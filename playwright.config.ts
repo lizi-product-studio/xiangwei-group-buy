@@ -9,7 +9,7 @@ export default defineConfig({
   use: { baseURL: 'http://127.0.0.1:5173', trace: process.env.CI ? 'on' : 'retain-on-failure' },
   webServer: [
     {
-      command: 'pnpm --filter @hometown/api dev',
+      command: 'pnpm --filter @hometown/api exec tsx src/server.ts',
       url: 'http://127.0.0.1:3100/health/ready',
       timeout: 30_000,
       reuseExistingServer: !process.env.CI,
