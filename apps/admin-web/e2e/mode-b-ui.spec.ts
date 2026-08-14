@@ -48,9 +48,17 @@ test('创建点位负责人后，只能在本点工作台完成到货、部分�
 
   await page.goto('/');
   await signIn(page, `e2e.admin.${suffix}`, 'e2e platform administrator password');
+  const orderNavigation = page.locator('nav[aria-label="主导航"] .nav-item').filter({ hasText: '订单管理' });
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(orderNavigation).toHaveCount(1);
+  await orderNavigation.click();
+  await expect(page.getByRole('heading', { name: '订单管理' })).toBeVisible();
   await page.setViewportSize({ width: 768, height: 900 });
   await expect(page.getByRole('button', { name: '系统设置' })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
+  await expect(orderNavigation).toHaveCount(1);
+  await orderNavigation.click();
+  await expect(page.getByRole('heading', { name: '订单管理' })).toBeVisible();
   await expect(page.getByRole('button', { name: '系统设置' })).toBeVisible();
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.getByRole('button', { name: '系统设置' }).click();

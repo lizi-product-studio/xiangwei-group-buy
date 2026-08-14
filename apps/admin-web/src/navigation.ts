@@ -1,0 +1,72 @@
+export type AdminPage =
+  | "dashboard"
+  | "products"
+  | "campaigns"
+  | "orders"
+  | "logistics"
+  | "pickup-points"
+  | "service"
+  | "finance"
+  | "settings"
+  | "point-workbench";
+
+export type AdminNavigationItem = {
+  key: AdminPage;
+  label: string;
+  roles: readonly string[];
+};
+
+export type AdminNavigationGroup = {
+  label: string;
+  items: readonly AdminNavigationItem[];
+};
+
+const globalRoles = ["OPERATOR", "FULFILLMENT", "SUPER_ADMIN", "FINANCE", "CUSTOMER_SERVICE"];
+
+const mainNavigation: readonly AdminNavigationGroup[] = [
+  {
+    label: "日常运营",
+    items: [
+      { key: "dashboard", label: "工作台", roles: ["OPERATOR"] },
+      { key: "products", label: "商品管理", roles: ["OPERATOR"] },
+      { key: "campaigns", label: "团期管理", roles: ["OPERATOR"] },
+      { key: "orders", label: "订单管理", roles: ["OPERATOR", "CUSTOMER_SERVICE", "FINANCE"] },
+    ],
+  },
+  {
+    label: "履约管理",
+    items: [
+      { key: "logistics", label: "物流管理", roles: ["OPERATOR", "FULFILLMENT"] },
+      { key: "pickup-points", label: "自提点管理", roles: ["OPERATOR", "FULFILLMENT"] },
+    ],
+  },
+  {
+    label: "客户与资金",
+    items: [
+      { key: "service", label: "售后与异常", roles: ["OPERATOR", "CUSTOMER_SERVICE", "FINANCE"] },
+      { key: "finance", label: "财务管理", roles: ["FINANCE"] },
+    ],
+  },
+  {
+    label: "系统",
+    items: [{ key: "settings", label: "系统设置", roles: ["SUPER_ADMIN"] }],
+  },
+];
+
+export function isPointWorkbenchUser(roles: readonly string[]): boolean {
+  return roles.some((role) => role === "PICKUP_MANAGER" || role === "PICKUP_VERIFIER")
+    && !roles.some((role) => globalRoles.includes(role));
+}
+
+export function getAdminNavigation(roles: readonly string[]): AdminNavigationGroup[] {
+  if (isPointWorkbenchUser(roles)) {
+    return [{ label: "点位工作台", items: [{ key: "point-workbench", label: "我的点位工作台", roles: ["PICKUP_MANAGER", "PICKUP_VERIFIER"] }] }];
+  }
+  const isSuperAdmin = roles.includes("SUPER_ADMIN");
+  return mainNavigation
+    .map((group) => ({
+      label: group.label,
+      items: group.items.filter((item) => isSuperAdmin || item.roles.some((role) => roles.includes(role))),
+    }))
+    .filter((group) => group.items.length > 0);
+}

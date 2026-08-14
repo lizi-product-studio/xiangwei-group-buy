@@ -62,8 +62,9 @@ import {
   type Refund,
   type Settlement,
 } from "./api.ts";
+import { getAdminNavigation, isPointWorkbenchUser, type AdminPage } from "./navigation.ts";
 
-type Page = "dashboard" | "products" | "campaigns" | "orders" | "logistics" | "pickup-points" | "service" | "finance" | "settings" | "point-workbench";
+type Page = AdminPage;
 const money = (cents: number) =>
   new Intl.NumberFormat("zh-CN", { style: "currency", currency: "CNY" }).format(
     cents / 100,
@@ -1454,10 +1455,10 @@ export function App() {
     return () => window.removeEventListener("admin-auth-expired", expired);
   }, []);
   const enabled = loggedIn;
-  const isPointWorkbenchUser=(roles.includes('PICKUP_MANAGER')||roles.includes('PICKUP_VERIFIER'))&&!roles.some((role)=>['OPERATOR','FULFILLMENT','SUPER_ADMIN','FINANCE','CUSTOMER_SERVICE'].includes(role));
+  const isPointWorkbenchUserForCurrentRoles=isPointWorkbenchUser(roles);
   const canReadCampaigns = can("OPERATOR", "FULFILLMENT");
   const canReadOperations = can("OPERATOR", "FULFILLMENT");
-  const canUsePickupVerifier = isPointWorkbenchUser;
+  const canUsePickupVerifier = isPointWorkbenchUserForCurrentRoles;
   const canReadOrders = can("OPERATOR", "FULFILLMENT", "FINANCE", "CUSTOMER_SERVICE");
   const campaignsQ = useQuery({
     queryKey: ["campaigns"],
@@ -1589,7 +1590,7 @@ export function App() {
     (query) => query.isLoading,
   );
   const pageQueries: Record<Page, Array<{ isError: boolean; refetch: () => Promise<unknown> }>> = {
-    dashboard: isPointWorkbenchUser ? [communityDeliveriesQ] : [communityCampaignsQ, communityDeliveriesQ, ordersQ, fulfillmentExceptionsQ],
+    dashboard: isPointWorkbenchUserForCurrentRoles ? [communityDeliveriesQ] : [communityCampaignsQ, communityDeliveriesQ, ordersQ, fulfillmentExceptionsQ],
     products: [platformSkusQ],
     campaigns: [communityCampaignsQ, areasQ, pickupPointsQ],
     orders: [ordersQ],
@@ -1617,10 +1618,10 @@ export function App() {
     [directory],
   );
   useEffect(()=>{
-    if(isPointWorkbenchUser&&page!=='point-workbench')setPage('point-workbench');
-    else if(!isPointWorkbenchUser&&!can('OPERATOR')&&can('FINANCE')&&page==='dashboard')setPage('finance');
-    else if(!isPointWorkbenchUser&&!can('OPERATOR')&&!can('FINANCE')&&can('CUSTOMER_SERVICE')&&page==='dashboard')setPage('orders');
-  },[isPointWorkbenchUser,page,roles.join(',')]);
+    if(isPointWorkbenchUserForCurrentRoles&&page!=='point-workbench')setPage('point-workbench');
+    else if(!isPointWorkbenchUserForCurrentRoles&&!can('OPERATOR')&&can('FINANCE')&&page==='dashboard')setPage('finance');
+    else if(!isPointWorkbenchUserForCurrentRoles&&!can('OPERATOR')&&!can('FINANCE')&&can('CUSTOMER_SERVICE')&&page==='dashboard')setPage('orders');
+  },[isPointWorkbenchUserForCurrentRoles,page,roles.join(',')]);
   const openSite = (plan: DeliveryPlan) => {
     setSelectedPlan(plan);
     setModal("site");
@@ -3072,18 +3073,15 @@ export function App() {
     settings: settingsPage,
     "point-workbench": pointWorkbenchPage,
   }[page];
-  const navGroups: Array<{label:string;items:Array<{key:Page;label:string;icon:React.ReactNode}>}> = isPointWorkbenchUser
-    ? [{label:'点位工作台',items:[{key:'point-workbench',label:'我的点位工作台',icon:<EnvironmentOutlined/>}]}]
-    : [
-      {label:'日常运营',items:[
-        ...(can('OPERATOR')?[{key:'dashboard' as Page,label:'工作台',icon:<AppstoreOutlined/>}]:[]),
-        ...(can('OPERATOR')?[{key:'products' as Page,label:'商品管理',icon:<AppstoreOutlined/>},{key:'campaigns' as Page,label:'团期管理',icon:<CarOutlined/>},{key:'orders' as Page,label:'订单管理',icon:<AuditOutlined/>}]:[]),
-        ...(can('CUSTOMER_SERVICE')?[{key:'orders' as Page,label:'订单管理',icon:<AuditOutlined/>}]:[]),
-      ]},
-      {label:'履约管理',items:can('OPERATOR','FULFILLMENT')?[{key:'logistics' as Page,label:'物流管理',icon:<CarOutlined/>},{key:'pickup-points' as Page,label:'自提点管理',icon:<EnvironmentOutlined/>}]:[]},
-      {label:'客户与资金',items:[...(can('OPERATOR','CUSTOMER_SERVICE','FINANCE')?[{key:'service' as Page,label:'售后与异常',icon:<AuditOutlined/>}]:[]),...(can('FINANCE')?[{key:'finance' as Page,label:'财务管理',icon:<WalletOutlined/>}]:[])]},
-      {label:'系统',items:can('SUPER_ADMIN')?[{key:'settings' as Page,label:'系统设置',icon:<AuditOutlined/>}]:[]},
-    ].filter((group)=>group.items.length>0);
+  const navIcons: Record<Page, React.ReactNode> = {
+    dashboard: <AppstoreOutlined />, products: <AppstoreOutlined />, campaigns: <CarOutlined />, orders: <AuditOutlined />,
+    logistics: <CarOutlined />, "pickup-points": <EnvironmentOutlined />, service: <AuditOutlined />, finance: <WalletOutlined />,
+    settings: <AuditOutlined />, "point-workbench": <EnvironmentOutlined />,
+  };
+  const navGroups = getAdminNavigation(roles).map((group) => ({
+    ...group,
+    items: group.items.map((item) => ({ ...item, icon: navIcons[item.key] })),
+  }));
   return (
     <div className="shell">
       {holder}
