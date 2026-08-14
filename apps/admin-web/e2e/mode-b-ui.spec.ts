@@ -17,11 +17,11 @@ test('社区团购的发车、点位差异到货和部分领取由后台界面�
   const area=await call<{id:string}>(request,'/api/v1/admin/service-areas','POST',{regionCode:'130606'});
   const point=await call<{id:string}>(request,'/api/v1/admin/pickup-points','POST',{serviceAreaId:area.id,name:`E2E 社区点 ${suffix}`,address:`保定市莲池区 E2E 路 ${suffix}`,capacityPerDay:100});
   const sku=await call<{id:string}>(request,'/api/v1/admin/platform/skus','POST',{title:`E2E 社区干货 ${suffix}`,category:'干货',origin:'河北',imageUrl:null,skuName:'500g',retailPriceCents:1200,defaultSellableQuantity:10,referencePurchaseCostCents:null,supplierNote:null,status:'ACTIVE'});
-  const campaign=await call<{id:string}>(request,'/api/v1/admin/community/campaigns','POST',{title:`E2E 社区团 ${suffix}`,serviceAreaId:area.id,pickupPointId:point.id,cutoffAt:new Date(Date.now()+1_100).toISOString(),dispatchAt:new Date(Date.now()+86_400_000).toISOString(),minTotalQuantity:1,failureAction:'CANCEL_AND_REFUND',items:[{platformSkuId:sku.id,retailPriceCents:1200,sellableQuantity:3}]});
+  const campaign=await call<{id:string}>(request,'/api/v1/admin/community/campaigns','POST',{title:`E2E 社区团 ${suffix}`,serviceAreaId:area.id,pickupPointId:point.id,cutoffAt:new Date(Date.now()+3_000).toISOString(),dispatchAt:new Date(Date.now()+86_400_000).toISOString(),minTotalQuantity:1,failureAction:'CANCEL_AND_REFUND',items:[{platformSkuId:sku.id,retailPriceCents:1200,sellableQuantity:3}]});
   await call(request,`/api/v1/admin/campaigns/${campaign.id}/open`,'POST');
   const order=await call<{id:string;orderNo:string}>(request,'/api/v1/orders','POST',{campaignId:campaign.id,serviceAreaId:area.id,pickupPointId:point.id,items:[{skuId:sku.id,quantity:3}]},{...superAdmin,'idempotency-key':`community-ui-order-${suffix}`});
   await call(request,`/api/v1/orders/${order.id}/mock-pay`,'POST');
-  await page.waitForTimeout(1_250);
+  await page.waitForTimeout(3_250);
   await call(request,`/api/v1/admin/campaigns/${campaign.id}/close`,'POST');
 
   await page.goto('/');
