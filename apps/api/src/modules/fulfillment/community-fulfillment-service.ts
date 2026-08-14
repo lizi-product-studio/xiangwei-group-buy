@@ -9,7 +9,7 @@ export type CommunityCampaignInput = {
   items:Array<{platformSkuId:string;retailPriceCents:number;sellableQuantity:number}>;
 };
 export type CommunityArrivalInput = {
-  receivedBy:string; confirmationNote:string|null;
+  receivedBy:string; confirmationNote:string|null; emergencyReason:string|null;
   items:Array<{platformSkuId:string;receivedQuantity:number;rejectedQuantity:number;shortQuantity:number;damagedQuantity:number;reason:FulfillmentExceptionType|null;evidenceNote:string|null;evidenceUrl:string|null}>;
 };
 
@@ -74,7 +74,7 @@ export class CommunityFulfillmentService {
       for(const orderId of orderIds){const order=await store.getOrderForUpdate(orderId);if(!order||order.status!=='IN_TRANSIT')continue; const orderRows=updatedRows.filter((row)=>row.orderId===order.id);if(!orderRows.some((row)=>row.fulfilledQuantity>0))continue; order.status=transitionOrder(order.status,'READY_FOR_PICKUP');await store.saveOrderStatus(order);await store.savePickupCredential({orderId:order.id,codeHash:this.pickupHash(order.id),status:'ACTIVE',expiresAt:new Date(Date.now()+14*86_400_000).toISOString()});}
       batch.status='ARRIVED';batch.arrivedAt=now;await store.saveDispatchBatch(batch);plan.status='ARRIVED';plan.arrivedAt=now;plan.updatedAt=now;await store.saveDeliveryPlan(plan);
       if(!await store.saveCommunityDeliveryConfirmation(confirmation)){const raced=await store.getCommunityDeliveryConfirmationByBatch(batch.id);if(raced)return raced;throw new BusinessError('CONCURRENT_MODIFICATION','到货确认已被并发处理，请刷新后重试',409);}
-      await this.audit(store,actorId,requestId,emergencyProxy?'COMMUNITY_DELIVERY_EMERGENCY_CONFIRMED':'COMMUNITY_DELIVERY_CONFIRMED','COMMUNITY_DELIVERY',confirmation.id,null,{confirmation,exception,allocations,emergencyProxy});
+      await this.audit(store,actorId,requestId,emergencyProxy?'COMMUNITY_DELIVERY_EMERGENCY_CONFIRMED':'COMMUNITY_DELIVERY_CONFIRMED','COMMUNITY_DELIVERY',confirmation.id,null,{confirmation,exception,allocations,emergencyProxy,emergencyReason:emergencyProxy?input.emergencyReason:null});
       return confirmation;
     });
   }

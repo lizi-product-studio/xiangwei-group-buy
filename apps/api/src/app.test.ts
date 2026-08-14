@@ -152,6 +152,19 @@ describe('API regression', () => {
     const partial=await app.inject({method:'POST',url:'/api/v1/pickup/verify',headers:pickupManager,payload:{orderId,deliveryPlanId:plan.id,code:code.json().data.code,items:[{platformSkuId:'community-sku-a',quantity:2}]}});expect(partial.statusCode,partial.body).toBe(200);expect(partial.json().data.status).toBe('READY_FOR_PICKUP');
     const completed=await app.inject({method:'POST',url:'/api/v1/pickup/verify',headers:pickupManager,payload:{orderId,deliveryPlanId:plan.id,code:code.json().data.code,items:[{platformSkuId:'community-sku-b',quantity:2}]}});expect(completed.statusCode,completed.body).toBe(200);expect(completed.json().data.status).toBe('PICKED_UP');
     expect((await store.listPurchaseOrders(campaignId))).toEqual([]);
+
+    const emergencyCampaign=(await app.inject({method:'POST',url:'/api/v1/admin/community/campaigns',headers:operator,payload:{title:'紧急代办确认团',serviceAreaId:'service-bd-lianchi',pickupPointId:pointId,cutoffAt:new Date(Date.now()+3_600_000).toISOString(),dispatchAt:new Date(Date.now()+7_200_000).toISOString(),minTotalQuantity:1,failureAction:'CANCEL_AND_REFUND',items:[{platformSkuId:'community-sku-a',retailPriceCents:1200,sellableQuantity:1}]}})).json().data.id as string;
+    expect((await app.inject({method:'POST',url:`/api/v1/admin/campaigns/${emergencyCampaign}/open`,headers:operator})).statusCode).toBe(200);
+    const emergencyOrder=await app.inject({method:'POST',url:'/api/v1/orders',headers:{...customer,'idempotency-key':'community-emergency-arrival'},payload:{campaignId:emergencyCampaign,serviceAreaId:'service-bd-lianchi',pickupPointId:pointId,items:[{skuId:'community-sku-a',quantity:1}]}});expect(emergencyOrder.statusCode,emergencyOrder.body).toBe(201);
+    expect((await app.inject({method:'POST',url:`/api/v1/orders/${emergencyOrder.json().data.id}/mock-pay`,headers:customer})).statusCode).toBe(200);await close(emergencyCampaign);
+    const emergencyPlan=await store.getDeliveryPlanByCampaign(emergencyCampaign);if(!emergencyPlan)throw new Error('emergency plan missing');
+    expect((await app.inject({method:'POST',url:`/api/v1/admin/delivery-plans/${emergencyPlan.id}/book-vehicle`,headers:fulfillment,payload:{vehicleOrderNo:'HL-EMERGENCY',driverName:'李师傅',driverPhone:'13900000000',vehiclePlate:'冀F-EMERGENCY'}})).statusCode).toBe(200);
+    const emergencyBatch=(await app.inject({method:'POST',url:'/api/v1/admin/dispatch-batches',headers:fulfillment,payload:{campaignId:emergencyCampaign}})).json().data.id as string;
+    expect((await app.inject({method:'POST',url:`/api/v1/admin/dispatch-batches/${emergencyBatch}/dispatch`,headers:fulfillment})).statusCode).toBe(200);
+    const emergencyArrival={receivedBy:'平台负责人',confirmationNote:null,items:[{platformSkuId:'community-sku-a',receivedQuantity:1,rejectedQuantity:0,shortQuantity:0,damagedQuantity:0,reason:null,evidenceNote:null,evidenceUrl:null}]};
+    expect((await app.inject({method:'POST',url:`/api/v1/admin/community/dispatch-batches/${emergencyBatch}/arrival`,headers:superAdmin,payload:emergencyArrival})).statusCode).toBe(400);
+    const emergencyConfirmed=await app.inject({method:'POST',url:`/api/v1/admin/community/dispatch-batches/${emergencyBatch}/arrival`,headers:superAdmin,payload:{...emergencyArrival,emergencyReason:'点位负责人突发疾病，平台负责人现场代办'}});expect(emergencyConfirmed.statusCode,emergencyConfirmed.body).toBe(200);
+    const emergencyAudit=(await store.listAuditLogs(100)).find((item)=>item.action==='COMMUNITY_DELIVERY_EMERGENCY_CONFIRMED');expect(emergencyAudit).toMatchObject({actorId:'demo-super-admin',afterData:expect.objectContaining({emergencyProxy:true,emergencyReason:'点位负责人突发疾病，平台负责人现场代办',confirmation:expect.objectContaining({confirmedAt:expect.any(String)})})});
   });
 
   it('keeps platform sales, supplier procurement, warehouse lots and pickup handover isolated from legacy merchant orders', async () => {

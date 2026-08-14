@@ -38,19 +38,25 @@ test('创建点位负责人后，只能在本点工作台完成到货、部分�
   const cutoffAt = new Date(Date.now() + 3_000).toISOString();
   const normalCampaign = await call<{ id: string }>(request, '/api/v1/admin/community/campaigns', 'POST', { title: `E2E 正常到货团 ${suffix}`, serviceAreaId: area.id, pickupPointId: point.id, cutoffAt, dispatchAt: new Date(Date.now() + 86_400_000).toISOString(), minTotalQuantity: 1, failureAction: 'CANCEL_AND_REFUND', items: [{ platformSkuId: sku.id, retailPriceCents: 1200, sellableQuantity: 1 }] });
   const exceptionCampaign = await call<{ id: string }>(request, '/api/v1/admin/community/campaigns', 'POST', { title: `E2E 差异到货团 ${suffix}`, serviceAreaId: area.id, pickupPointId: point.id, cutoffAt, dispatchAt: new Date(Date.now() + 86_400_000).toISOString(), minTotalQuantity: 1, failureAction: 'CANCEL_AND_REFUND', items: [{ platformSkuId: sku.id, retailPriceCents: 1200, sellableQuantity: 3 }] });
+  const emergencyCampaign = await call<{ id: string }>(request, '/api/v1/admin/community/campaigns', 'POST', { title: `E2E 紧急代办团 ${suffix}`, serviceAreaId: area.id, pickupPointId: point.id, cutoffAt, dispatchAt: new Date(Date.now() + 86_400_000).toISOString(), minTotalQuantity: 1, failureAction: 'CANCEL_AND_REFUND', items: [{ platformSkuId: sku.id, retailPriceCents: 1200, sellableQuantity: 1 }] });
   await call(request, `/api/v1/admin/campaigns/${normalCampaign.id}/open`, 'POST');
   await call(request, `/api/v1/admin/campaigns/${exceptionCampaign.id}/open`, 'POST');
+  await call(request, `/api/v1/admin/campaigns/${emergencyCampaign.id}/open`, 'POST');
   const normalOrder = await call<{ id: string; orderNo: string }>(request, '/api/v1/orders', 'POST', { campaignId: normalCampaign.id, serviceAreaId: area.id, pickupPointId: point.id, items: [{ skuId: sku.id, quantity: 1 }] }, { ...demoSuper, 'idempotency-key': `staff-ui-normal-order-${suffix}` });
   const exceptionOrder = await call<{ id: string; orderNo: string }>(request, '/api/v1/orders', 'POST', { campaignId: exceptionCampaign.id, serviceAreaId: area.id, pickupPointId: point.id, items: [{ skuId: sku.id, quantity: 3 }] }, { ...demoSuper, 'idempotency-key': `staff-ui-exception-order-${suffix}` });
+  const emergencyOrder = await call<{ id: string; orderNo: string }>(request, '/api/v1/orders', 'POST', { campaignId: emergencyCampaign.id, serviceAreaId: area.id, pickupPointId: point.id, items: [{ skuId: sku.id, quantity: 1 }] }, { ...demoSuper, 'idempotency-key': `staff-ui-emergency-order-${suffix}` });
   await call(request, `/api/v1/orders/${normalOrder.id}/mock-pay`, 'POST');
   await call(request, `/api/v1/orders/${exceptionOrder.id}/mock-pay`, 'POST');
+  await call(request, `/api/v1/orders/${emergencyOrder.id}/mock-pay`, 'POST');
   await page.waitForTimeout(3_250);
   await call(request, `/api/v1/admin/campaigns/${normalCampaign.id}/close`, 'POST');
   await call(request, `/api/v1/admin/campaigns/${exceptionCampaign.id}/close`, 'POST');
+  await call(request, `/api/v1/admin/campaigns/${emergencyCampaign.id}/close`, 'POST');
   const deliveries = await call<Array<{ id: string; campaignId: string }>>(request, '/api/v1/admin/community/deliveries', 'GET');
   const normalDelivery = deliveries.find((item) => item.campaignId === normalCampaign.id) ?? (() => { throw new Error('expected normal community delivery'); })();
   const exceptionDelivery = deliveries.find((item) => item.campaignId === exceptionCampaign.id) ?? (() => { throw new Error('expected exception community delivery'); })();
-  for (const [campaignId, delivery, suffixPart] of [[normalCampaign.id, normalDelivery, 'normal'], [exceptionCampaign.id, exceptionDelivery, 'exception']] as const) {
+  const emergencyDelivery = deliveries.find((item) => item.campaignId === emergencyCampaign.id) ?? (() => { throw new Error('expected emergency community delivery'); })();
+  for (const [campaignId, delivery, suffixPart] of [[normalCampaign.id, normalDelivery, 'normal'], [exceptionCampaign.id, exceptionDelivery, 'exception'], [emergencyCampaign.id, emergencyDelivery, 'emergency']] as const) {
     await call(request, `/api/v1/admin/delivery-plans/${delivery.id}/book-vehicle`, 'POST', { logisticsPlatform: '货拉拉', vehicleOrderNo: `HL-${suffix}-${suffixPart}`, driverName: 'E2E 司机', driverPhone: '13900000000', vehiclePlate: '冀F12345', estimatedArrivalAt: new Date(Date.now() + 3_600_000).toISOString(), remark: null });
     const batch = await call<{ id: string }>(request, '/api/v1/admin/dispatch-batches', 'POST', { campaignId });
     await call(request, `/api/v1/admin/dispatch-batches/${batch.id}/dispatch`, 'POST');
@@ -71,6 +77,14 @@ test('创建点位负责人后，只能在本点工作台完成到货、部分�
   await expect(page.getByRole('heading', { name: '订单管理' })).toBeVisible();
   await expect(page.getByRole('button', { name: '系统设置' })).toBeVisible();
   await page.setViewportSize({ width: 1280, height: 900 });
+  await page.getByRole('button', { name: '物流管理' }).click();
+  const emergencyRow = page.getByRole('row', { name: new RegExp(`E2E 紧急代办团 ${suffix}`) });
+  await emergencyRow.getByRole('button', { name: '紧急代办点位确认' }).click();
+  await expect(page.getByText('紧急代办：点位逐商品确认到货', { exact: true })).toBeVisible();
+  await page.getByLabel('接货人').fill('E2E 平台负责人');
+  await page.getByLabel('紧急代办原因').fill('点位负责人突发疾病，平台负责人现场代办');
+  await page.getByRole('button', { name: '确认到货与差异' }).click();
+  await expect(emergencyRow.getByText('已到货', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: '系统设置' }).click();
   await page.getByRole('button', { name: '新增内部员工' }).click();
   await page.getByLabel('员工姓名').fill('E2E 点位负责人');
@@ -133,6 +147,8 @@ test('创建点位负责人后，只能在本点工作台完成到货、部分�
   await expect(operationsExceptionRow.getByRole('button', { name: '处理配送异常' })).toBeVisible();
   await expect(operationsExceptionRow.getByText('正常商品已可领取')).toBeVisible();
   await page.getByRole('button', { name: '系统设置' }).click();
+  const emergencyAuditRow = page.getByRole('row', { name: /紧急代办点位到货确认/ });
+  await expect(emergencyAuditRow.getByText('点位负责人突发疾病，平台负责人现场代办')).toBeVisible();
   await page.getByRole('row', { name: new RegExp('E2E 点位负责人') }).getByRole('button', { name: '变更/停用' }).click();
   await page.getByLabel('状态').click();
   await page.getByText('已停用', { exact: true }).last().click();
