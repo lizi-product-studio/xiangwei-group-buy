@@ -1,0 +1,33 @@
+<view class="pickup-page">
+  <view class="pickup-page__intro">
+    <text>选择收货区域</text>
+    <text>先选择您方便领取货物的区县和固定自提点。下单前即可看到本团可用的自提点；预计到货时间会在订单中持续更新。</text>
+  </view>
+
+  <view wx:if="{{areas.length > 1}}" class="area-group">
+    <view wx:for="{{areas}}" wx:key="id" class="point-row {{selectedAreaId === item.id ? 'point-row--selected' : ''}}" data-id="{{item.id}}" bindtap="chooseArea">
+      <view class="point-row__pin">区</view><view class="point-row__copy"><text>{{item.name}}</text></view><text class="point-row__check">{{selectedAreaId === item.id ? '当前区域' : '切换'}}</text>
+    </view>
+  </view>
+
+  <view wx:if="{{loading}}" class="state-card">正在加载已开放的收货区域…</view>
+  <view wx:elif="{{error}}" class="state-card state-card--error">
+    <text>{{error}}</text>
+    <button size="mini" bindtap="loadAreas">重新加载</button>
+  </view>
+  <view wx:elif="{{!areas.length}}" class="state-card">
+    <text>当前区域暂未开放收单</text>
+    <text>您可以留下开通意向，平台会优先评估有稳定领取需求的地区。</text>
+    <button size="mini" class="ghost-button" bindtap="showInterest">登记开通意向</button>
+  </view>
+
+  <view wx:for="{{points}}" wx:key="id" class="area-group">
+    <view class="point-row {{selectedId === item.id ? 'point-row--selected' : ''}}" data-id="{{item.id}}" bindtap="choosePoint">
+      <view class="point-row__pin">点</view>
+      <view class="point-row__copy"><text>{{item.name}}</text><text>{{item.address}}</text></view>
+      <text class="point-row__check">{{selectedId === item.id ? '已选择' : '选择'}}</text>
+    </view>
+  </view>
+  <view wx:if="{{!loading && areas.length && !points.length}}" class="state-card">当前区域暂无可用自提点，请选择其他区域或登记开通意向。</view>
+  <button wx:if="{{areas.length}}" class="interest-link" bindtap="showInterest">所在区县暂未开放？登记开通意向</button>
+</view>

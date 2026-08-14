@@ -1,0 +1,32 @@
+<view class="home">
+  <image class="home__gate" src="/assets/header-gate-ink.png" mode="aspectFit"/>
+  <view class="home-header">
+    <view class="location" bindtap="openPickup">
+      <text class="location__label">当前固定自提点⌄</text>
+      <text class="location__name">{{pickupPoint ? pickupPoint.name : '请选择固定自提点'}}　›</text>
+    </view>
+  </view>
+
+  <view class="campaign-intro">
+    <text class="campaign-intro__title">本期团购</text>
+    <view class="campaign-intro__meta"><text class="campaign-intro__calendar">日</text><text>{{deliveryText}}</text></view>
+    <view class="campaign-intro__promise"><text class="campaign-intro__check">✓</text><text>平台统一采购 · 按固定自提点集中送达</text></view>
+  </view>
+
+  <view class="benefit-row" aria-label="商品分类">
+    <view wx:for="{{categoryItems}}" wx:key="value" class="benefit-row__item {{activeCategory === item.value ? 'benefit-row__item--active' : ''}}" data-category="{{item.value}}" bindtap="changeCategory">
+      <image class="benefit-row__icon" src="{{item.icon}}" mode="aspectFit" /><text>{{item.label}}</text>
+    </view>
+  </view>
+
+  <view class="origin-story"><image class="origin-story__image" src="/assets/hero-sorghum-field.png" mode="aspectFill"/><view class="origin-story__cover"><text class="origin-story__eyebrow">时令之味</text><text class="origin-story__title">来自土地的朴实馈赠</text><view class="origin-story__rule"></view><text class="origin-story__note">按产季上架，安心之选</text></view></view>
+
+  <view class="section-head"><view><text class="section-head__title">{{activeCategory === '全部' ? '正在收单' : activeCategory}}</text><text class="section-head__count">{{campaigns.length}} 件商品可加入本期订单</text></view><text class="section-head__rule" bindtap="openOrders">我的订单 ›</text></view>
+  <view wx:if="{{loading}}" class="state-card">正在加载本期商品…</view>
+  <view wx:elif="{{error}}" class="state-card state-card--error"><text>{{error}}</text><button size="mini" class="ghost-button" bindtap="loadCampaigns">重新加载</button></view>
+  <view wx:elif="{{!area}}" class="state-card"><text>当前区域暂未开放收单服务</text><text>先选择一个已开放的收货区域，系统会展示可购买商品。</text><button size="mini" class="ghost-button" bindtap="openPickup">选择收货区域</button></view>
+  <view wx:elif="{{!campaigns.length}}" class="state-card"><text>这个固定自提点暂时没有正在收单的商品</text><text>可更换同一区域的固定自提点，或等待下期开团。</text><button size="mini" class="ghost-button" bindtap="openPickup">更换固定自提点</button></view>
+
+  <view class="campaign-list"><view wx:for="{{campaigns}}" wx:key="skuId" class="product-card" data-id="{{item.id}}" data-sku="{{item.skuId}}" bindtap="openCampaign"><view class="product-card__media"><image class="product-card__image" src="{{item.imageUrl || '/assets/product-rice-noodles.jpg'}}" mode="aspectFill"/><text class="product-card__tag">{{item.origin}}</text></view><view class="product-card__body"><text class="product-card__title">{{item.productTitle}}</text><text class="product-card__desc">{{item.skuName}}</text><view class="product-card__foot"><view><text class="price"><text class="price__currency">¥</text>{{item.priceText}}</text><text class="price-note">团购价</text></view><view class="buy-button">＋</view></view></view></view></view>
+  <view wx:if="{{campaigns.length}}" class="cart-entry" bindtap="openCart"><text>查看购物车</text><text class="cart-entry__hint">本期商品统一结算 ›</text></view>
+</view>

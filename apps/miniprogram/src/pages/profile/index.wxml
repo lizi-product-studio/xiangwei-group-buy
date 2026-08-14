@@ -1,0 +1,41 @@
+<view class="profile">
+  <view class="identity-card" wx:if="{{loggedIn}}">
+    <view class="avatar">乡</view>
+    <view class="identity-card__copy"><text>{{userName}}</text><text>{{wechatMode ? '已完成微信登录，订单与领取信息仅对你可见' : '开发体验身份，仅用于本地流程验证'}}</text></view>
+    <text class="identity-card__logout" bindtap="logout">退出登录</text>
+  </view>
+
+  <view class="login-card" wx:else>
+    <view><text>登录后查看订单与取货码</text><text>我们仅使用微信授权确认账号，不获取手机号。</text></view>
+    <button class="primary-button" loading="{{loginLoading}}" bindtap="login">{{wechatMode ? '微信快捷登录' : '体验登录'}}</button>
+    <text wx:if="{{!wechatMode}}" class="login-card__hint">当前为开发演示环境；体验登录只用于验证完整的消费者流程。</text>
+    <checkbox-group bindchange="changePrivacy"><label class="login-card__consent"><checkbox value="accepted" checked="{{privacyAccepted}}" color="#f05232" />我已阅读并同意用户服务协议和隐私说明（版本 {{privacyVersion}}）</label></checkbox-group>
+    <view class="login-card__privacy"><text class="login-card__link" bindtap="openTerms">查看《用户服务协议》</text><text>和</text><text class="login-card__link" bindtap="openPrivacy">《隐私说明》</text></view>
+  </view>
+
+  <view class="order-card" wx:if="{{loggedIn}}">
+    <view class="card-head" data-filter="ALL" bindtap="openOrders"><view><text>我的订单</text><text wx:if="{{!loading}}">共 {{orderTotal}} 单</text></view><text>全部订单 ›</text></view>
+    <view wx:if="{{error}}" class="summary-error" bindtap="loadSummary">{{error}}，点击重试</view>
+    <view wx:else class="order-statuses">
+      <view data-filter="PENDING" bindtap="openOrders"><text class="status-icon">付</text><text>待付款</text><text wx:if="{{counts.pending}}" class="status-count">{{counts.pending}}</text></view>
+      <view data-filter="ACTIVE" bindtap="openOrders"><text class="status-icon">团</text><text>进行中</text><text wx:if="{{counts.active}}" class="status-count">{{counts.active}}</text></view>
+      <view data-filter="READY" bindtap="openOrders"><text class="status-icon status-icon--green">提</text><text>待自提</text><text wx:if="{{counts.ready}}" class="status-count">{{counts.ready}}</text></view>
+      <view data-filter="AFTER" bindtap="openOrders"><text class="status-icon status-icon--gray">售</text><text>退款/售后</text><text wx:if="{{counts.afterSale}}" class="status-count">{{counts.afterSale}}</text></view>
+    </view>
+  </view>
+
+  <view class="pickup-pass" bindtap="openPickup">
+    <view class="pickup-pass__mark">区</view>
+    <view class="pickup-pass__copy"><text>当前收货区域</text><text>{{area ? area.name + ' · 选择固定自提点' : '选择已开放收货区域'}}</text><text>{{area ? '固定自提点在下单前确认，到货时间会在订单更新' : '按省、市、区县查看已开放区域'}}</text></view>
+    <text class="pickup-pass__arrow">›</text>
+  </view>
+
+  <view class="service-card">
+    <text class="service-card__title">常用服务</text>
+    <button bindtap="openMessages"><text>订单消息</text><text>地点、发车与到货提醒 ›</text></button>
+    <button bindtap="openInterest"><text>开通意向</text><text>所在区县暂未开放？登记需求 ›</text></button>
+    <button open-type="contact"><text>客服</text><text>联系在线客服 ›</text></button>
+    <button bindtap="showHelp"><text>帮助</text><text>下单与集中领取说明 ›</text></button>
+    <button bindtap="showAbout"><text>关于</text><text>版本与平台信息 ›</text></button>
+  </view>
+</view>

@@ -1,0 +1,12 @@
+{
+  email {$ACME_EMAIL}
+  auto_https on
+}
+
+{$PUBLIC_DOMAIN} {
+  encode zstd gzip
+
+  @api path /api/* /health/*
+  reverse_proxy @api api:3100
+  reverse_proxy admin:80
+}

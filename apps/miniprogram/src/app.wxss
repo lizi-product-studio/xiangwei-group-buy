@@ -1,0 +1,20 @@
+page {
+  --ink: #17263a;
+  --paper: #fffefb;
+  --brand: #f05232;
+  --brand-soft: #fff0eb;
+  --success: #547b36;
+  --line: #ece9e1;
+  min-height: 100%;
+  color: var(--ink);
+  background: #faf9f4;
+  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+button { border-radius: 18rpx; }
+button::after { border: 0; }
+.primary-button { color: #fff; background: var(--brand); font-weight: 750; box-shadow: 0 10rpx 24rpx rgba(240,82,50,.16); }
+.primary-button[disabled] { color: #fff; background: #f7aa9a; }
+.ghost-button { color: var(--ink); background: #fffefb; border: 1rpx solid var(--line); }
+.money { font-family: "DIN Alternate", Bahnschrift, sans-serif; font-weight: 750; }
+.money::before { content: "¥"; margin-right: 3rpx; font-size: .65em; }
+.eyebrow { color: #7c8775; font-size: 20rpx; font-weight: 700; }

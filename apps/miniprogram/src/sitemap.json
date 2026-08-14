@@ -1,0 +1,5 @@
+{
+  "desc": "乡味集页面索引",
+  "rules": [{ "action": "allow", "page": "*" }]
+}
+

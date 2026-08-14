@@ -1,0 +1,17 @@
+<view class="interest-page">
+  <view class="hero">
+    <text>你所在的区县暂未开放？</text>
+    <text>留下需求，我们优先评估收单、配送和集中领取条件。</text>
+  </view>
+  <view class="form-card">
+    <label>所在省 / 市 / 区县<text>*</text></label>
+    <input data-field="regionText" value="{{regionText}}" maxlength="80" placeholder="例：河北省保定市莲池区" bindinput="inputValue" />
+    <label>联系人<text>*</text></label>
+    <input data-field="contactName" value="{{contactName}}" maxlength="30" placeholder="怎么称呼您" bindinput="inputValue" />
+    <label>联系电话<text>*</text></label>
+    <input data-field="contactPhone" value="{{contactPhone}}" type="number" maxlength="20" placeholder="便于通知开通进展" bindinput="inputValue" />
+    <checkbox-group bindchange="changePrivacy"><label class="privacy"><checkbox value="accepted" checked="{{privacyAccepted}}" color="#e94c2f" />我已阅读并同意平台为开通评估和通知进展使用以上信息</label></checkbox-group>
+    <view class="privacy-note"><text>信息仅供开通评估与联系，不会用于营销转售。</text><text class="privacy-note__link" bindtap="openPrivacy">查看《隐私说明》（版本 {{privacyVersion}}）</text></view>
+    <button class="primary-button" loading="{{submitting}}" bindtap="submit">提交开通意向</button>
+  </view>
+</view>

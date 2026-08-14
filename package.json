@@ -1,0 +1,36 @@
+{
+  "name": "hometown-food-group-buying",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.16.0",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "dev:api": "pnpm --filter @hometown/api dev",
+    "dev:admin": "pnpm --filter @hometown/admin-web dev",
+    "infra:up": "docker compose -f infra/compose.yaml up -d",
+    "infra:down": "docker compose -f infra/compose.yaml down",
+    "db:migrate": "pnpm --filter @hometown/api db:migrate",
+    "admin:bootstrap": "pnpm --filter @hometown/api admin:bootstrap",
+    "assets:tabs": "node scripts/generate-mini-tab-icons.mjs",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm --filter @hometown/domain build && pnpm --filter @hometown/api-contracts build && pnpm -r typecheck",
+    "lint": "eslint . --max-warnings=0",
+    "test": "pnpm -r test",
+    "test:coverage": "pnpm -r --if-present test:coverage",
+    "test:e2e": "playwright test",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.51.1",
+    "@eslint/js": "9.38.0",
+    "@resvg/resvg-js": "2.6.2",
+    "@types/node": "24.10.0",
+    "@vitest/coverage-v8": "4.0.3",
+    "eslint": "9.38.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.46.2",
+    "vitest": "4.0.3"
+  }
+}

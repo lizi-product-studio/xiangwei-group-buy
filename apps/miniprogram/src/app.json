@@ -1,0 +1,39 @@
+{
+  "pages": [
+    "pages/home/index",
+    "pages/campaign/detail",
+    "pages/checkout/index",
+    "pages/cart/index",
+    "pages/pickup-select/index",
+    "pages/orders/index",
+    "pages/order-detail/index",
+    "pages/pickup-code/index",
+    "pages/messages/index",
+    "pages/interest/index",
+    "pages/legal/index",
+    "pages/after-sale/index",
+    "pages/profile/index"
+  ],
+  "window": {
+    "navigationBarBackgroundColor": "#fffefb",
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "乡味集",
+    "backgroundColor": "#faf9f4",
+    "backgroundTextStyle": "dark"
+  },
+  "tabBar": {
+    "color": "#677281",
+    "selectedColor": "#ef5438",
+    "backgroundColor": "#fffefb",
+    "borderStyle": "white",
+    "list": [
+      { "pagePath": "pages/home/index", "text": "团购", "iconPath": "assets/tab-home-default.png", "selectedIconPath": "assets/tab-home-active.png" },
+      { "pagePath": "pages/cart/index", "text": "购物车", "iconPath": "assets/tab-cart-default.png", "selectedIconPath": "assets/tab-cart-active.png" },
+      { "pagePath": "pages/orders/index", "text": "订单", "iconPath": "assets/tab-orders-default.png", "selectedIconPath": "assets/tab-orders-active.png" },
+      { "pagePath": "pages/profile/index", "text": "我的", "iconPath": "assets/tab-profile-default.png", "selectedIconPath": "assets/tab-profile-active.png" }
+    ]
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json",
+  "lazyCodeLoading": "requiredComponents"
+}

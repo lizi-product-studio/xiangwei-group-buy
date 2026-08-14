@@ -1,0 +1,11 @@
+<view class="pickup-card">
+  <view class="pickup-card__stamp">提</view>
+  <text class="pickup-card__title">到店后向工作人员出示</text>
+  <text wx:if="{{loading}}" class="pickup-card__hint">正在生成安全取货码…</text>
+  <text wx:elif="{{error}}" class="pickup-card__error">{{error}}</text>
+  <block wx:else>
+    <text class="pickup-card__code">{{code}}</text>
+    <text class="pickup-card__hint">有效期至 {{expiresText}}</text>
+    <text class="pickup-card__warning">请勿提前把取货码发送给他人</text>
+  </block>
+</view>

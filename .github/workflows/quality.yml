@@ -1,0 +1,56 @@
+name: Quality
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: hometown_food
+          MYSQL_USER: app
+          MYSQL_PASSWORD: app_password
+          MYSQL_ROOT_PASSWORD: root_password
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot_password"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+      redis:
+        image: redis:7.4-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd="redis-cli ping" --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      DATABASE_URL: mysql://app:app_password@127.0.0.1:3306/hometown_food
+      INTEGRATION_DATABASE_URL: mysql://app:app_password@127.0.0.1:3306/hometown_food
+      INTEGRATION_REDIS_URL: redis://127.0.0.1:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 11.16.0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:migrate
+      - run: pnpm check
+      - run: pnpm test:coverage
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Run Mode B browser gate
+        run: pnpm test:e2e
+      - name: Upload Playwright evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-mode-b-${{ github.run_id }}
+          path: |
+            playwright-report
+            test-results
+          if-no-files-found: ignore
+          retention-days: 14
+      - run: docker build -f apps/api/Dockerfile -t hometown-api:ci .
+      - run: docker build -f apps/admin-web/Dockerfile -t hometown-admin:ci .

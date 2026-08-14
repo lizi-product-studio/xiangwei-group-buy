@@ -1,0 +1,84 @@
+import { afterAll,beforeAll,describe,expect,it } from 'vitest';
+import type { FastifyInstance } from 'fastify';
+import { buildApp } from './app.js';
+import { loadConfig } from './config.js';
+
+const databaseUrl=process.env.INTEGRATION_DATABASE_URL;const redisUrl=process.env.INTEGRATION_REDIS_URL;
+describe.skipIf(!databaseUrl||!redisUrl)('real MySQL and Redis integration',()=>{
+  let app:FastifyInstance;
+  beforeAll(async()=>{app=await buildApp({config:loadConfig({NODE_ENV:'test',DATA_STORE:'mysql',DATABASE_URL:databaseUrl,QUEUE_DRIVER:'redis',REDIS_URL:redisUrl,PICKUP_CODE_SECRET:'integration-pickup-secret-value',PLATFORM_PROCUREMENT_ENABLED:'true'})});});
+  afterAll(async()=>{if(app)await app.close();});
+  it('runs migrations, persists a campaign and closes it through a recovered Redis job',async()=>{
+    expect((await app.inject({method:'GET',url:'/health/ready'})).statusCode).toBe(200);
+    const operator={'x-demo-user-id':'integration-operator','x-demo-role':'OPERATOR'};
+    const suffix=crypto.randomUUID().slice(0,8);
+    const merchant=await app.inject({method:'POST',url:'/api/v1/admin/merchants',headers:operator,payload:{name:`Integration merchant ${suffix}`,defaultCommissionBps:500,wechatSubMchid:null}});
+    expect(merchant.statusCode,merchant.body).toBe(201);
+    const product=await app.inject({method:'POST',url:'/api/v1/admin/products',headers:operator,payload:{merchantId:merchant.json().data.id,title:`Integration product ${suffix}`,category:'测试',origin:'测试产地',imageUrl:null,skuName:'500g',priceCents:1990,stock:10}});
+    expect(product.statusCode,product.body).toBe(201);
+    const productId=product.json().data.id as string;const skuId=product.json().data.sku.id as string;
+    expect((await app.inject({method:'POST',url:`/api/v1/admin/products/${productId}/submit-review`,headers:operator})).statusCode).toBe(200);
+    expect((await app.inject({method:'POST',url:`/api/v1/admin/products/${productId}/review`,headers:{'x-demo-user-id':'integration-reviewer','x-demo-role':'REVIEWER'},payload:{decision:'APPROVE'}})).statusCode).toBe(200);
+    const cutoffAt=new Date(Date.now()+1_500).toISOString();
+    const created=await app.inject({method:'POST',url:'/api/v1/admin/campaigns',headers:operator,payload:{title:'真实基础设施联调团',serviceAreaId:'service-hz',cutoffAt,dispatchAt:new Date(Date.now()+60_000).toISOString(),minTotalQuantity:1,failureAction:'CANCEL_AND_REFUND',skuIds:[skuId]}});
+    expect(created.statusCode).toBe(201);const campaignId=created.json().data.id as string;
+    const site=await app.inject({method:'POST',url:'/api/v1/admin/delivery-plans',headers:{'x-demo-user-id':'integration-operator','x-demo-role':'OPERATOR'},payload:{campaignId,pickupPointId:'pickup-hz-001',siteName:'莲池区裕华路自提点',address:'河北省保定市莲池区裕华西路（演示地址）',arrivalStartAt:new Date(Date.now()+86_400_000).toISOString(),arrivalEndAt:null,contactName:'集成测试负责人',contactPhone:'13800000000',remark:'真实 MySQL 固定自提点'}});
+    expect(site.statusCode,site.body).toBe(200);
+    expect((await app.inject({method:'POST',url:`/api/v1/admin/campaigns/${campaignId}/open`,headers:{'x-demo-user-id':'integration-operator','x-demo-role':'OPERATOR'}})).statusCode).toBe(200);
+    let status='OPEN';const deadline=Date.now()+8_000;
+    while(Date.now()<deadline&&status==='OPEN'){await new Promise((resolve)=>setTimeout(resolve,150));const response=await app.inject({method:'GET',url:'/api/v1/admin/campaigns',headers:operator});status=(response.json().data as Array<{id:string;status:string}>).find((campaign)=>campaign.id===campaignId)?.status ?? 'MISSING';}
+    expect(status).toBe('CANCELLED');
+  },12_000);
+
+  it('persists two mode-B receipt batches and one replenishment retry through MySQL and Redis',async()=>{
+    const operator={'x-demo-user-id':'integration-platform-operator','x-demo-role':'SUPER_ADMIN'};
+    const customer={'x-demo-user-id':'integration-platform-customer','x-demo-role':'USER'};
+    const suffix=crypto.randomUUID().slice(0,8);
+    const warehouse=(await app.inject({method:'POST',url:'/api/v1/admin/platform/warehouses',headers:operator,payload:{name:`Integration warehouse ${suffix}`,address:`Integration warehouse address ${suffix}`,status:'ACTIVE'}}));
+    expect(warehouse.statusCode,warehouse.body).toBe(201);
+    const supplier=(await app.inject({method:'POST',url:'/api/v1/admin/platform/suppliers',headers:operator,payload:{name:`Integration supplier ${suffix}`,contactName:'Integration contact',contactPhone:'13800000000',status:'ACTIVE'}}));
+    expect(supplier.statusCode,supplier.body).toBe(201);
+    const qualification=await app.inject({method:'POST',url:`/api/v1/admin/platform/suppliers/${supplier.json().data.id}/qualifications`,headers:operator,payload:{qualificationType:'FOOD_LICENSE',qualificationNo:`QUAL-${suffix}`,expiresAt:'2099-01-01',status:'APPROVED',evidenceSummary:'integration approved qualification'}});
+    expect(qualification.statusCode,qualification.body).toBe(201);
+    const sku=(await app.inject({method:'POST',url:'/api/v1/admin/platform/skus',headers:operator,payload:{title:`Integration SKU ${suffix}`,category:'Dry goods',origin:'Integration origin',imageUrl:null,skuName:'One pack',retailPriceCents:1200,status:'ACTIVE'}}));
+    expect(sku.statusCode,sku.body).toBe(201);
+    const offer=(await app.inject({method:'POST',url:'/api/v1/admin/platform/offers',headers:operator,payload:{supplierId:supplier.json().data.id,platformSkuId:sku.json().data.id,purchasePriceCents:700,minimumPurchaseQuantity:1,leadTimeDays:1,status:'ACTIVE'}}));
+    expect(offer.statusCode,offer.body).toBe(201);
+    const cutoffAt=new Date(Date.now()+1_500).toISOString();
+    const campaign=(await app.inject({method:'POST',url:'/api/v1/admin/platform/campaigns',headers:operator,payload:{title:`Integration platform campaign ${suffix}`,serviceAreaId:'service-hz',warehouseId:warehouse.json().data.id,cutoffAt,dispatchAt:new Date(Date.now()+60_000).toISOString(),minTotalQuantity:1,failureAction:'CANCEL_AND_REFUND',items:[{platformSkuId:sku.json().data.id,supplierOfferId:offer.json().data.id,sellableQuantity:10}]}}));
+    expect(campaign.statusCode,campaign.body).toBe(201);
+    const campaignId=campaign.json().data.id as string;
+    const plan=await app.inject({method:'POST',url:'/api/v1/admin/delivery-plans',headers:operator,payload:{campaignId,pickupPointId:'pickup-hz-001',siteName:'莲池区裕华路自提点',address:'河北省保定市莲池区裕华西路（演示地址）',arrivalStartAt:null,arrivalEndAt:null,contactName:null,contactPhone:null,remark:null}});
+    expect(plan.statusCode,plan.body).toBe(200);
+    expect((await app.inject({method:'POST',url:`/api/v1/admin/campaigns/${campaignId}/open`,headers:operator})).statusCode).toBe(200);
+    const order=await app.inject({method:'POST',url:'/api/v1/orders',headers:{...customer,'idempotency-key':`integration-${suffix}`},payload:{campaignId,serviceAreaId:'service-hz',pickupPointId:'pickup-hz-001',items:[{skuId:sku.json().data.id,quantity:10}]}});
+    expect(order.statusCode,order.body).toBe(201);
+    const paid=await app.inject({method:'POST',url:`/api/v1/orders/${order.json().data.id}/mock-pay`,headers:customer});
+    expect(paid.statusCode,paid.body).toBe(200);
+    expect(paid.json().data).toMatchObject({status:'PAID_WAITING_CLOSE',paymentRoute:'PLATFORM_DIRECT'});
+    let purchaseOrderId:string|undefined;let itemId:string|undefined;
+    const deadline=Date.now()+10_000;
+    while(Date.now()<deadline&&!purchaseOrderId){await new Promise((resolve)=>setTimeout(resolve,150));const response=await app.inject({method:'GET',url:'/api/v1/admin/platform/purchase-orders',headers:operator});const po=(response.json().data as Array<{campaignId:string;id:string;items:Array<{id:string}>}>).find((value)=>value.campaignId===campaignId);purchaseOrderId=po?.id;itemId=po?.items[0]?.id;}
+    expect(purchaseOrderId).toBeTruthy();expect(itemId).toBeTruthy();
+    const firstPayload={items:[{purchaseOrderItemId:itemId!,acceptedQuantity:8,rejectedQuantity:2,batchNo:`LOT-${suffix}-A`,productionDate:null,expiresAt:null,inspectionNote:'supplier short receipt',exceptionReason:'SHORT_RECEIPT',evidenceUrl:null}]};
+    const first=await app.inject({method:'POST',url:`/api/v1/admin/platform/purchase-orders/${purchaseOrderId}/receive`,headers:operator,payload:firstPayload});
+    expect(first.statusCode,first.body).toBe(200);
+    const retried=await app.inject({method:'POST',url:`/api/v1/admin/platform/purchase-orders/${purchaseOrderId}/receive`,headers:operator,payload:firstPayload});
+    expect(retried.statusCode,retried.body).toBe(200);expect(retried.json().data.id).toBe(first.json().data.id);
+    const replenishment=await app.inject({method:'POST',url:`/api/v1/admin/platform/purchase-orders/${purchaseOrderId}/receive`,headers:operator,payload:{items:[{purchaseOrderItemId:itemId!,acceptedQuantity:2,rejectedQuantity:0,batchNo:`LOT-${suffix}-B`,productionDate:null,expiresAt:null,inspectionNote:'replenishment accepted',evidenceUrl:null}]}});
+    expect(replenishment.statusCode,replenishment.body).toBe(200);expect(replenishment.json().data.id).not.toBe(first.json().data.id);
+    const finalRetry=await app.inject({method:'POST',url:`/api/v1/admin/platform/purchase-orders/${purchaseOrderId}/receive`,headers:operator,payload:{items:[{purchaseOrderItemId:itemId!,acceptedQuantity:2,rejectedQuantity:0,batchNo:`LOT-${suffix}-B`,productionDate:null,expiresAt:null,inspectionNote:'replenishment accepted',evidenceUrl:null}]}});
+    expect(finalRetry.statusCode,finalRetry.body).toBe(200);expect(finalRetry.json().data.id).toBe(replenishment.json().data.id);
+    const purchaseOrders=await app.inject({method:'GET',url:'/api/v1/admin/platform/purchase-orders',headers:operator});
+    expect((purchaseOrders.json().data as Array<{id:string;status:string;items:Array<{acceptedQuantity:number;remainingQuantity:number}>}>).find((value)=>value.id===purchaseOrderId)).toMatchObject({status:'RECEIVED',items:[{acceptedQuantity:10,remainingQuantity:0}]});
+    const sorting=await app.inject({method:'POST',url:`/api/v1/admin/platform/campaigns/${campaignId}/sorting`,headers:operator});
+    expect(sorting.statusCode,sorting.body).toBe(200);
+    const sortingTasks=await app.inject({method:'GET',url:'/api/v1/admin/platform/sorting-tasks',headers:operator});
+    expect(sortingTasks.statusCode,sortingTasks.body).toBe(200);
+    expect((sortingTasks.json().data as Array<{campaignId:string;status:string}>).find((value)=>value.campaignId===campaignId)).toMatchObject({status:'PENDING'});
+    expect((await app.inject({method:'POST',url:`/api/v1/admin/platform/campaigns/${campaignId}/sorting/complete`,headers:operator})).statusCode).toBe(200);
+    expect((await app.inject({method:'POST',url:`/api/v1/admin/delivery-plans/${plan.json().data.id}/book-vehicle`,headers:operator,payload:{vehicleOrderNo:`VEHICLE-${suffix}`,driverName:'Integration driver',driverPhone:'13900000000',vehiclePlate:'冀F12345'}})).statusCode).toBe(200);
+    const outbound=await app.inject({method:'POST',url:`/api/v1/admin/platform/campaigns/${campaignId}/outbound`,headers:operator,payload:{carrierReference:`OUTBOUND-${suffix}`}});
+    expect(outbound.statusCode,outbound.body).toBe(200);
+  },15_000);
+});

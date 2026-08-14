@@ -1,0 +1,119 @@
+name: hometown-food
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: hometown_food
+      MYSQL_USER: hometown
+      MYSQL_PASSWORD: ${MYSQL_APP_PASSWORD:?required}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?required}
+      TZ: Asia/Shanghai
+    command: ["--character-set-server=utf8mb4","--collation-server=utf8mb4_0900_ai_ci","--default-time-zone=+00:00"]
+    volumes: ["mysql_data:/var/lib/mysql"]
+    healthcheck:
+      test: ["CMD-SHELL","MYSQL_PWD=\"$$MYSQL_ROOT_PASSWORD\" mysqladmin ping -h 127.0.0.1 -uroot --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks: [backend]
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server","--appendonly","yes","--requirepass","${REDIS_PASSWORD:?required}"]
+    volumes: ["redis_data:/data"]
+    healthcheck:
+      test: ["CMD-SHELL","redis-cli -a $$REDIS_PASSWORD ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    environment: { REDIS_PASSWORD: "${REDIS_PASSWORD:?required}" }
+    networks: [backend]
+
+  migrate:
+    build: { context: .., dockerfile: apps/api/Dockerfile }
+    restart: "no"
+    command: ["node","dist/scripts/migrate.js"]
+    environment:
+      DATABASE_URL: mysql://hometown:${MYSQL_APP_PASSWORD:?required}@mysql:3306/hometown_food
+    depends_on: { mysql: { condition: service_healthy } }
+    networks: [backend]
+
+  api:
+    build: { context: .., dockerfile: apps/api/Dockerfile }
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3100
+      LOG_LEVEL: info
+      TRUST_PROXY: "true"
+      REQUIRE_HTTPS: "true"
+      PRIVACY_NOTICE_VERSION: ${PRIVACY_NOTICE_VERSION:-2026-08-12}
+      RATE_LIMIT_MAX: 600
+      DATA_STORE: mysql
+      DATABASE_URL: mysql://hometown:${MYSQL_APP_PASSWORD:?required}@mysql:3306/hometown_food
+      QUEUE_DRIVER: redis
+      REDIS_URL: redis://:${REDIS_PASSWORD:?required}@redis:6379
+      AUTH_PROVIDER: wechat
+      AUTH_SESSION_TTL_SECONDS: 604800
+      WECHAT_APP_ID: ${WECHAT_APP_ID:?required}
+      WECHAT_APP_SECRET: ${WECHAT_APP_SECRET:?required}
+      WECHAT_SUBSCRIBE_SITE_TEMPLATE_ID: ${WECHAT_SUBSCRIBE_SITE_TEMPLATE_ID:?required}
+      WECHAT_SUBSCRIBE_SITE_TEMPLATE_DATA: ${WECHAT_SUBSCRIBE_SITE_TEMPLATE_DATA:?required}
+      WECHAT_SUBSCRIBE_DISPATCH_TEMPLATE_ID: ${WECHAT_SUBSCRIBE_DISPATCH_TEMPLATE_ID:?required}
+      WECHAT_SUBSCRIBE_DISPATCH_TEMPLATE_DATA: ${WECHAT_SUBSCRIBE_DISPATCH_TEMPLATE_DATA:?required}
+      WECHAT_SUBSCRIBE_ARRIVAL_TEMPLATE_ID: ${WECHAT_SUBSCRIBE_ARRIVAL_TEMPLATE_ID:?required}
+      WECHAT_SUBSCRIBE_ARRIVAL_TEMPLATE_DATA: ${WECHAT_SUBSCRIBE_ARRIVAL_TEMPLATE_DATA:?required}
+      WECHAT_SUBSCRIBE_PARTIAL_REFUND_TEMPLATE_ID: ${WECHAT_SUBSCRIBE_PARTIAL_REFUND_TEMPLATE_ID:?required}
+      WECHAT_SUBSCRIBE_PARTIAL_REFUND_TEMPLATE_DATA: ${WECHAT_SUBSCRIBE_PARTIAL_REFUND_TEMPLATE_DATA:?required}
+      PAYMENT_PROVIDER: wechat-platform
+      WECHAT_PAY_SP_MCHID: ${WECHAT_PAY_SP_MCHID:?required}
+      WECHAT_PAY_CERT_SERIAL: ${WECHAT_PAY_CERT_SERIAL:?required}
+      WECHAT_PAY_PRIVATE_KEY_PATH: /run/secrets/wechat_private_key
+      WECHAT_PAY_PUBLIC_KEY_ID: ${WECHAT_PAY_PUBLIC_KEY_ID:?required}
+      WECHAT_PAY_PUBLIC_KEY_PATH: /run/secrets/wechat_public_key
+      WECHAT_PAY_API_V3_KEY: ${WECHAT_PAY_API_V3_KEY:?required}
+      WECHAT_PAY_NOTIFY_URL: ${WECHAT_PAY_NOTIFY_URL:?required}
+      WECHAT_PAY_REFUND_NOTIFY_URL: ${WECHAT_PAY_REFUND_NOTIFY_URL:?required}
+      WECHAT_PAY_PLATFORM_NAME: ${WECHAT_PAY_PLATFORM_NAME:?required}
+      PICKUP_CODE_SECRET: ${PICKUP_CODE_SECRET:?required}
+    secrets: [wechat_private_key,wechat_public_key]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD","node","-e","fetch('http://127.0.0.1:3100/health/ready',{headers:{'x-forwarded-proto':'https'}}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks: [backend]
+
+  admin:
+    build: { context: .., dockerfile: apps/admin-web/Dockerfile }
+    restart: unless-stopped
+    depends_on: { api: { condition: service_healthy } }
+    networks: [backend]
+
+  gateway:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?required}
+      ACME_EMAIL: ${ACME_EMAIL:?required}
+    volumes:
+      - ./Caddyfile.production:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: { admin: { condition: service_started }, api: { condition: service_healthy } }
+    networks: [backend]
+
+secrets:
+  wechat_private_key: { file: "${WECHAT_PRIVATE_KEY_FILE:?required}" }
+  wechat_public_key: { file: "${WECHAT_PUBLIC_KEY_FILE:?required}" }
+volumes: { mysql_data: {}, redis_data: {}, caddy_data: {}, caddy_config: {} }
+networks: { backend: {} }
