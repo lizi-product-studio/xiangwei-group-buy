@@ -32,9 +32,9 @@ interface OrderDetailView extends OrderDto {
 const STATUS: Record<string, { text: string; hint: string }> = {
   PENDING_PAYMENT: { text: '待付款', hint: '请在支付有效期内完成付款' },
   PAID_WAITING_CLOSE: { text: '等待截单', hint: '平台正在统一收单' },
-  LOCKED: { text: '已成团', hint: '平台正在生成采购单并安排中心仓收货验收' },
-  ALLOCATING: { text: '中心仓分拣中', hint: '合格批次正在按固定自提点分拣' },
-  IN_TRANSIT: { text: '配送至自提点', hint: '中心仓已出库，正在配送至本团固定自提点' },
+  LOCKED: { text: '已截单', hint: '平台正在统一备货并安排配送' },
+  ALLOCATING: { text: '待发车', hint: '平台正在确认本团配送安排' },
+  IN_TRANSIT: { text: '运输中', hint: '货物正在配送至本团固定自提点' },
   READY_FOR_PICKUP: { text: '待领取', hint: '点位已完成交接，请凭取货码领取' },
   PICKED_UP: { text: '已领取', hint: '本次领取已经核销' },
   COMPLETED: { text: '已完成', hint: '订单已完成' },
@@ -52,7 +52,8 @@ const EXCEPTION_REASON: Record<string, string> = {
 
 function locationCopy(plan: DeliveryPlanDto | null) {
   if (!plan || plan.status === 'PENDING_SITE') return { name: '领取地点信息暂不可用', address: '请联系平台客服确认', time: '地点信息待补充' };
-  return { name: plan.siteName ?? '集中领取地点已确认', address: plan.address ?? '', time: plan.arrivalStartAt ? `预计 ${formatDateTime(plan.arrivalStartAt)} 到达` : '到货时间待确认' };
+  const eta=plan.estimatedArrivalAt??plan.arrivalStartAt;
+  return { name: plan.siteName ?? '集中领取地点已确认', address: plan.address ?? '', time: eta ? `预计 ${formatDateTime(eta)} 到达` : '到货时间待确认' };
 }
 
 Page({
@@ -82,7 +83,7 @@ Page({
           ...item,
           priceText: formatMoney(item.unitPriceCents),
           amountText: formatMoney(item.amountCents),
-          fulfillmentText: item.exceptionQuantity > 0 ? `可领取 ${item.fulfilledQuantity} 件 · 异常 ${item.exceptionQuantity} 件` : item.fulfilledQuantity > 0 ? `可领取 ${item.fulfilledQuantity} 件` : '待履约',
+          fulfillmentText: item.exceptionQuantity > 0 ? `待领 ${item.remainingPickupQuantity ?? item.fulfilledQuantity} 件 · 异常 ${item.exceptionQuantity} 件` : item.fulfilledQuantity > 0 ? `待领 ${item.remainingPickupQuantity ?? item.fulfilledQuantity} 件` : '待履约',
           exceptionReasonText: item.exceptionQuantity > 0 ? `异常原因：${reasonBySku.get(item.skuId) ?? '待确认'}` : null,
           refundText,
         };

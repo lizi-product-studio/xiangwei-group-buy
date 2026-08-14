@@ -107,6 +107,43 @@ describe('API regression', () => {
     await createOrder(campaignId);
   });
 
+  it('runs the lightweight community route without supplier, warehouse, purchase order or stock-lot prerequisites', async () => {
+    await app.close();
+    await store.saveUser({ id: 'verifier-1', wechatOpenId: null, status: 'ACTIVE', createdAt: new Date().toISOString() });
+    await store.savePlatformSku({id:'community-sku-a',productId:'community-product-a',name:'常温杂粮 A（500g）',retailPriceCents:moneyCents(1200),defaultSellableQuantity:20,referencePurchaseCostCents:null,supplierNote:null,status:'ACTIVE',product:{id:'community-product-a',title:'社区杂粮 A',category:'粮油',origin:'保定',imageUrl:null,storageType:'NORMAL_TEMPERATURE',status:'ACTIVE'},createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()});
+    await store.savePlatformSku({id:'community-sku-b',productId:'community-product-b',name:'真空熟食 B（300g）',retailPriceCents:moneyCents(2000),defaultSellableQuantity:20,referencePurchaseCostCents:null,supplierNote:null,status:'ACTIVE',product:{id:'community-product-b',title:'社区熟食 B',category:'熟食',origin:'保定',imageUrl:null,storageType:'NORMAL_TEMPERATURE',status:'ACTIVE'},createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()});
+    app=await buildApp({config:loadConfig({NODE_ENV:'test',COMMUNITY_FULFILLMENT_ENABLED:'true'}),store});
+    const created=await app.inject({method:'POST',url:'/api/v1/admin/community/campaigns',headers:operator,payload:{title:'社区轻量履约团',serviceAreaId:'service-bd-lianchi',pickupPointId:pointId,cutoffAt:new Date(Date.now()+3_600_000).toISOString(),dispatchAt:new Date(Date.now()+7_200_000).toISOString(),minTotalQuantity:1,failureAction:'CANCEL_AND_REFUND',items:[{platformSkuId:'community-sku-a',retailPriceCents:1200,sellableQuantity:10},{platformSkuId:'community-sku-b',retailPriceCents:2000,sellableQuantity:10}]}});
+    expect(created.statusCode,created.body).toBe(201); const campaignId=created.json().data.id as string;
+    expect((await app.inject({method:'POST',url:`/api/v1/admin/campaigns/${campaignId}/open`,headers:operator})).statusCode).toBe(200);
+    const orderResponse=await app.inject({method:'POST',url:'/api/v1/orders',headers:{...customer,'idempotency-key':'community-checkout-key'},payload:{campaignId,serviceAreaId:'service-bd-lianchi',pickupPointId:pointId,items:[{skuId:'community-sku-a',quantity:2},{skuId:'community-sku-b',quantity:3}]}});expect(orderResponse.statusCode,orderResponse.body).toBe(201);const orderId=orderResponse.json().data.id as string;
+    expect((await app.inject({method:'POST',url:`/api/v1/orders/${orderId}/mock-pay`,headers:customer})).statusCode).toBe(200);
+    vi.useFakeTimers();vi.setSystemTime(new Date(Date.now()+3_600_001));try{expect((await app.inject({method:'POST',url:`/api/v1/admin/campaigns/${campaignId}/close`,headers:operator})).statusCode).toBe(200);}finally{vi.useRealTimers();}
+    const plan=await store.getDeliveryPlanByCampaign(campaignId);if(!plan)throw new Error('community plan missing');
+    expect((await app.inject({method:'POST',url:`/api/v1/admin/delivery-plans/${plan.id}/book-vehicle`,headers:fulfillment,payload:{logisticsPlatform:'货拉拉',vehicleOrderNo:'HL-COMMUNITY-1',driverName:'李师傅',driverPhone:'13900000000',vehiclePlate:'冀F12345',estimatedArrivalAt:new Date(Date.now()+86_400_000).toISOString()}})).statusCode).toBe(200);
+    const batch=await app.inject({method:'POST',url:'/api/v1/admin/dispatch-batches',headers:fulfillment,payload:{campaignId}});expect(batch.statusCode,batch.body).toBe(201);const batchId=batch.json().data.id as string;
+    expect((await app.inject({method:'POST',url:`/api/v1/admin/dispatch-batches/${batchId}/dispatch`,headers:fulfillment})).statusCode).toBe(200);
+    const genericCommunityReceive=await app.inject({method:'POST',url:`/api/v1/pickup/batches/${batchId}/receive`,headers:fulfillment,payload:{deliveryPlanId:plan.id}});
+    expect(genericCommunityReceive.statusCode,genericCommunityReceive.body).toBe(409);
+    expect((await store.getDeliveryPlanByCampaign(campaignId))?.status).toBe('IN_TRANSIT');
+    expect((await app.inject({method:'GET',url:`/api/v1/pickup-code?orderId=${orderId}`,headers:customer})).statusCode).toBe(409);
+    expect((await app.inject({method:'POST',url:'/api/v1/admin/pickup-verifier-assignments/grant',headers:operator,payload:{userId:'verifier-1',pickupPointId:pointId}})).statusCode).toBe(200);
+    const verifierDeliveries=await app.inject({method:'GET',url:'/api/v1/admin/community/deliveries',headers:verifier});expect(verifierDeliveries.statusCode,verifierDeliveries.body).toBe(200);expect(verifierDeliveries.json().data).toEqual([expect.objectContaining({campaignId,dispatchBatchId:batchId,expectedItems:[expect.objectContaining({platformSkuId:'community-sku-a',expectedQuantity:2}),expect.objectContaining({platformSkuId:'community-sku-b',expectedQuantity:3})]})]);expect(verifierDeliveries.body).not.toContain('purchasePriceCents');expect((await app.inject({method:'GET',url:'/api/v1/admin/platform/skus',headers:verifier})).statusCode).toBe(403);
+    const arrival={receivedBy:'点位负责人',confirmationNote:'现场已清点',items:[{platformSkuId:'community-sku-a',receivedQuantity:2,rejectedQuantity:0,shortQuantity:0,damagedQuantity:0,reason:null,evidenceNote:null,evidenceUrl:null},{platformSkuId:'community-sku-b',receivedQuantity:2,rejectedQuantity:0,shortQuantity:1,damagedQuantity:0,reason:'TRANSIT_SHORTAGE',evidenceNote:'现场少一袋，已拍照',evidenceUrl:null}]};
+    const confirmations=await Promise.all([app.inject({method:'POST',url:`/api/v1/admin/community/dispatch-batches/${batchId}/arrival`,headers:verifier,payload:arrival}),app.inject({method:'POST',url:`/api/v1/admin/community/dispatch-batches/${batchId}/arrival`,headers:verifier,payload:arrival})]);for(const confirmation of confirmations)expect(confirmation.statusCode,confirmation.body).toBe(200);
+    const exceptions=(await store.listFulfillmentExceptions()).filter((item)=>item.campaignId===campaignId);expect(exceptions).toHaveLength(1);
+    const exceptionId=exceptions[0]!.id;
+    expect((await app.inject({method:'POST',url:`/api/v1/admin/platform/fulfillment-exceptions/${exceptionId}/decision`,headers:operator,payload:{status:'REFUND_CONFIRMED',responsibility:'CARRIER',resolutionNote:'无法在承诺时间内补送，按订单快照价退一件'}})).statusCode).toBe(200);
+    const partialRefund=await app.inject({method:'POST',url:`/api/v1/admin/platform/fulfillment-exceptions/${exceptionId}/partial-refund`,headers:finance,payload:{confirmationNote:'财务已核对短少证据与订单快照价'}});expect(partialRefund.statusCode,partialRefund.body).toBe(200);
+    expect((await app.inject({method:'POST',url:`/api/v1/admin/platform/fulfillment-exceptions/${exceptionId}/partial-refund`,headers:finance,payload:{confirmationNote:'重复请求不得重复退款'}})).statusCode).toBe(200);
+    expect((await store.listPlatformPartialRefundsByOrder(orderId))).toHaveLength(1);
+    const code=await app.inject({method:'GET',url:`/api/v1/pickup-code?orderId=${orderId}`,headers:customer});expect(code.statusCode,code.body).toBe(200);
+    const lookup=await app.inject({method:'GET',url:`/api/v1/pickup/orders/lookup?deliveryPlanId=${plan.id}&orderNo=${orderResponse.json().data.orderNo}`,headers:verifier});expect(lookup.statusCode,lookup.body).toBe(200);expect(lookup.json().data.items).toEqual(expect.arrayContaining([expect.objectContaining({skuId:'community-sku-a',remainingPickupQuantity:2}),expect.objectContaining({skuId:'community-sku-b',remainingPickupQuantity:2,exceptionQuantity:1})]));
+    const partial=await app.inject({method:'POST',url:'/api/v1/pickup/verify',headers:verifier,payload:{orderId,deliveryPlanId:plan.id,code:code.json().data.code,items:[{platformSkuId:'community-sku-a',quantity:2}]}});expect(partial.statusCode,partial.body).toBe(200);expect(partial.json().data.status).toBe('READY_FOR_PICKUP');
+    const completed=await app.inject({method:'POST',url:'/api/v1/pickup/verify',headers:verifier,payload:{orderId,deliveryPlanId:plan.id,code:code.json().data.code,items:[{platformSkuId:'community-sku-b',quantity:2}]}});expect(completed.statusCode,completed.body).toBe(200);expect(completed.json().data.status).toBe('PICKED_UP');
+    expect((await store.listPurchaseOrders(campaignId))).toEqual([]);
+  });
+
   it('keeps platform sales, supplier procurement, warehouse lots and pickup handover isolated from legacy merchant orders', async () => {
     const enabledConfig=loadConfig({NODE_ENV:'test',PLATFORM_PROCUREMENT_ENABLED:'true',DEFAULT_BUSINESS_MODEL_VERSION:'PLATFORM_PROCUREMENT'});
     await app.close();
@@ -702,7 +739,8 @@ describe('API regression', () => {
     expect((await app.inject({method:'POST',url:`/api/v1/pickup/batches/${batch}/receive`,headers:fulfillment,payload:{deliveryPlanId:plan.id}})).statusCode).toBe(200);
     const lookup=await app.inject({method:'GET',url:lookupUrl,headers:verifierLookup});
     expect(lookup.statusCode,lookup.body).toBe(200);
-    expect(lookup.json().data).toEqual({id:orderId,orderNo:order.orderNo,deliveryPlanId:plan.id,status:'READY_FOR_PICKUP'});
+    expect(lookup.json().data).toEqual(expect.objectContaining({id:orderId,orderNo:order.orderNo,deliveryPlanId:plan.id,status:'READY_FOR_PICKUP'}));
+    expect(lookup.json().data.items).toEqual(expect.arrayContaining([expect.objectContaining({skuId:'sku-demo-001',quantity:1})]));
     expect(lookup.json().data).not.toHaveProperty('userId');
     expect((await app.inject({method:'GET',url:`/api/v1/pickup/orders/lookup?deliveryPlanId=wrong-plan&orderNo=${encodeURIComponent(order.orderNo)}`,headers:verifierLookup})).statusCode).toBe(404);
     const plans=await app.inject({method:'GET',url:'/api/v1/pickup/delivery-plans',headers:verifierLookup});

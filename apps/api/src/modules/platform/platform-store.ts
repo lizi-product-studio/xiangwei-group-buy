@@ -9,6 +9,9 @@ import type {
   PlatformPartialRefund,
   PlatformRefund,
   PlatformCampaignItem,
+  CommunityCampaignItem,
+  CommunityDeliveryConfirmation,
+  CommunityPickupReceipt,
   PlatformSku,
   PlatformSalesLine,
   PurchaseOrder,
@@ -64,6 +67,11 @@ export interface PlatformStore {
   replaceCampaignPlatformItems(campaign: Campaign): Promise<void>;
   reserveCampaignPlatformStock(campaignId: string, platformSkuId: string, quantity: number): Promise<boolean>;
   releaseCampaignPlatformStock(campaignId: string, platformSkuId: string, quantity: number): Promise<boolean>;
+  listCommunityCampaignItems(campaignId:string):Promise<CommunityCampaignItem[]>;
+  getCommunityCampaignItem(campaignId:string,platformSkuId:string):Promise<CommunityCampaignItem|null>;
+  replaceCommunityCampaignItems(campaignId:string,items:CommunityCampaignItem[]):Promise<void>;
+  reserveCommunityCampaignStock(campaignId:string,platformSkuId:string,quantity:number):Promise<boolean>;
+  releaseCommunityCampaignStock(campaignId:string,platformSkuId:string,quantity:number):Promise<boolean>;
   saveSalesOrderItems(orderId: string, items: Array<{ id:string; platformSkuId: string; productId: string; title: string; skuName: string; quantity: number; unitPriceCents: number; purchaseUnitCents: number; amountCents: number }>): Promise<void>;
   listPlatformOrderItemsByCampaign(campaignId: string): Promise<Array<{ orderId: string; platformSkuId: string; quantity: number; purchaseUnitCents: number }>>;
   listPlatformSalesLinesByCampaign(campaignId:string):Promise<PlatformSalesLine[]>;
@@ -102,6 +110,10 @@ export interface PlatformStore {
   updateFulfillmentAllocations(values:FulfillmentAllocation[]):Promise<boolean>;
   markFulfillmentAllocationsRefunded(exceptionId:string,partialRefund:PlatformPartialRefund,at:string):Promise<boolean>;
   getFulfillmentExceptionForUpdate(id:string):Promise<FulfillmentException|null>;
+  getCommunityDeliveryConfirmationByBatch(batchId:string):Promise<CommunityDeliveryConfirmation|null>;
+  saveCommunityDeliveryConfirmation(value:CommunityDeliveryConfirmation):Promise<boolean>;
+  getCommunityPickupReceipt(orderId:string,requestKey:string):Promise<CommunityPickupReceipt|null>;
+  saveCommunityPickupReceipt(value:CommunityPickupReceipt):Promise<boolean>;
 }
 
 export const platformStore = (value: unknown): PlatformStore => value as PlatformStore;

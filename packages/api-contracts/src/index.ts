@@ -33,10 +33,15 @@ export const platformCampaignSchema = z.object({
   cutoffAt:z.iso.datetime({offset:true}), dispatchAt:z.iso.datetime({offset:true}), minTotalQuantity:z.int().min(1).max(1_000_000).default(1), failureAction:z.enum(['CANCEL_AND_REFUND','POSTPONE']),
   items:z.array(z.object({platformSkuId:identifierSchema,supplierOfferId:identifierSchema,sellableQuantity:z.int().min(1).max(1_000_000)})).min(1).max(500),
 }).superRefine((value,context)=>{if(Date.parse(value.dispatchAt)<=Date.parse(value.cutoffAt))context.addIssue({code:'custom',path:['dispatchAt'],message:'发车时间必须晚于截团时间'});});
+export const communityCampaignSchema=z.object({
+  title:z.string().trim().min(2).max(80),serviceAreaId:identifierSchema,pickupPointId:identifierSchema,
+  cutoffAt:z.iso.datetime({offset:true}),dispatchAt:z.iso.datetime({offset:true}),minTotalQuantity:z.int().min(1).max(1_000_000).default(1),failureAction:z.enum(['CANCEL_AND_REFUND','POSTPONE']),
+  items:z.array(z.object({platformSkuId:identifierSchema,retailPriceCents:z.int().min(1),sellableQuantity:z.int().min(1).max(1_000_000)})).min(1).max(500),
+}).superRefine((value,context)=>{if(Date.parse(value.dispatchAt)<=Date.parse(value.cutoffAt))context.addIssue({code:'custom',path:['dispatchAt'],message:'发车时间必须晚于截团时间'});});
 export const supplierSchema=z.object({name:z.string().trim().min(2).max(120),contactName:z.string().trim().min(2).max(80).nullable().default(null),contactPhone:mainlandChinaMobileSchema.nullable().default(null),status:z.enum(['DRAFT','ACTIVE','SUSPENDED']).default('DRAFT')});
 export const supplierQualificationSchema=z.object({qualificationType:z.string().trim().min(2).max(64),qualificationNo:z.string().trim().min(2).max(120).nullable().default(null),expiresAt:z.string().date().nullable().default(null),status:z.enum(['PENDING','APPROVED','REJECTED','EXPIRED']).default('PENDING'),evidenceSummary:z.string().trim().min(2).max(500).nullable().default(null)});
 export const warehouseSchema=z.object({name:z.string().trim().min(2).max(120),address:z.string().trim().min(5).max(255),status:z.enum(['ACTIVE','SUSPENDED']).default('ACTIVE')});
-export const platformSkuSchema=z.object({id:identifierSchema.optional(),productId:identifierSchema.optional(),title:z.string().trim().min(2).max(160),category:z.string().trim().min(2).max(40),origin:z.string().trim().min(2).max(160),imageUrl:z.string().trim().max(2048).nullable().default(null),skuName:z.string().trim().min(1).max(160),retailPriceCents:z.int().min(1),status:z.enum(['ACTIVE','INACTIVE']).default('ACTIVE')});
+export const platformSkuSchema=z.object({id:identifierSchema.optional(),productId:identifierSchema.optional(),title:z.string().trim().min(2).max(160),category:z.string().trim().min(2).max(40),origin:z.string().trim().min(2).max(160),imageUrl:z.string().trim().max(2048).nullable().default(null),skuName:z.string().trim().min(1).max(160),retailPriceCents:z.int().min(1),defaultSellableQuantity:z.int().min(0).max(10_000_000).default(0),referencePurchaseCostCents:z.int().min(1).nullable().default(null),supplierNote:z.string().trim().max(500).nullable().default(null),status:z.enum(['ACTIVE','INACTIVE']).default('ACTIVE')});
 export const supplierOfferSchema=z.object({supplierId:identifierSchema,platformSkuId:identifierSchema,purchasePriceCents:z.int().min(1).nullable(),minimumPurchaseQuantity:z.int().min(1).default(1),leadTimeDays:z.int().min(0).max(365).default(1),status:z.enum(['DRAFT','ACTIVE','SUSPENDED']).default('DRAFT')});
 /** A finance operator records the external transfer reference; this never touches customer payments. */
 export const supplierPayablePaymentSchema=z.object({paymentReference:z.string().trim().min(2).max(160)});
@@ -118,13 +123,16 @@ export const createDeliveryPlanSchema = z.object({
   }
 });
 export const bookVehicleSchema = z.object({
+  logisticsPlatform:z.string().trim().min(2).max(80).default('货拉拉'),
   vehicleOrderNo: z.string().trim().min(2).max(100),
   driverName: z.string().trim().min(2).max(80).nullable().default(null),
   driverPhone: mainlandChinaMobileSchema.nullable().default(null),
   vehiclePlate: z.string().trim().min(2).max(32).nullable().default(null),
+  estimatedArrivalAt:z.iso.datetime({offset:true}).nullable().default(null),
 });
 export const receiveBatchSchema = z.object({ deliveryPlanId: identifierSchema });
-export const verifyPickupSchema = z.object({ orderId: identifierSchema, deliveryPlanId: identifierSchema, code: z.string().regex(/^\d{6}$/) });
+export const communityArrivalSchema=z.object({receivedBy:z.string().trim().min(2).max(120),confirmationNote:z.string().trim().max(500).nullable().default(null),items:z.array(z.object({platformSkuId:identifierSchema,receivedQuantity:z.int().min(0),rejectedQuantity:z.int().min(0).default(0),shortQuantity:z.int().min(0).default(0),damagedQuantity:z.int().min(0).default(0),reason:fulfillmentExceptionTypeSchema.nullable().default(null),evidenceNote:z.string().trim().max(500).nullable().default(null),evidenceUrl:z.string().url().max(2048).nullable().default(null)})).min(1).max(500)});
+export const verifyPickupSchema = z.object({ orderId: identifierSchema, deliveryPlanId: identifierSchema, code: z.string().regex(/^\d{6}$/), items:z.array(z.object({platformSkuId:identifierSchema,quantity:z.int().min(1).max(999)})).max(100).optional() });
 /** Exact, point-scoped lookup used by the on-site pickup verifier. */
 export const pickupOrderLookupQuerySchema = z.object({ deliveryPlanId: identifierSchema, orderNo: z.string().trim().min(1).max(64) });
 export const pickupVerifierAssignmentSchema = z.object({ userId: identifierSchema, pickupPointId: identifierSchema });
@@ -145,6 +153,7 @@ export const notificationPreferenceSchema = z.object({ types:z.array(z.enum(['SI
 
 export type CreateCampaignInput = z.infer<typeof createCampaignSchema>;
 export type PlatformCampaignInput=z.infer<typeof platformCampaignSchema>;
+export type CommunityCampaignInput=z.infer<typeof communityCampaignSchema>;
 export type UpdateCampaignInput = z.infer<typeof updateCampaignSchema>;
 export type PostponeCampaignInput = z.infer<typeof postponeCampaignSchema>;
 export type OrderRequest = z.infer<typeof orderRequestSchema>;

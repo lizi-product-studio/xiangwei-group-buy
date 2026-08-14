@@ -13,7 +13,7 @@ export default defineConfig({
       url: 'http://127.0.0.1:3100/health/ready',
       timeout: 30_000,
       reuseExistingServer: !process.env.CI,
-      env: { ...process.env, NODE_ENV: 'test', PORT: '3100', DATA_STORE: 'memory', QUEUE_DRIVER: 'memory', PAYMENT_PROVIDER: 'mock', PLATFORM_PROCUREMENT_ENABLED: 'true', DEFAULT_BUSINESS_MODEL_VERSION: 'PLATFORM_PROCUREMENT' },
+      env: { ...process.env, NODE_ENV: 'test', PORT: '3100', DATA_STORE: 'memory', QUEUE_DRIVER: 'memory', PAYMENT_PROVIDER: 'mock', COMMUNITY_FULFILLMENT_ENABLED: 'true', PLATFORM_PROCUREMENT_ENABLED: 'true', DEFAULT_BUSINESS_MODEL_VERSION: 'PLATFORM_COMMUNITY' },
     },
     {
       command: 'pnpm --filter @hometown/admin-web dev',

@@ -45,18 +45,24 @@ export class OrderService {
       throw new BusinessError('VALIDATION_ERROR', '所选自提点不是本团期指定领取点', 400);
     }
 
-    if (campaign.businessModelVersion === 'PLATFORM_PROCUREMENT') {
+    if (campaign.businessModelVersion !== 'LEGACY_MARKETPLACE') {
       const merged = new Map<string, number>();
       for (const line of input.items) merged.set(line.skuId, (merged.get(line.skuId) ?? 0) + line.quantity);
       const items: OrderItem[] = [];
       for (const [platformSkuId, quantity] of merged) {
-        const item = await store.getCampaignPlatformItem(campaign.id, platformSkuId);
+        const item = campaign.businessModelVersion === 'PLATFORM_COMMUNITY'
+          ? await store.getCommunityCampaignItem(campaign.id, platformSkuId)
+          : await store.getCampaignPlatformItem(campaign.id, platformSkuId);
         if (!item) throw new BusinessError('RESOURCE_NOT_FOUND', `平台商品 ${platformSkuId} 不属于当前团期`, 404);
         if (item.sellableQuantity - item.reservedQuantity < quantity) throw new BusinessError('SKU_STOCK_INSUFFICIENT', `${item.skuName} 可售数量不足`, 409, { platformSkuId, available: item.sellableQuantity - item.reservedQuantity });
         const amountCents = multiplyMoney(item.retailPriceCents, quantity);
-        items.push({ salesOrderItemId:null, skuId: platformSkuId, productId: item.productId, merchantId: null, name: item.skuName, quantity, unitPriceCents: item.retailPriceCents, amountCents, commissionRateBps: 0, commissionCents: moneyCents(0), purchaseUnitCents: item.purchasePriceCents, fulfilledQuantity:0, exceptionQuantity:0, refundedQuantity:0, refundedAmountCents:moneyCents(0) });
+        const purchaseUnitCents=campaign.businessModelVersion==='PLATFORM_PROCUREMENT'
+          ? (item as Awaited<ReturnType<CommerceStore['getCampaignPlatformItem']>>)?.purchasePriceCents
+          : moneyCents(0);
+        if(purchaseUnitCents===undefined||purchaseUnitCents===null)throw new BusinessError('FINANCIAL_INCONSISTENT','平台采购团期缺少采购价快照',500);
+        items.push({ salesOrderItemId:null, skuId: platformSkuId, productId: item.productId, merchantId: null, name: item.skuName, quantity, unitPriceCents: item.retailPriceCents, amountCents, commissionRateBps: 0, commissionCents: moneyCents(0), purchaseUnitCents, fulfilledQuantity:0,pickedUpQuantity:0, exceptionQuantity:0, refundedQuantity:0, refundedAmountCents:moneyCents(0) });
       }
-      return { userId, campaignId: input.campaignId, serviceAreaId: input.serviceAreaId, pickupPointId: input.pickupPointId, deliveryPlanId: deliveryPlan.id, businessModelVersion: 'PLATFORM_PROCUREMENT', paymentRoute: 'PLATFORM_DIRECT', status: 'PENDING_PAYMENT', totalCents: sumMoney(items.map((item) => item.amountCents)), commissionCents: moneyCents(0), items, merchantOrders: [] };
+      return { userId, campaignId: input.campaignId, serviceAreaId: input.serviceAreaId, pickupPointId: input.pickupPointId, deliveryPlanId: deliveryPlan.id, businessModelVersion: campaign.businessModelVersion, paymentRoute: 'PLATFORM_DIRECT', status: 'PENDING_PAYMENT', totalCents: sumMoney(items.map((item) => item.amountCents)), commissionCents: moneyCents(0), items, merchantOrders: [] };
     }
 
     const merged = new Map<string, number>();
@@ -88,8 +94,9 @@ export class OrderService {
         commissionCents: calculateCommission(amountCents, sku.commissionRateBps),
         fulfilledQuantity:0,
         exceptionQuantity:0,
-        refundedQuantity:0,
-        refundedAmountCents:moneyCents(0),
+      refundedQuantity:0,
+      refundedAmountCents:moneyCents(0),
+      pickedUpQuantity:0,
       });
     }
     const totalCents = sumMoney(items.map((item) => item.amountCents));
@@ -143,7 +150,9 @@ export class OrderService {
     for (const item of preview.items) {
       const reserved = preview.businessModelVersion === 'PLATFORM_PROCUREMENT'
         ? await store.reserveCampaignPlatformStock(input.campaignId, item.skuId, item.quantity)
-        : await store.reserveCampaignSkuStock(input.campaignId, item.skuId, item.quantity);
+        : preview.businessModelVersion === 'PLATFORM_COMMUNITY'
+          ? await store.reserveCommunityCampaignStock(input.campaignId,item.skuId,item.quantity)
+          : await store.reserveCampaignSkuStock(input.campaignId, item.skuId, item.quantity);
       if (!reserved) {
         throw new BusinessError('SKU_STOCK_INSUFFICIENT', `${item.name} 库存不足`, 409);
       }
@@ -162,7 +171,7 @@ export class OrderService {
       pickedUpAt:null,
     };
     await store.saveOrder(order);
-    if (order.businessModelVersion === 'PLATFORM_PROCUREMENT') await store.saveSalesOrderItems(order.id, order.items.map((item) => ({ id:randomUUID(), platformSkuId: item.skuId, productId: item.productId, title: item.name, skuName: item.name, quantity: item.quantity, unitPriceCents: Number(item.unitPriceCents), purchaseUnitCents: Number(item.purchaseUnitCents ?? 0), amountCents: Number(item.amountCents) })));
+    if (order.businessModelVersion !== 'LEGACY_MARKETPLACE') await store.saveSalesOrderItems(order.id, order.items.map((item) => ({ id:randomUUID(), platformSkuId: item.skuId, productId: item.productId, title: item.name, skuName: item.name, quantity: item.quantity, unitPriceCents: Number(item.unitPriceCents), purchaseUnitCents: Number(item.purchaseUnitCents ?? 0), amountCents: Number(item.amountCents) })));
     await store.saveIdempotency(userId, idempotencyKey, { fingerprint, orderId: id });
     return order;
     });
@@ -219,7 +228,7 @@ export class OrderService {
 
   private async cancelPendingOrder(store:CommerceStore,order:Order):Promise<boolean>{
     if(!(await store.cancelPendingOrder(order.id)))return false;
-    for(const item of order.items){const released=order.businessModelVersion==='PLATFORM_PROCUREMENT'?await store.releaseCampaignPlatformStock(order.campaignId,item.skuId,item.quantity):await store.releaseCampaignSkuStock(order.campaignId,item.skuId,item.quantity);if(!released)throw new BusinessError('INVENTORY_INCONSISTENT','订单取消后可售数量释放失败',500,{orderId:order.id,skuId:item.skuId});}
+    for(const item of order.items){const released=order.businessModelVersion==='PLATFORM_PROCUREMENT'?await store.releaseCampaignPlatformStock(order.campaignId,item.skuId,item.quantity):order.businessModelVersion==='PLATFORM_COMMUNITY'?await store.releaseCommunityCampaignStock(order.campaignId,item.skuId,item.quantity):await store.releaseCampaignSkuStock(order.campaignId,item.skuId,item.quantity);if(!released)throw new BusinessError('INVENTORY_INCONSISTENT','订单取消后可售数量释放失败',500,{orderId:order.id,skuId:item.skuId});}
     const payment=await store.getPaymentByOrder(order.id);
     if(payment?.status==='CREATED'){payment.status='FAILED';await store.savePayment(payment);}
     return true;

@@ -32,7 +32,7 @@ interface CampaignDto {
 interface OrderDto {
   id: string;
   orderNo: string;
-  businessModelVersion?: 'LEGACY_MARKETPLACE' | 'PLATFORM_PROCUREMENT';
+  businessModelVersion?: 'LEGACY_MARKETPLACE' | 'PLATFORM_PROCUREMENT' | 'PLATFORM_COMMUNITY';
   campaignId: string;
   serviceAreaId: string;
   pickupPointId:string;
@@ -45,7 +45,7 @@ interface OrderDto {
   paidAt: string | null;
   pickedUpAt:string|null;
   afterSales?: Array<{ id: string; reason: string; description: string; status: 'SUBMITTED' | 'PROCESSING' | 'RESOLVED' | 'REJECTED'; createdAt: string; updatedAt: string }>;
-  items: Array<{ skuId: string; name: string; quantity: number; unitPriceCents: number; amountCents: number; fulfilledQuantity:number; exceptionQuantity:number; refundedQuantity:number; refundedAmountCents:number; refundStatus?:'PENDING'|'CREATED'|'PROCESSING'|'FAILED'|'SUCCEEDED'|null; refundAmountCents?:number }>;
+  items: Array<{ skuId: string; name: string; quantity: number; unitPriceCents: number; amountCents: number; fulfilledQuantity:number; pickedUpQuantity?:number; remainingPickupQuantity?:number; exceptionQuantity:number; refundedQuantity:number; refundedAmountCents:number; refundStatus?:'PENDING'|'CREATED'|'PROCESSING'|'FAILED'|'SUCCEEDED'|null; refundAmountCents?:number }>;
   fulfillmentExceptions?:Array<{id:string;status:string;sourceStage:string;responsibility:string;resolutionNote:string|null;items:Array<{platformSkuId:string;fulfilledQuantity:number;exceptionQuantity:number;refundedQuantity:number;reason:string|null}>}>;
   partialRefunds?:Array<{id:string;exceptionId:string;status:string;amountCents:number}>;
 }
@@ -60,6 +60,7 @@ interface DeliveryPlanDto {
   address: string | null;
   arrivalStartAt: string | null;
   arrivalEndAt: string | null;
+  estimatedArrivalAt?: string | null;
 }
 
 interface ServiceAreaDto {

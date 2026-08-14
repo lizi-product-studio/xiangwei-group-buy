@@ -1,7 +1,7 @@
 type RefundStatus = 'PENDING'|'CREATED'|'PROCESSING'|'FAILED'|'SUCCEEDED'|null|undefined;
 
 export function isModeBOrder(order: Pick<OrderDto, 'businessModelVersion'>): boolean {
-  return order.businessModelVersion === 'PLATFORM_PROCUREMENT';
+  return order.businessModelVersion === 'PLATFORM_PROCUREMENT' || order.businessModelVersion === 'PLATFORM_COMMUNITY';
 }
 
 export function refundProgressText(status: RefundStatus): string {

@@ -123,7 +123,7 @@ export class PaymentService {
 
   public async refundOrder(orderId:string):Promise<void>{
     const model=await this.store.getOrder(orderId);
-    if(model?.businessModelVersion==='PLATFORM_PROCUREMENT'){await this.refundPlatformOrder(orderId);return;}
+    if(model?.businessModelVersion!=='LEGACY_MARKETPLACE'){await this.refundPlatformOrder(orderId);return;}
     const refunds=await this.store.transaction(async(store)=>{
       const order=await store.getOrderForUpdate(orderId);if(!order)throw new BusinessError('RESOURCE_NOT_FOUND','订单不存在',404);
       if(order.status==='REFUNDED')return[];
@@ -154,7 +154,7 @@ export class PaymentService {
   public async requestFullRefund(orderId:string):Promise<void>{
     await this.store.transaction(async(store)=>{
       const order=await store.getOrderForUpdate(orderId);if(!order)throw new BusinessError('RESOURCE_NOT_FOUND','订单不存在',404);
-      if(order.businessModelVersion==='PLATFORM_PROCUREMENT')throw new BusinessError('PARTIAL_REFUND_NOT_SUPPORTED','模式 B 订单只能由已确认履约异常触发退款，不能使用历史整单退款入口',409);
+      if(order.businessModelVersion!=='LEGACY_MARKETPLACE')throw new BusinessError('PARTIAL_REFUND_NOT_SUPPORTED','模式 B 订单只能由已确认履约异常触发退款，不能使用历史整单退款入口',409);
       if(order.status==='REFUNDED'||order.status==='REFUNDING')return;
       if(!['PAID_WAITING_CLOSE','LOCKED','ALLOCATING','IN_TRANSIT','READY_FOR_PICKUP','PICKED_UP'].includes(order.status))throw new BusinessError('INVALID_STATE_TRANSITION','订单当前不可发起退款',409);
       const stockShouldBeReleased=order.status!=='PICKED_UP';
@@ -193,7 +193,7 @@ export class PaymentService {
       if(await store.saveRefundIfStatus(refund,['CREATED','PROCESSING','FAILED']))orderId=refund.orderId;
     });
     if(partialRefundId)await this.finalizePartialRefund(partialRefundId);
-    if(orderId){const order=await this.store.getOrder(orderId);if(order?.businessModelVersion==='PLATFORM_PROCUREMENT')await this.finalizePlatformRefund(orderId);else await this.finalizeRefund(orderId);}
+    if(orderId){const order=await this.store.getOrder(orderId);if(order?.businessModelVersion!=='LEGACY_MARKETPLACE')await this.finalizePlatformRefund(orderId);else await this.finalizeRefund(orderId);}
   }
 
   public async reconcileRefunds(limit=100):Promise<void>{
@@ -274,7 +274,7 @@ export class PaymentService {
       const created:PlatformPartialRefund[]=[];const byOrder=new Map<string,typeof allocations>();for(const allocation of allocations){const rows=byOrder.get(allocation.orderId)??[];rows.push(allocation);byOrder.set(allocation.orderId,rows);}
       for(const [orderId,rows] of byOrder){
         const order=await store.getOrderForUpdate(orderId);const payment=await store.getPaymentByOrderForUpdate(orderId);
-        if(!order||order.businessModelVersion!=='PLATFORM_PROCUREMENT'||order.paymentRoute!=='PLATFORM_DIRECT'||!payment||payment.status!=='SUCCEEDED')throw new BusinessError('INVALID_STATE_TRANSITION','异常订单没有可执行的平台成功支付',409);
+        if(!order||order.businessModelVersion==='LEGACY_MARKETPLACE'||order.paymentRoute!=='PLATFORM_DIRECT'||!payment||payment.status!=='SUCCEEDED')throw new BusinessError('INVALID_STATE_TRANSITION','异常订单没有可执行的平台成功支付',409);
         const amount=rows.reduce((sum,row)=>{const line=order.items.find((item)=>item.salesOrderItemId===row.salesOrderItemId);return sum+(line?Number(line.unitPriceCents)*(row.exceptionQuantity-row.refundedQuantity):NaN);},0);
         if(!Number.isSafeInteger(amount)||amount<=0)throw new BusinessError('FINANCIAL_INCONSISTENT','异常退款金额无法从销售快照计算',500);
         const existing=(await store.listPlatformPartialRefundsByException(exception.id)).find((value)=>value.orderId===orderId);
@@ -293,7 +293,7 @@ export class PaymentService {
     for(const refund of refunds)await this.finalizePartialRefund(refund.id);
   }
   private async platformRefundRequest(refund:PlatformRefund):Promise<RefundRequest>{const [order,payment]=await Promise.all([this.store.getOrder(refund.orderId),this.store.getPaymentByOrder(refund.orderId)]);if(!order||!payment||order.paymentRoute!=='PLATFORM_DIRECT')throw new BusinessError('VALIDATION_ERROR','平台退款路由不一致',409);return{providerRefundNo:refund.providerRefundNo,subMchid:null,outTradeNo:order.orderNo,amountCents:Number(refund.amountCents),totalCents:Number(payment.amountCents)};}
-  private async platformPartialRefundRequest(refund:PlatformPartialRefund):Promise<RefundRequest>{const [order,payment]=await Promise.all([this.store.getOrder(refund.orderId),this.store.getPaymentByOrder(refund.orderId)]);if(!order||!payment||order.businessModelVersion!=='PLATFORM_PROCUREMENT'||order.paymentRoute!=='PLATFORM_DIRECT')throw new BusinessError('VALIDATION_ERROR','部分退款路由不一致',409);return{providerRefundNo:refund.providerRefundNo,subMchid:null,outTradeNo:order.orderNo,amountCents:Number(refund.amountCents),totalCents:Number(payment.amountCents)};}
+  private async platformPartialRefundRequest(refund:PlatformPartialRefund):Promise<RefundRequest>{const [order,payment]=await Promise.all([this.store.getOrder(refund.orderId),this.store.getPaymentByOrder(refund.orderId)]);if(!order||!payment||order.businessModelVersion==='LEGACY_MARKETPLACE'||order.paymentRoute!=='PLATFORM_DIRECT')throw new BusinessError('VALIDATION_ERROR','部分退款路由不一致',409);return{providerRefundNo:refund.providerRefundNo,subMchid:null,outTradeNo:order.orderNo,amountCents:Number(refund.amountCents),totalCents:Number(payment.amountCents)};}
   private async submitPlatformPartialRefund(refund:PlatformPartialRefund,now=Date.now()):Promise<void>{const token=randomUUID();if(!(await this.store.transaction((store)=>store.claimPlatformPartialRefundSubmission(refund.id,new Date(now+refundSubmissionLeaseMilliseconds).toISOString(),new Date(now).toISOString(),token))))return;const result=await this.provider.refund(await this.platformPartialRefundRequest(refund));await this.store.transaction((store)=>store.savePlatformPartialRefundIfClaimed({...refund,providerRefundId:result.providerRefundId,status:result.status,submissionLeaseUntil:null,submissionClaimToken:null},token));}
   private async reconcilePlatformPartialRefund(refund:PlatformPartialRefund):Promise<void>{const now=Date.now();if(refund.submissionLeaseUntil!==null&&Date.parse(refund.submissionLeaseUntil)>now)return;if(refund.submissionLeaseUntil===null){const result=await this.provider.queryRefund({providerRefundNo:refund.providerRefundNo,subMchid:null});await this.store.savePlatformPartialRefundIfUnclaimed({...refund,providerRefundId:result.providerRefundId,status:result.status,submissionLeaseUntil:null,submissionClaimToken:null},new Date(now).toISOString());return;}const token=randomUUID();if(!(await this.store.transaction((store)=>store.claimPlatformPartialRefundSubmission(refund.id,new Date(now+refundSubmissionLeaseMilliseconds).toISOString(),new Date(now).toISOString(),token))))return;try{const result=await this.provider.queryRefund({providerRefundNo:refund.providerRefundNo,subMchid:null});if(result.status!=='FAILED'){await this.store.transaction((store)=>store.savePlatformPartialRefundIfClaimed({...refund,providerRefundId:result.providerRefundId,status:result.status,submissionLeaseUntil:null,submissionClaimToken:null},token));return;}const response=await this.provider.refund(await this.platformPartialRefundRequest(refund));await this.store.transaction((store)=>store.savePlatformPartialRefundIfClaimed({...refund,providerRefundId:response.providerRefundId,status:response.status,submissionLeaseUntil:null,submissionClaimToken:null},token));}catch{/* retain lease: later recovery remains query-first */}}
   private async submitPlatformRefund(refund:PlatformRefund,now=Date.now()):Promise<void>{

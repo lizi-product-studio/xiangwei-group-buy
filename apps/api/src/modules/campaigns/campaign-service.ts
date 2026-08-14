@@ -67,7 +67,7 @@ export class CampaignService {
       const campaign: Campaign = {
         id: randomUUID(),
         ...input,
-        businessModelVersion:'LEGACY_MARKETPLACE', warehouseId:null, platformItems:[],
+      businessModelVersion:'LEGACY_MARKETPLACE', warehouseId:null, platformItems:[], communityItems:[],
         skuIds: items.map((item) => item.skuId),
         items,
         status: 'DRAFT',
@@ -223,7 +223,7 @@ export class CampaignService {
 
   private async releaseOrderStock(store: CommerceStore, order: { campaignId: string; businessModelVersion:Campaign['businessModelVersion']; items: Array<{ skuId: string; quantity: number }> }): Promise<void> {
     for (const item of order.items) {
-      const released=order.businessModelVersion==='PLATFORM_PROCUREMENT'?await store.releaseCampaignPlatformStock(order.campaignId,item.skuId,item.quantity):await store.releaseCampaignSkuStock(order.campaignId,item.skuId,item.quantity);
+      const released=order.businessModelVersion==='PLATFORM_PROCUREMENT'?await store.releaseCampaignPlatformStock(order.campaignId,item.skuId,item.quantity):order.businessModelVersion==='PLATFORM_COMMUNITY'?await store.releaseCommunityCampaignStock(order.campaignId,item.skuId,item.quantity):await store.releaseCampaignSkuStock(order.campaignId,item.skuId,item.quantity);
       if (!released) {
         throw new BusinessError('INVENTORY_INCONSISTENT', '订单库存释放失败，已回滚本次结团', 500, {
           campaignId: order.campaignId,

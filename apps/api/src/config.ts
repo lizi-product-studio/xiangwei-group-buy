@@ -25,7 +25,9 @@ const configSchema = z.object({
   PAYMENT_PROVIDER: z.enum(['mock', 'wechat-platform']).default('mock'),
   /** Mode B is deliberately opt-in until warehouse stock and direct-payment checks are complete. */
   PLATFORM_PROCUREMENT_ENABLED: z.stringbool().default(false),
-  DEFAULT_BUSINESS_MODEL_VERSION: z.enum(['LEGACY_MARKETPLACE', 'PLATFORM_PROCUREMENT']).default('LEGACY_MARKETPLACE'),
+  /** Lightweight community fulfilment is separately switchable from the legacy warehouse flow. */
+  COMMUNITY_FULFILLMENT_ENABLED: z.stringbool().default(false),
+  DEFAULT_BUSINESS_MODEL_VERSION: z.enum(['LEGACY_MARKETPLACE', 'PLATFORM_PROCUREMENT', 'PLATFORM_COMMUNITY']).default('LEGACY_MARKETPLACE'),
   WECHAT_PAY_SP_MCHID: z.string().regex(/^\d{8,10}$/).optional(),
   /** Direct merchant number used only by the platform-procurement payment route. */
   WECHAT_PAY_PLATFORM_MCHID: z.string().regex(/^\d{8,10}$/).optional(),
@@ -72,6 +74,9 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
   if (config.DEFAULT_BUSINESS_MODEL_VERSION === 'PLATFORM_PROCUREMENT' && !config.PLATFORM_PROCUREMENT_ENABLED) {
     throw new BusinessError('VALIDATION_ERROR', '模式 B 默认开关要求 PLATFORM_PROCUREMENT_ENABLED=true', 500);
   }
+  if (config.DEFAULT_BUSINESS_MODEL_VERSION === 'PLATFORM_COMMUNITY' && !config.COMMUNITY_FULFILLMENT_ENABLED) {
+    throw new BusinessError('VALIDATION_ERROR', '社区团购模式默认开关要求 COMMUNITY_FULFILLMENT_ENABLED=true', 500);
+  }
   if (config.DATA_STORE === 'mysql' && !config.DATABASE_URL) {
     throw new BusinessError('VALIDATION_ERROR', 'MySQL 数据源必须配置 DATABASE_URL', 500);
   }
@@ -84,7 +89,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     if (config.NODE_ENV === 'production') assertProductionHttpsUrl(config.WECHAT_PAY_NOTIFY_URL!, 'WECHAT_PAY_NOTIFY_URL');
     if (config.NODE_ENV === 'production') assertProductionHttpsUrl(config.WECHAT_PAY_REFUND_NOTIFY_URL!, 'WECHAT_PAY_REFUND_NOTIFY_URL');
   }
-  if (config.PLATFORM_PROCUREMENT_ENABLED && config.PAYMENT_PROVIDER === 'wechat-platform' && (!config.WECHAT_PAY_PLATFORM_MCHID || !config.WECHAT_PAY_PLATFORM_CERT_SERIAL || !config.WECHAT_PAY_PLATFORM_PRIVATE_KEY_PATH)) {
+  if ((config.PLATFORM_PROCUREMENT_ENABLED || config.COMMUNITY_FULFILLMENT_ENABLED) && config.PAYMENT_PROVIDER === 'wechat-platform' && (!config.WECHAT_PAY_PLATFORM_MCHID || !config.WECHAT_PAY_PLATFORM_CERT_SERIAL || !config.WECHAT_PAY_PLATFORM_PRIVATE_KEY_PATH)) {
     throw new BusinessError('VALIDATION_ERROR', '平台采购模式的微信直连支付必须配置平台主体商户号、证书序列号和私钥路径', 500);
   }
   if (config.NODE_ENV === 'production' && config.DATA_STORE !== 'mysql') {

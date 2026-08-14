@@ -1261,3 +1261,79 @@ Close every code/configuration issue identified by the independent project evalu
 - Add admin API/UI regressions for assignment list, grant/revoke actions and actionable verifier-state feedback.
 - Exercise migration locking with a database-backed check when MySQL is available; unit-level code must release the named lock in `finally`.
 - Re-run typecheck, focused tests, the workspace quality gate, and coverage after integration.
+# 2026-08-14 — Mode B 社区团购轻量履约主线（已确认产品调整）
+
+## 产品目标
+
+把一期日常运营收敛为“卖什么 → 什么时候卖 → 发到哪里 → 到了多少 → 谁取走了”。平台仍是销售、支付、退款和售后主体；供应商采购价、点位合作费用与结算保留线下处理。既有 Mode B 的采购、中心仓、批次、分拣、出库、供应商应付链仅作为历史兼容能力保留，不能再是新日常团期的前置条件或主导航。
+
+## 已确认范围与假设
+
+- 新增业务版本 `PLATFORM_COMMUNITY`，支付路由仍为 `PLATFORM_DIRECT`。旧 `LEGACY_MARKETPLACE` 与已存在的 `PLATFORM_PROCUREMENT` 记录、接口、支付/退款/分账/审计均保持可读可处理，绝不转换或删除。
+- 一团仍只绑定一个开售前确认的固定自提点；不引入一团多点、冷链、供应商后台、点位钱包、自动结算或第三方物流接口。
+- 新版本团期直接使用平台商品与团期售价/可售量快照，不要求仓库、供应商报价、采购单、批次或库存桶。商品可记录仅供内部参考的采购成本/供应商备注，但这些字段不参与消费者订单、退款或点位人员可见 DTO。
+- 配送为人工记录：货拉拉/承运平台、运单号、司机、车牌、发车时间、预计到达时间；只有绑定点位的有效负责人现场确认数量后才产生可领取权益。
+
+## 影响面与最小替换策略
+
+| 面向 | 现有强依赖 | 替换方式 | 历史兼容 |
+| --- | --- | --- | --- |
+| 商品/团期 | `supplier_sku_offers`、仓库和 `campaign_platform_skus` 才能建团 | 新增独立的社区团期商品快照与可售量；直接平台商品建档、发布 | 旧 Mode B 继续读原快照与采购链 |
+| 下单/支付 | Mode B 只识别 `PLATFORM_PROCUREMENT` | 新版本以 `PLATFORM_COMMUNITY` 预占社区团期可售量、写平台销售明细、走单平台支付 | 旧合单支付/平台采购直连支付按原路由处理 |
+| 履约 | 收货→批次→分拣→出库→交接 | 新增社区配送批次、点位逐 SKU 实到确认；正常数量分配至订单后开放取货 | 旧出库/交接和库存流水不改写 |
+| 领取 | 订单级一次性核销 | 销售明细增加已领取数量，核销记录保存逐 SKU 全提/部分提取事实 | 旧订单继续使用原订单级记录 |
+| 后台导航 | “采购与中心仓”承载主流程 | 日常主入口替换为“配送与领取”、商品、团期、订单、异常；采购/仓储/历史结算放入只读兼容区 | 兼容接口不删除 |
+
+## MVP 功能列表、页面与模块
+
+1. 工作台：按今天待开团、待发车、待点位确认、待领取、待处理异常生成可操作清单。
+2. 商品管理：运营创建/编辑/停用平台商品（名称、分类、图片、规格、默认零售价、可售数量、可选采购成本和供应商备注）。
+3. 团期管理：用平台商品创建社区团期，配置本团售价/可售量、开售/截单/提货时间、服务区域和固定自提点；发布后才能公开购买。
+4. 配送与领取：运营登记人工运单并确认发车；仅点位负责人可在自己绑定点位确认逐 SKU 实到/短少/破损/错货，并使正常数量进入待领取。
+5. 点位核销：六码查询展示订单商品、待领数量与异常数量；支持全提或逐商品部分提货，写不可抵赖操作和审计。
+6. 异常与售后：复用统一异常记录，来源覆盖发车前、运输、点位交接、提货现场、售后；点位只能登记事实，运营决定补送/换货/部分退款/全额退款/驳回，财务执行已批准的退款。
+
+## 最小增量数据迁移
+
+迁移 `0032_community_fulfillment.sql` 只新增表、字段、索引和约束：
+
+- 扩展 `campaigns` / `orders` / `payments` 的版本或路由枚举，新增 `PLATFORM_COMMUNITY`，不修改旧行。
+- `community_campaign_items`：新团期平台商品快照、团期售价、可售量、预占量；与旧 `campaign_platform_skus` 完全隔离。
+- `community_delivery_items`：按配送批次保存应发、实到、短少、破损和证据；配送计划保留人工承运信息与预计到达时间。
+- `sales_order_items.picked_up_quantity` 与 `pickup_receipt_items`：保存新版本逐 SKU 已领取事实，旧订单默认为零且不回填。
+- `platform_skus` 增加可选 `reference_purchase_cost_cents`、`supplier_note`，仅运营/采购/财务可读；不替代供应商应付或采购价。
+
+回滚只关闭 `COMMUNITY_FULFILLMENT_ENABLED`，停止创建/发布新社区团期；新增表和旧表均保留，已经付款的新订单仍按其不可变版本继续完成或退款。
+
+## API 与权限设计
+
+- `POST/GET /api/v1/admin/community/products`：OPERATOR/SUPER_ADMIN 创建和维护；成本/备注仅 PROCUREMENT/FINANCE/SUPER_ADMIN 返回。
+- `POST /api/v1/admin/community/campaigns`、团期发布/截单：OPERATOR/SUPER_ADMIN。
+- `POST /api/v1/admin/community/delivery-plans/:id/dispatch`：FULFILLMENT/OPERATOR/SUPER_ADMIN，必须已绑定固定点且已录人工运单信息。
+- `POST /api/v1/community/delivery-plans/:id/arrival`：PICKUP_VERIFIER（或超级管理员）且绑定该点位；必须运输中；逐 SKU 数量不得超过应发，重复请求返回已有事实。
+- `GET /api/v1/community/pickup/orders/lookup`、`POST /api/v1/community/pickup/verify`：只允许绑定点位的有效负责人；只返回本点订单及必要商品数量，不返回采购成本、供应商、团期配置、收入、退款执行或历史结算。
+- 异常决策和退款复用已有服务端权限、审计、部分退款围栏；通用整单退款入口继续拒绝所有 Mode B 订单。
+
+## 开发顺序
+
+1. 先落 schema、领域类型、存储双实现和新版本路由；为社区团期下单/取消/支付增加独立销售明细与库存预占。
+2. 实现人工配送、逐 SKU 点位确认、正常数量分配、通知和部分领取的领域服务，保留原采购仓储服务不改语义。
+3. 调整 API 契约、服务端鉴权与审计；补重复发车/到货、点位隔离、越权、数量边界和部分退款回归。
+4. 将后台主导航改为商品、团期、订单、配送与领取、异常；把仓储/采购/历史结算移至兼容入口。同步小程序订单/领取文案和明细状态。
+5. 实跑后台与小程序关键路径，跑迁移、单元/API/真实 MySQL-Redis 集成、浏览器 E2E、lint/typecheck/build/coverage；冻结后交独立项目评测 Agent 复测。
+
+## 验收标准
+
+- 新商品和新社区团期不要求 `supplier_sku_offers`、采购单、中心仓或批次库存；发布且固定点确认后才在小程序可购买。
+- 一笔新订单只写平台销售订单/平台支付/销售明细，绝不创建 `merchant_orders`、`settlements`、采购单或供应商应付。
+- 发车前必须登记人工物流信息；非绑定点位人员无法看到或确认其他点位配送；重复确认不重复开放领取或重复审计。
+- 点位短少/破损仅阻断对应 SKU 数量，其他商品/订单仍可领取；部分提货和部分退款不把订单错误标为全额退款。
+- 提货码核销页展示逐 SKU 待领、已领、异常数量，任何全提/部分提货都产生审计事实。
+- Legacy 与旧平台采购订单继续可查询、退款和完成历史任务，且不会进入社区新链路。
+
+## 测试计划与风险
+
+- 单元/API：版本隔离、商品/团期创建、付款预占、运单/发车顺序、点位授权与隔离、重复到货、数量不一致、全提/部分提、异常和部分退款金额上限。
+- 真库：0032 迁移可重复执行；并发点位确认、并发核销、支付/退款回调与旧 0026–0031 数据并存。
+- 浏览器/小程序：运营创建商品→团期→发车→点位确认→有码查询→部分/全部领取；空态、403、重复提交、窄屏；证据/trace 由 CI 上传。
+- 高风险：支付、退款、数量、权限和历史财务数据。所有新路径须按 `business_model_version` 显式分支，不能以旧 merchant/warehouse 字段推断。

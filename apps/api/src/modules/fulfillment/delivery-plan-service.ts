@@ -44,6 +44,8 @@ export class DeliveryPlanService {
         plan.driverName = null;
         plan.driverPhone = null;
         plan.vehiclePlate = null;
+        plan.logisticsPlatform = null;
+        plan.estimatedArrivalAt = null;
         plan.bookedAt = null;
       }
       plan.updatedAt = new Date().toISOString();
@@ -63,9 +65,11 @@ export class DeliveryPlanService {
         throw new BusinessError('DELIVERY_SITE_NOT_CONFIRMED', '请先确认集中领取地点，再登记约车信息', 409);
       }
       plan.vehicleOrderNo = input.vehicleOrderNo;
+      plan.logisticsPlatform = input.logisticsPlatform;
       plan.driverName = input.driverName;
       plan.driverPhone = input.driverPhone;
       plan.vehiclePlate = input.vehiclePlate;
+      plan.estimatedArrivalAt = input.estimatedArrivalAt;
       plan.status = 'VEHICLE_BOOKED';
       plan.bookedAt = new Date().toISOString();
       plan.updatedAt = plan.bookedAt;

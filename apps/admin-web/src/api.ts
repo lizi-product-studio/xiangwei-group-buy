@@ -1,8 +1,8 @@
 export type CampaignStatus='DRAFT'|'SCHEDULED'|'OPEN'|'CLOSING'|'LOCKED'|'FULFILLING'|'COMPLETED'|'POSTPONED'|'CANCELLED';
-export interface Campaign{id:string;title:string;serviceAreaId:string;cutoffAt:string;dispatchAt:string;minTotalQuantity:number;failureAction:'CANCEL_AND_REFUND'|'POSTPONE';businessModelVersion:'LEGACY_MARKETPLACE'|'PLATFORM_PROCUREMENT';skuIds:string[];items?:Array<{skuId:string;title:string;skuName:string}>;status:CampaignStatus;version:number}
+export interface Campaign{id:string;title:string;serviceAreaId:string;cutoffAt:string;dispatchAt:string;minTotalQuantity:number;failureAction:'CANCEL_AND_REFUND'|'POSTPONE';businessModelVersion:'LEGACY_MARKETPLACE'|'PLATFORM_PROCUREMENT'|'PLATFORM_COMMUNITY';skuIds:string[];items?:Array<{skuId:string;title:string;skuName:string;unitPriceCents?:number;stock?:number;soldQuantity?:number}>;status:CampaignStatus;version:number}
 export interface PlatformSupplier{id:string;name:string;status:'DRAFT'|'ACTIVE'|'SUSPENDED';contactName:string|null;contactPhone:string|null}
 export interface PlatformWarehouse{id:string;name:string;address:string;status:'ACTIVE'|'SUSPENDED'}
-export interface PlatformSku{id:string;productId:string;name:string;retailPriceCents:number;status:'ACTIVE'|'INACTIVE';product:{title:string;category:string;origin:string}}
+export interface PlatformSku{id:string;productId:string;name:string;retailPriceCents:number;defaultSellableQuantity?:number;referencePurchaseCostCents?:number|null;supplierNote?:string|null;status:'ACTIVE'|'INACTIVE';product:{title:string;category:string;origin:string;imageUrl:string|null}}
 export interface SupplierOffer{id:string;supplierId:string;platformSkuId:string;purchasePriceCents:number|null;minimumPurchaseQuantity:number;leadTimeDays:number;status:'DRAFT'|'ACTIVE'|'SUSPENDED'}
 export interface PurchaseOrder{id:string;purchaseNo:string;campaignId:string;supplierId?:string;warehouseId:string;status:string;items:Array<{id:string;platformSkuId:string;plannedQuantity:number;acceptedQuantity?:number;remainingQuantity?:number;purchaseUnitCents?:number}>}
 export interface SortingTask{id:string;campaignId:string;warehouseId:string;status:'PENDING'|'COMPLETED'|'CANCELLED';createdAt:string;completedAt:string|null;items:Array<{id:string;platformSkuId:string;quantity:number}>}
@@ -18,9 +18,10 @@ export interface PickupPoint{id:string;serviceAreaId:string;name:string;address:
 export interface NetworkPreset{id:'BAODING_COUNTIES';name:string;description:string;totalCities:number;activeCities:number}
 export interface NetworkActivationResult{presetId:string;created:number;skipped:number;total:number;areas:ServiceArea[]}
 export interface BatchPickupResult{created:number;skipped:number;total:number;points:PickupPoint[]}
-export interface DeliveryPlan{id:string;campaignId:string;serviceAreaId:string;pickupPointId:string|null;status:'PENDING_SITE'|'SITE_CONFIRMED'|'VEHICLE_BOOKED'|'IN_TRANSIT'|'ARRIVED';siteName:string|null;address:string|null;arrivalStartAt:string|null;arrivalEndAt:string|null;contactName:string|null;contactPhone:string|null;vehicleOrderNo:string|null;driverName:string|null;driverPhone:string|null;vehiclePlate:string|null;remark:string|null;confirmedAt:string|null;bookedAt:string|null;dispatchedAt:string|null;arrivedAt:string|null;createdAt:string;updatedAt:string}
+export interface DeliveryPlan{id:string;campaignId:string;serviceAreaId:string;pickupPointId:string|null;status:'PENDING_SITE'|'SITE_CONFIRMED'|'VEHICLE_BOOKED'|'IN_TRANSIT'|'ARRIVED';siteName:string|null;address:string|null;arrivalStartAt:string|null;arrivalEndAt:string|null;contactName:string|null;contactPhone:string|null;vehicleOrderNo:string|null;driverName:string|null;driverPhone:string|null;vehiclePlate:string|null;logisticsPlatform?:string|null;estimatedArrivalAt?:string|null;remark:string|null;confirmedAt:string|null;bookedAt:string|null;dispatchedAt:string|null;arrivedAt:string|null;createdAt:string;updatedAt:string}
+export interface CommunityDelivery{id:string;campaignId:string;campaignTitle:string;pickupPointId:string|null;status:DeliveryPlan['status'];siteName:string|null;address:string|null;vehicleOrderNo:string|null;logisticsPlatform:string|null;driverName:string|null;vehiclePlate:string|null;estimatedArrivalAt:string|null;dispatchedAt:string|null;arrivedAt:string|null;dispatchBatchId:string|null;arrivalConfirmed:boolean;expectedItems:Array<{platformSkuId:string;title:string;skuName:string;expectedQuantity:number}>}
 export interface Order{id:string;orderNo:string;campaignId:string;serviceAreaId:string;pickupPointId:string;deliveryPlanId:string;status:string;totalCents:number;commissionCents:number;createdAt:string;paidAt:string|null;items:Array<{name:string;quantity:number}>}
-export interface PickupOrderLookup{id:string;orderNo:string;deliveryPlanId:string;status:string}
+export interface PickupOrderLookup{id:string;orderNo:string;deliveryPlanId:string;status:string;items:Array<{skuId:string;name:string;quantity:number;readyQuantity:number;alreadyPickedQuantity:number;remainingPickupQuantity:number;exceptionQuantity:number}>}
 /** Append-only point-access event. The UI derives current access from the latest event per user and point. */
 export interface PickupVerifierAssignment{id:string;userId:string;pickupPointId:string;action:'GRANTED'|'REVOKED';createdAt:string}
 export interface PickupVerifierAssignmentChange{userId:string;pickupPointId:string;active:boolean;changed:boolean}
@@ -69,6 +70,11 @@ export const api={
   listPlatformSuppliers:()=>request<PlatformSupplier[]>('/api/v1/admin/platform/suppliers'),
   listPlatformWarehouses:()=>request<PlatformWarehouse[]>('/api/v1/admin/platform/warehouses'),
   listPlatformSkus:()=>request<PlatformSku[]>('/api/v1/admin/platform/skus'),
+  savePlatformSku:(payload:{id?:string;productId?:string;title:string;category:string;origin:string;imageUrl:string|null;skuName:string;retailPriceCents:number;defaultSellableQuantity:number;referencePurchaseCostCents:number|null;supplierNote:string|null;status:'ACTIVE'|'INACTIVE'})=>request<PlatformSku>('/api/v1/admin/platform/skus',{method:'POST',body:JSON.stringify(payload)}),
+  createCommunityCampaign:(payload:{title:string;serviceAreaId:string;pickupPointId:string;cutoffAt:string;dispatchAt:string;minTotalQuantity:number;failureAction:'CANCEL_AND_REFUND'|'POSTPONE';items:Array<{platformSkuId:string;retailPriceCents:number;sellableQuantity:number}>})=>request<Campaign>('/api/v1/admin/community/campaigns',{method:'POST',body:JSON.stringify(payload)}),
+  listCommunityCampaigns:()=>request<Campaign[]>('/api/v1/admin/community/campaigns'),
+  listCommunityDeliveries:()=>request<CommunityDelivery[]>('/api/v1/admin/community/deliveries'),
+  confirmCommunityArrival:(batchId:string,payload:{receivedBy:string;confirmationNote:string|null;items:Array<{platformSkuId:string;receivedQuantity:number;rejectedQuantity:number;shortQuantity:number;damagedQuantity:number;reason:string|null;evidenceNote:string|null;evidenceUrl:string|null}>})=>request<unknown>(`/api/v1/admin/community/dispatch-batches/${batchId}/arrival`,{method:'POST',body:JSON.stringify(payload)}),
   listSupplierOffers:()=>request<SupplierOffer[]>('/api/v1/admin/platform/offers'),
   listPurchaseOrders:()=>request<PurchaseOrder[]>('/api/v1/admin/platform/purchase-orders'),
   receivePurchaseOrder:(id:string,payload:{items:Array<{purchaseOrderItemId:string;acceptedQuantity:number;rejectedQuantity:number;batchNo:string|null;productionDate:string|null;expiresAt:string|null;inspectionNote:string|null;exceptionReason?:'SHORT_RECEIPT'|'QUALITY_REJECTED'|'PACKAGE_DAMAGED'|null;evidenceUrl?:string|null}>})=>request<unknown>(`/api/v1/admin/platform/purchase-orders/${id}/receive`,{method:'POST',body:JSON.stringify(payload)}),
@@ -94,7 +100,7 @@ export const api={
   listDeliveryPlans:()=>request<DeliveryPlan[]>('/api/v1/admin/delivery-plans'),
   listPickupDeliveryPlans:()=>request<DeliveryPlan[]>('/api/v1/pickup/delivery-plans'),
   saveDeliveryPlan:(payload:{campaignId:string;pickupPointId:string|null;siteName:string|null;address:string|null;arrivalStartAt:string|null;arrivalEndAt:string|null;contactName:string|null;contactPhone:string|null;remark:string|null})=>request<DeliveryPlan>('/api/v1/admin/delivery-plans',{method:'POST',body:JSON.stringify(payload)}),
-  bookVehicle:(id:string,payload:{vehicleOrderNo:string;driverName:string|null;driverPhone:string|null;vehiclePlate:string|null})=>request<DeliveryPlan>(`/api/v1/admin/delivery-plans/${id}/book-vehicle`,{method:'POST',body:JSON.stringify(payload)}),
+  bookVehicle:(id:string,payload:{logisticsPlatform?:string;vehicleOrderNo:string;driverName:string|null;driverPhone:string|null;vehiclePlate:string|null;estimatedArrivalAt?:string|null})=>request<DeliveryPlan>(`/api/v1/admin/delivery-plans/${id}/book-vehicle`,{method:'POST',body:JSON.stringify(payload)}),
   listMerchants:()=>request<Merchant[]>('/api/v1/admin/merchants'),
   createMerchant:(payload:{name:string;defaultCommissionBps:number;wechatSubMchid:string|null})=>request<Merchant>('/api/v1/admin/merchants',{method:'POST',body:JSON.stringify(payload)}),
   updateMerchant:(id:string,payload:{name:string;defaultCommissionBps:number;wechatSubMchid:string|null})=>request<Merchant>(`/api/v1/admin/merchants/${id}`,{method:'PATCH',body:JSON.stringify(payload)}),
@@ -127,7 +133,7 @@ export const api={
   createBatch:(campaignId:string)=>request<DispatchBatch>('/api/v1/admin/dispatch-batches',{method:'POST',body:JSON.stringify({campaignId})}),
   dispatchBatch:(id:string)=>request<DispatchBatch>(`/api/v1/admin/dispatch-batches/${id}/dispatch`,{method:'POST'}),
   receiveBatch:(id:string,deliveryPlanId:string)=>request<{batch:DispatchBatch;readyOrders:number}>(`/api/v1/pickup/batches/${id}/receive`,{method:'POST',body:JSON.stringify({deliveryPlanId})}),
-  verifyPickup:(payload:{orderId:string;deliveryPlanId:string;code:string})=>request<{orderId:string;status:string}>('/api/v1/pickup/verify',{method:'POST',body:JSON.stringify(payload)}),
+  verifyPickup:(payload:{orderId:string;deliveryPlanId:string;code:string;items?:Array<{platformSkuId:string;quantity:number}>})=>request<{orderId:string;status:string}>('/api/v1/pickup/verify',{method:'POST',body:JSON.stringify(payload)}),
   listSettlements:()=>request<Settlement[]>('/api/v1/admin/finance/settlements'),
   listRefunds:()=>request<Refund[]>('/api/v1/admin/finance/refunds'),
   listLedger:()=>request<LedgerTransaction[]>('/api/v1/admin/finance/ledger'),

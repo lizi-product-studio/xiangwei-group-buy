@@ -7,7 +7,6 @@ import {
   EnvironmentOutlined,
   LogoutOutlined,
   PlusOutlined,
-  ShopOutlined,
   WalletOutlined,
 } from "@ant-design/icons";
 import {
@@ -36,12 +35,14 @@ import {
   auth,
   requiresLogin,
   type Campaign,
+  type CommunityDelivery,
   type CampaignStatus,
   type DeliveryPlan,
   type DispatchBatch,
   type Merchant,
   type Order,
   type PickupVerifierAssignment,
+  type PickupOrderLookup,
   type PlatformSupplier,
   type PlatformSku,
   type PurchaseOrder,
@@ -489,19 +490,23 @@ function VehicleModal({
 }) {
   const [busy, setBusy] = useState(false);
   const save = async (value: {
+    logisticsPlatform?: string;
     vehicleOrderNo: string;
     driverName?: string;
     driverPhone?: string;
     vehiclePlate?: string;
+    estimatedArrivalAt?: Dayjs;
   }) => {
     if (!plan) return;
     setBusy(true);
     try {
       await api.bookVehicle(plan.id, {
+        logisticsPlatform: value.logisticsPlatform || '货拉拉',
         vehicleOrderNo: value.vehicleOrderNo,
         driverName: value.driverName || null,
         driverPhone: value.driverPhone || null,
         vehiclePlate: value.vehiclePlate || null,
+        estimatedArrivalAt: value.estimatedArrivalAt?.toISOString() ?? null,
       });
       await saved();
       close();
@@ -518,8 +523,9 @@ function VehicleModal({
       destroyOnHidden
     >
       <Form layout="vertical" onFinish={save}>
+        <Form.Item label="配送平台" name="logisticsPlatform" initialValue="货拉拉" rules={[{ required: true, min: 2 }]}><Input /></Form.Item>
         <Form.Item
-          label="货拉拉订单号 / 约车凭证"
+          label="运单号 / 约车凭证"
           name="vehicleOrderNo"
           rules={[{ required: true, min: 2 }]}
         >
@@ -536,11 +542,12 @@ function VehicleModal({
         <Form.Item label="车牌号" name="vehiclePlate">
           <Input />
         </Form.Item>
+        <Form.Item label="预计到达时间" name="estimatedArrivalAt"><DatePicker showTime style={{width:'100%'}} /></Form.Item>
         <div className="modal-note">
           司机信息只保留在履约侧，不会展示给消费者。
         </div>
         <Button type="primary" htmlType="submit" block loading={busy}>
-          登记已预约车辆
+          保存运单并确认预约
         </Button>
       </Form>
     </Modal>
@@ -1133,19 +1140,35 @@ function VerifyPickupModal({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [order, setOrder] = useState<PickupOrderLookup | null>(null);
+  const [form] = Form.useForm<{orderNo:string;code:string;items:Array<{platformSkuId:string;quantity:number}>}>();
   useEffect(() => {
     setError("");
-  }, [open, plan?.id]);
-  const save = async (value: { orderNo: string; code: string }) => {
+    setOrder(null);
+    form.resetFields();
+  }, [open, plan?.id, form]);
+  const lookup = async () => {
     if (!plan) return;
+    setBusy(true);setError("");
+    try {
+      const value=await form.validateFields(['orderNo']);
+      const found=await api.lookupPickupOrder(plan.id,value.orderNo.trim());
+      setOrder(found);
+      form.setFieldsValue({items:found.items.filter((item)=>item.remainingPickupQuantity>0).map((item)=>({platformSkuId:item.skuId,quantity:item.remainingPickupQuantity}))});
+    } catch (reason) { setError(reason instanceof Error?reason.message:'订单查询失败'); } finally { setBusy(false); }
+  };
+  const save = async (value: { orderNo: string; code: string; items?:Array<{platformSkuId:string;quantity:number}> }) => {
+    if (!plan) return;
+    if (!order) { setError('请先查询并核对订单商品'); return; }
     setBusy(true);
     setError("");
     try {
-      const order = await api.lookupPickupOrder(plan.id, value.orderNo.trim());
+      const selectedItems=value.items?.filter((item)=>item.quantity>0);
       await api.verifyPickup({
         orderId: order.id,
         deliveryPlanId: plan.id,
         code: value.code,
+        ...(selectedItems?{items:selectedItems}:{}),
       });
       await saved();
       close();
@@ -1169,14 +1192,14 @@ function VerifyPickupModal({
       footer={null}
       destroyOnHidden
     >
-      <p className="modal-note">
-        仅核验当前到货点订单。扫码枪可直接输入订单号，再输入用户出示的六码取货码。
-      </p>
+      <p className="modal-note">仅核验当前到货点订单。先查询商品明细，再按实际领取数量确认全提或部分提货。</p>
       {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 16 }} />}
-      <Form layout="vertical" onFinish={save}>
+      <Form form={form} layout="vertical" onFinish={save}>
         <Form.Item label="订单号" name="orderNo" rules={[{ required: true }]}>
           <Input />
         </Form.Item>
+        <Button onClick={()=>void lookup()} loading={busy} block style={{marginBottom:16}}>查询订单商品</Button>
+        {order&&<section className="panel" style={{padding:12,marginBottom:16}}><b>{order.orderNo} · <StatusTag value={order.status}/></b>{order.items.map((item,index)=><div key={item.skuId} className="pickup-line"><span>{item.name}</span><span>待领 {item.remainingPickupQuantity} / 已领 {item.alreadyPickedQuantity} / 异常 {item.exceptionQuantity}</span>{item.remainingPickupQuantity>0&&<><Form.Item hidden name={['items',index,'platformSkuId']}><Input/></Form.Item><Form.Item label="本次领取数量" name={['items',index,'quantity']} rules={[{required:true}]}><InputNumber min={0} max={item.remainingPickupQuantity} precision={0} style={{width:'100%'}}/></Form.Item></>}</div>)}</section>}
         <Form.Item
           label="六码取货码"
           name="code"
@@ -1184,8 +1207,8 @@ function VerifyPickupModal({
         >
           <Input inputMode="numeric" maxLength={6} />
         </Form.Item>
-        <Button type="primary" htmlType="submit" block loading={busy}>
-          核验并完成领取
+        <Button type="primary" htmlType="submit" block loading={busy} disabled={!order}>
+          核验并确认本次领取
         </Button>
       </Form>
     </Modal>
@@ -1343,6 +1366,27 @@ function PickupHandoverModal({
   </Modal>;
 }
 
+function CommunityProductModal({open,close,onSaved,sku}:{open:boolean;close:()=>void;onSaved:()=>void;sku:PlatformSku|null}){
+  const [form]=Form.useForm<{title:string;category:string;origin:string;imageUrl:string|null;skuName:string;retailPriceCents:number;defaultSellableQuantity:number;referencePurchaseCostCents:number|null;supplierNote:string|null}>();
+  const [saving,setSaving]=useState(false);
+  const save=async(value:{title:string;category:string;origin:string;imageUrl:string|null;skuName:string;retailPriceCents:number;defaultSellableQuantity:number;referencePurchaseCostCents:number|null;supplierNote:string|null})=>{setSaving(true);try{const payload={...value,status:sku?.status??'ACTIVE'} as const;await api.savePlatformSku(sku?{...payload,id:sku.id,productId:sku.productId}:payload);message.success('平台商品已保存，可加入新团期');form.resetFields();onSaved();close();}catch(error){message.error(error instanceof Error?error.message:'保存失败');}finally{setSaving(false);}};
+  const initialValues=sku?{title:sku.product.title,category:sku.product.category,origin:sku.product.origin,imageUrl:sku.product.imageUrl,skuName:sku.name,retailPriceCents:sku.retailPriceCents,defaultSellableQuantity:sku.defaultSellableQuantity??0,referencePurchaseCostCents:sku.referencePurchaseCostCents??null,supplierNote:sku.supplierNote??null}:{category:'地方特产',origin:'保定',imageUrl:null,defaultSellableQuantity:0,referencePurchaseCostCents:null,supplierNote:null};
+  return <Modal open={open} onCancel={close} footer={null} destroyOnHidden title={sku?'编辑平台商品':'新增平台商品'}><Alert type="info" showIcon message="商品是长期资料" description="采购成本和供应商备注仅作内部参考，不会进入消费者订单、退款或点位人员视图。" style={{marginBottom:16}}/><Form key={sku?.id??'new'} form={form} layout="vertical" initialValues={initialValues} onFinish={(value)=>void save(value)}><div className="form-grid"><Form.Item label="商品名称" name="title" rules={[{required:true,min:2}]}><Input /></Form.Item><Form.Item label="规格" name="skuName" rules={[{required:true,min:1}]}><Input /></Form.Item></div><div className="form-grid"><Form.Item label="分类" name="category" rules={[{required:true}]}><Input /></Form.Item><Form.Item label="产地" name="origin" rules={[{required:true}]}><Input /></Form.Item></div><div className="form-grid"><Form.Item label="默认零售价（分）" name="retailPriceCents" rules={[{required:true}]}><InputNumber min={1} precision={0} style={{width:'100%'}} /></Form.Item><Form.Item label="默认可售数量" name="defaultSellableQuantity" rules={[{required:true}]}><InputNumber min={0} precision={0} style={{width:'100%'}} /></Form.Item></div><Form.Item label="图片 URL（可选）" name="imageUrl"><Input /></Form.Item><Form.Item label="采购成本（分，可选）" name="referencePurchaseCostCents"><InputNumber min={1} precision={0} style={{width:'100%'}} /></Form.Item><Form.Item label="供应商备注（可选）" name="supplierNote"><Input.TextArea rows={2} maxLength={500} /></Form.Item><Button htmlType="submit" type="primary" loading={saving}>保存平台商品</Button></Form></Modal>;
+}
+
+function CommunityCampaignModal({open,close,skus,areas,points,onSaved}:{open:boolean;close:()=>void;skus:PlatformSku[];areas:ServiceArea[];points:PickupPoint[];onSaved:()=>void}){
+  const [form]=Form.useForm<{title:string;serviceAreaId:string;pickupPointId:string;cutoffAt:Dayjs;dispatchAt:Dayjs;minTotalQuantity:number;items:Array<{platformSkuId:string;retailPriceCents:number;sellableQuantity:number}>}>();const [saving,setSaving]=useState(false);const areaId=Form.useWatch('serviceAreaId',form);
+  const save=async(value:{title:string;serviceAreaId:string;pickupPointId:string;cutoffAt:Dayjs;dispatchAt:Dayjs;minTotalQuantity:number;items:Array<{platformSkuId:string;retailPriceCents:number;sellableQuantity:number}>})=>{setSaving(true);try{await api.createCommunityCampaign({title:value.title,serviceAreaId:value.serviceAreaId,pickupPointId:value.pickupPointId,cutoffAt:value.cutoffAt.toISOString(),dispatchAt:value.dispatchAt.toISOString(),minTotalQuantity:value.minTotalQuantity,failureAction:'CANCEL_AND_REFUND',items:value.items});message.success('社区团期已创建，请确认后开售');form.resetFields();onSaved();close();}catch(error){message.error(error instanceof Error?error.message:'创建失败');}finally{setSaving(false);}};
+  return <Modal open={open} onCancel={close} footer={null} width={760} title="创建社区团期"><Alert type="info" showIcon message="一团一个固定自提点" description="创建后商品、团期售价和可售量会成为快照；不要求采购单、中心仓或批次库存。" style={{marginBottom:16}}/><Form form={form} layout="vertical" initialValues={{minTotalQuantity:1,items:[]}} onFinish={(value)=>void save(value)}><Form.Item label="团期名称" name="title" rules={[{required:true,min:2}]}><Input /></Form.Item><div className="form-grid"><Form.Item label="收货区域" name="serviceAreaId" rules={[{required:true}]}><Select options={areas.filter((area)=>area.status==='ENABLED'&&area.orderEnabled).map((area)=>({value:area.id,label:area.name}))} /></Form.Item><Form.Item label="固定自提点" name="pickupPointId" rules={[{required:true}]}><Select options={points.filter((point)=>point.status==='ACTIVE'&&(!areaId||point.serviceAreaId===areaId)).map((point)=>({value:point.id,label:point.name}))} /></Form.Item></div><div className="form-grid"><Form.Item label="截单时间" name="cutoffAt" rules={[{required:true}]}><DatePicker showTime style={{width:'100%'}} /></Form.Item><Form.Item label="预计提货/发车时间" name="dispatchAt" rules={[{required:true}]}><DatePicker showTime style={{width:'100%'}} /></Form.Item></div><Form.Item label="最小成团件数" name="minTotalQuantity" rules={[{required:true}]}><InputNumber min={1} precision={0} /></Form.Item><Form.List name="items">{(fields,{add,remove})=><><Button type="dashed" onClick={()=>add()} style={{marginBottom:12}}>添加团期商品</Button>{fields.map((field)=><div key={field.key} className="panel" style={{padding:12,marginBottom:12}}><Button type="link" danger onClick={()=>remove(field.name)}>移除</Button><Form.Item label="平台商品" name={[field.name,'platformSkuId']} rules={[{required:true}]}><Select options={skus.filter((sku)=>sku.status==='ACTIVE').map((sku)=>({value:sku.id,label:`${sku.product.title} · ${sku.name}`}))} /></Form.Item><div className="form-grid"><Form.Item label="本团售价（分）" name={[field.name,'retailPriceCents']} rules={[{required:true}]}><InputNumber min={1} precision={0} style={{width:'100%'}} /></Form.Item><Form.Item label="本团可售数量" name={[field.name,'sellableQuantity']} rules={[{required:true}]}><InputNumber min={1} precision={0} style={{width:'100%'}} /></Form.Item></div></div>)}</>}</Form.List><Button htmlType="submit" type="primary" loading={saving}>创建团期</Button></Form></Modal>;
+}
+
+function CommunityArrivalModal({open,close,saved,delivery}:{open:boolean;close:()=>void;saved:()=>Promise<unknown>;delivery:CommunityDelivery|null}){
+  const [form]=Form.useForm<{receivedBy:string;confirmationNote:string|null;items:Array<{platformSkuId:string;receivedQuantity:number;rejectedQuantity:number;shortQuantity:number;damagedQuantity:number;reason:string|null;evidenceNote:string|null;evidenceUrl:string|null}>}>();const [saving,setSaving]=useState(false);
+  useEffect(()=>{if(delivery)form.setFieldsValue({receivedBy:'',confirmationNote:null,items:delivery.expectedItems.map((item)=>({platformSkuId:item.platformSkuId,receivedQuantity:item.expectedQuantity,rejectedQuantity:0,shortQuantity:0,damagedQuantity:0,reason:null,evidenceNote:null,evidenceUrl:null}))});},[delivery,form]);
+  const save=async(value:{receivedBy:string;confirmationNote:string|null;items:Array<{platformSkuId:string;receivedQuantity:number;rejectedQuantity:number;shortQuantity:number;damagedQuantity:number;reason:string|null;evidenceNote:string|null;evidenceUrl:string|null}>})=>{if(!delivery?.dispatchBatchId)return;setSaving(true);try{await api.confirmCommunityArrival(delivery.dispatchBatchId,{...value,confirmationNote:value.confirmationNote||null,items:value.items.map((item)=>({...item,reason:item.reason||null,evidenceNote:item.evidenceNote||null,evidenceUrl:item.evidenceUrl||null}))});message.success('已登记逐商品实到，正常数量已开放领取');await saved();close();}catch(error){message.error(error instanceof Error?error.message:'到货确认失败');}finally{setSaving(false);}};
+  return <Modal open={open} onCancel={close} footer={null} width={760} destroyOnHidden title="点位逐商品确认到货"><Alert showIcon type="info" message="只登记现场事实" description="实到、拒收、短少、破损之和必须等于应到数。差异商品须填写原因和文字证据；只有正常实到数量开放领取。" style={{marginBottom:16}}/><Form form={form} layout="vertical" onFinish={(value)=>void save(value)}><Form.Item label="接货人" name="receivedBy" rules={[{required:true,min:2}]}><Input /></Form.Item><Form.Item label="交接说明（可选）" name="confirmationNote"><Input.TextArea rows={2} maxLength={500}/></Form.Item>{delivery?.expectedItems.map((item,index)=><section className="panel" key={item.platformSkuId} style={{padding:12,marginBottom:12}}><b>{item.title} · {item.skuName}</b><span className="cell-note">应到 {item.expectedQuantity} 件</span><Form.Item hidden name={['items',index,'platformSkuId']}><Input /></Form.Item><div className="form-grid"><Form.Item label="实到" name={['items',index,'receivedQuantity']} rules={[{required:true}]}><InputNumber min={0} precision={0} style={{width:'100%'}}/></Form.Item><Form.Item label="拒收" name={['items',index,'rejectedQuantity']} rules={[{required:true}]}><InputNumber min={0} precision={0} style={{width:'100%'}}/></Form.Item><Form.Item label="短少" name={['items',index,'shortQuantity']} rules={[{required:true}]}><InputNumber min={0} precision={0} style={{width:'100%'}}/></Form.Item><Form.Item label="破损" name={['items',index,'damagedQuantity']} rules={[{required:true}]}><InputNumber min={0} precision={0} style={{width:'100%'}}/></Form.Item></div><div className="form-grid"><Form.Item label="差异原因（有差异时必填）" name={['items',index,'reason']}><Select allowClear options={['TRANSIT_SHORTAGE','TRANSIT_DAMAGE','WRONG_POINT','PICKUP_POINT_REJECTED','PACKAGE_DAMAGED'].map((value)=>({value,label:value}))}/></Form.Item><Form.Item label="文字证据（有差异时必填）" name={['items',index,'evidenceNote']}><Input maxLength={500}/></Form.Item></div><Form.Item label="照片/证据 URL（可选）" name={['items',index,'evidenceUrl']}><Input /></Form.Item></section>)}<Button htmlType="submit" type="primary" loading={saving}>确认到货与差异</Button></Form></Modal>;
+}
+
 export function App() {
   const [loggedIn, setLoggedIn] = useState(
     !requiresLogin || Boolean(auth.token()),
@@ -1350,6 +1394,8 @@ export function App() {
   const [page, setPage] = useState<Page>("dashboard");
   const [modal, setModal] = useState<string | null>(null);
   const [selectedPlan, setSelectedPlan] = useState<DeliveryPlan | null>(null);
+  const [selectedCommunityDelivery, setSelectedCommunityDelivery] = useState<CommunityDelivery | null>(null);
+  const [selectedCommunitySku, setSelectedCommunitySku] = useState<PlatformSku | null>(null);
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(
     null,
   );
@@ -1448,9 +1494,9 @@ export function App() {
     enabled: enabled && can("OPERATOR", "CUSTOMER_SERVICE", "FINANCE"),
   });
   const platformSuppliersQ=useQuery({queryKey:['platform-suppliers'],queryFn:api.listPlatformSuppliers,enabled:enabled&&can('PROCUREMENT','FINANCE','OPERATOR')});
-  const platformWarehousesQ=useQuery({queryKey:['platform-warehouses'],queryFn:api.listPlatformWarehouses,enabled:enabled&&can('PROCUREMENT','WAREHOUSE_OPERATOR','OPERATOR')});
   const platformSkusQ=useQuery({queryKey:['platform-skus'],queryFn:api.listPlatformSkus,enabled:enabled&&can('PROCUREMENT','OPERATOR')});
-  const supplierOffersQ=useQuery({queryKey:['supplier-offers'],queryFn:api.listSupplierOffers,enabled:enabled&&can('PROCUREMENT','FINANCE')});
+  const communityCampaignsQ=useQuery({queryKey:['community-campaigns'],queryFn:api.listCommunityCampaigns,enabled:enabled&&can('OPERATOR','FULFILLMENT')});
+  const communityDeliveriesQ=useQuery({queryKey:['community-deliveries'],queryFn:api.listCommunityDeliveries,enabled:enabled&&(can('OPERATOR','FULFILLMENT')||canUsePickupVerifier)});
   const purchaseOrdersQ=useQuery({queryKey:['purchase-orders'],queryFn:api.listPurchaseOrders,enabled:enabled&&can('PROCUREMENT','WAREHOUSE_RECEIVER','QUALITY_INSPECTOR','WAREHOUSE_OPERATOR','FINANCE','OPERATOR')});
   const platformInventoryQ=useQuery({queryKey:['platform-inventory'],queryFn:api.listPlatformInventory,enabled:enabled&&can('WAREHOUSE_RECEIVER','QUALITY_INSPECTOR','WAREHOUSE_OPERATOR','PROCUREMENT','FINANCE')});
   const supplierPayablesQ=useQuery({queryKey:['supplier-payables'],queryFn:api.listSupplierPayables,enabled:enabled&&can('FINANCE','PROCUREMENT')});
@@ -1512,7 +1558,7 @@ export function App() {
     verifiers: [verifierAssignmentsQ, pickupPointsQ],
     fulfillment: canUsePickupVerifier ? [plansQ] : [plansQ, campaignsQ, areasQ, batchesQ, ordersQ],
     service: [interestsQ, manualNotificationsQ, afterSalesQ],
-    platform: [platformSuppliersQ, platformWarehousesQ, platformSkusQ, supplierOffersQ, purchaseOrdersQ, platformInventoryQ, supplierPayablesQ, platformSortingTasksQ, fulfillmentExceptionsQ, lockedPlatformCampaignsQ, platformOutboundOrdersQ],
+    platform: [platformSkusQ, communityCampaignsQ, communityDeliveriesQ, fulfillmentExceptionsQ],
     finance: [settlementsQ, refundsQ],
     audit: [auditQ],
   };
@@ -2334,6 +2380,19 @@ export function App() {
       <section className="panel" style={{marginTop:16}}><PanelTitle eyebrow="异常待处理" title="差异交接与部分退款" action={<span className="panel__hint">现场只能登记事实；运营确认处置，财务才可执行退款。</span>} /><Table<FulfillmentException> rowKey="id" pagination={{pageSize:8}} dataSource={fulfillmentExceptionsQ.data??[]} columns={[{title:'来源',dataIndex:'sourceStage'},{title:'异常数量',render:(_,v)=>v.items.reduce((sum,item)=>sum+item.rejectedQuantity+item.shortQuantity+item.damagedQuantity,0)},{title:'退款金额依据',render:(_,v)=><div className="cell-note">{v.refundBreakdown.map((line)=><div key={line.salesOrderItemId}>订单 {line.orderNo} · {line.productName} / {line.skuName}（SKU {line.platformSkuId}）：异常 {line.exceptionQuantity} 件，已退 {line.refundedQuantity} 件，本退 {line.refundableQuantity} 件 × {money(line.unitPriceCents)} = {money(line.refundableAmountCents)}</div>)}<b>待退 {money(v.refundableAmountCents)} · 已退 {money(v.refundedAmountCents)}</b></div>},{title:'原因',render:(_,v)=>v.items.map((item)=>item.reason).join('、')},{title:'责任',dataIndex:'responsibility'},{title:'状态',dataIndex:'status',render:(v:string)=><StatusTag value={v}/>},{title:'下一步',render:(_,v)=> <>{can('OPERATOR')&&['REGISTERED','WAITING_REPLENISHMENT'].includes(v.status)&&v.items.some((item)=>item.reason==='WRONG_POINT')&&<Button type="link" onClick={()=>{const note=resolutionNote('请填写调拨至正确点位、重新验收的运营安排');if(note)void act(`exception-transfer-plan-${v.id}`,()=>api.decideFulfillmentException(v.id,{status:'TRANSFER_PENDING',responsibility:v.responsibility,resolutionNote:note}),'已安排调拨复验')}}>安排调拨</Button>}{can('OPERATOR')&&['REGISTERED','WAITING_REPLENISHMENT','TRANSFER_PENDING'].includes(v.status)&&!v.items.some((item)=>item.reason==='WRONG_POINT')&&<Button type="link" onClick={()=>{const note=resolutionNote('请填写无法补货/补送后的退款处置说明');if(note)void act(`exception-refund-${v.id}`,()=>api.decideFulfillmentException(v.id,{status:'REFUND_CONFIRMED',responsibility:v.responsibility,resolutionNote:note}),'已确认部分退款')}}>确认退款</Button>}{can('WAREHOUSE_RECEIVER','QUALITY_INSPECTOR','WAREHOUSE_OPERATOR','FULFILLMENT')&&v.status==='TRANSFER_PENDING'&&v.items.some((item)=>item.reason==='WRONG_POINT')&&<Button type="link" onClick={()=>{const note=resolutionNote('请填写调拨到正确点位后的复验说明');const wrongItems=v.items.filter((item)=>item.reason==='WRONG_POINT');if(note)void act(`exception-transfer-${v.id}`,()=>api.reinspectWrongPointTransfer(v.id,{evidenceNote:note,items:wrongItems.map((item)=>({platformSkuId:item.platformSkuId,acceptedQuantity:item.rejectedQuantity+item.shortQuantity+item.damagedQuantity}))}),'调拨复验完成，已恢复对应领取权益')}}>完成调拨复验</Button>}{can('FINANCE')&&v.status==='REFUND_CONFIRMED'&&<Popconfirm title="按以下订单快照价执行已确认异常的部分退款？" description={<div>{v.refundBreakdown.map((line)=><div key={line.salesOrderItemId}><b>订单 {line.orderNo}</b><br/>{line.productName} / {line.skuName}（SKU {line.platformSkuId}）<br/>异常 {line.exceptionQuantity} 件 · 已退 {line.refundedQuantity} 件 · 本退 {line.refundableQuantity} 件 × {money(line.unitPriceCents)} = <b>{money(line.refundableAmountCents)}</b><br/>订单实付 {money(line.orderTotalCents)} · 累计已退 {money(line.orderRefundedAmountCents)} · 退款处理中 {money(line.orderRefundInFlightAmountCents)} · 可退余额 {money(line.orderRefundableBalanceCents)}</div>)}<div>本次合计：<b>{money(v.refundableAmountCents)}</b></div></div>} onConfirm={()=>{const note=resolutionNote('请填写财务二次确认说明');if(note)void act(`exception-pay-${v.id}`,()=>api.executePartialRefund(v.id,note),'已提交部分退款')}}><Button type="link" danger>核对后执行退款</Button></Popconfirm>}</>}]} /></section>
     </>
   );
+  const communityOperationsPage = (
+    <>
+      <header className="section-header"><div><span className="eyebrow">平台自营 · 社区团购</span><h1>配送与领取</h1><p>日常只处理商品、团期、人工配送、点位实到与用户领取。采购、仓储和历史撮合数据保留在兼容区，不再阻塞新团期。</p></div><div className="header-actions">{can('OPERATOR')&&<Button onClick={()=>setModal('community-product')}>新增平台商品</Button>}{can('OPERATOR')&&<Button type="primary" icon={<PlusOutlined />} onClick={()=>setModal('community-campaign')}>创建社区团期</Button>}</div></header>
+      <Alert type="info" showIcon message="轻量履约主线" description="商品建档 → 团期发布 → 截单 → 录入货拉拉/运单并发车 → 点位逐商品确认实到 → 用户按提货码领取。到货与异常仅影响对应商品数量。" />
+      <section className="dashboard-grid" style={{marginTop:16}}>
+        <article className="panel"><PanelTitle eyebrow="长期资料" title="平台商品" /><Table<PlatformSku> size="small" rowKey="id" pagination={{pageSize:5}} dataSource={platformSkusQ.data??[]} columns={[{title:'商品',render:(_,item)=><span>{item.product.title} · {item.name}</span>},{title:'默认零售价',dataIndex:'retailPriceCents',render:(value:number)=>money(value)},{title:'默认可售',dataIndex:'defaultSellableQuantity'},{title:'状态',dataIndex:'status',render:(value:string)=><StatusTag value={value}/>},{title:'操作',render:(_,item)=>can('OPERATOR')?<><Button type="link" onClick={()=>{setSelectedCommunitySku(item);setModal('community-product');}}>编辑</Button>{item.status==='ACTIVE'&&<Popconfirm title="停用后不能加入新的社区团期，已发布团期不受影响。" onConfirm={()=>void act(`community-sku-off-${item.id}`,()=>api.savePlatformSku({id:item.id,productId:item.productId,title:item.product.title,category:item.product.category,origin:item.product.origin,imageUrl:item.product.imageUrl,skuName:item.name,retailPriceCents:item.retailPriceCents,defaultSellableQuantity:item.defaultSellableQuantity??0,referencePurchaseCostCents:item.referencePurchaseCostCents??null,supplierNote:item.supplierNote??null,status:'INACTIVE'}),'平台商品已停用')}><Button type="link" danger>停用</Button></Popconfirm>}</>:null}]} /></article>
+        <article className="panel"><PanelTitle eyebrow="待发车 / 待点位确认" title="配送单" /><Table size="small" rowKey="id" pagination={{pageSize:5}} dataSource={communityDeliveriesQ.data??[]} columns={[{title:'团期',dataIndex:'campaignTitle'},{title:'状态',dataIndex:'status',render:(value:string)=><StatusTag value={value}/>},{title:'人工运单',render:(_,item)=>item.vehicleOrderNo?`${item.logisticsPlatform??'配送'} · ${item.vehicleOrderNo}`:'待录入'},{title:'下一步',render:(_,item)=>item.status==='SITE_CONFIRMED'&&can('FULFILLMENT','OPERATOR')?<Button type="link" onClick={()=>{const plan=plans.find((value)=>value.id===item.id);if(plan){setSelectedPlan(plan);setModal('vehicle');}}}>录入运单</Button>:item.status==='VEHICLE_BOOKED'?<span className="muted">等待确认发车</span>:item.status==='IN_TRANSIT'&&item.dispatchBatchId&&(canUsePickupVerifier||can('SUPER_ADMIN'))?<Button type="link" onClick={()=>{setSelectedCommunityDelivery(item);setModal('community-arrival');}}>逐商品确认到货</Button>:item.status==='IN_TRANSIT'?<span className="muted">等待点位清点</span>:item.status==='ARRIVED'&&(canUsePickupVerifier||can('SUPER_ADMIN'))?<Button type="link" onClick={()=>{const plan=plans.find((value)=>value.id===item.id);if(plan){setSelectedPlan(plan);setModal('verify');}}}>按提货码确认领取</Button>:<span className="muted">已到货</span>}]} /></article>
+      </section>
+      <section className="panel" style={{marginTop:16}}><PanelTitle eyebrow="团期管理" title="新社区团期" /><Table<Campaign> rowKey="id" pagination={{pageSize:8}} dataSource={communityCampaignsQ.data??[]} columns={[{title:'团期',dataIndex:'title'},{title:'固定点位',render:(_,campaign)=>plans.find((plan)=>plan.campaignId===campaign.id)?.siteName??'待确认'},{title:'状态',dataIndex:'status',render:(value:string)=><StatusTag value={value}/>},{title:'商品数',render:(_,campaign)=>campaign.items?.length??0},{title:'下一步',render:(_,campaign)=>{const batch=batches.find((item)=>item.campaignId===campaign.id);if(campaign.status==='DRAFT'&&can('OPERATOR'))return <Button type="link" onClick={()=>void act(`community-open-${campaign.id}`,()=>api.openCampaign(campaign.id),'团期已发布')}>发布开售</Button>;if(['LOCKED','FULFILLING'].includes(campaign.status)&&can('FULFILLMENT','OPERATOR')){if(!batch&&campaign.status==='LOCKED')return <Button type="link" onClick={()=>void act(`community-batch-${campaign.id}`,()=>api.createBatch(campaign.id),'配送批次已创建，请录入运单并确认发车')}>创建配送批次</Button>;if(batch?.status==='DRAFT')return <Button type="link" onClick={()=>void act(`community-dispatch-${batch.id}`,()=>api.dispatchBatch(batch.id),'已确认发车，等待点位清点')}>确认发车</Button>;}return <span className="muted">{campaign.status==='OPEN'?'等待截单':'按当前状态处理'}</span>;}}]} /></section>
+      <section className="panel" style={{marginTop:16}}><PanelTitle eyebrow="异常与售后" title="待处理异常" action={<span className="panel__hint">点位只登记事实；运营确认补送或退款，财务执行退款。</span>} /><Table<FulfillmentException> rowKey="id" pagination={{pageSize:8}} dataSource={(fulfillmentExceptionsQ.data??[]).filter((item)=>communityCampaignsQ.data?.some((campaign)=>campaign.id===item.campaignId))} columns={[{title:'来源',dataIndex:'sourceStage'},{title:'异常数量',render:(_,item)=>item.items.reduce((sum,line)=>sum+line.rejectedQuantity+line.shortQuantity+line.damagedQuantity,0)},{title:'退款依据',render:(_,item)=><div className="cell-note">{item.refundBreakdown.map((line)=><div key={line.salesOrderItemId}>订单 {line.orderNo} · {line.productName}/{line.skuName}：异常 {line.exceptionQuantity} 件，已退 {line.refundedQuantity} 件，本退 {line.refundableQuantity} 件 × {money(line.unitPriceCents)} = {money(line.refundableAmountCents)}</div>)}<b>待退 {money(item.refundableAmountCents)} · 已退 {money(item.refundedAmountCents)}</b></div>},{title:'状态',dataIndex:'status',render:(value:string)=><StatusTag value={value}/>},{title:'下一步',render:(_,item)=><>{can('OPERATOR')&&item.status==='REGISTERED'&&<Button type="link" onClick={()=>{const note=resolutionNote('请填写补送、调拨或待补货安排');if(note)void act(`community-wait-${item.id}`,()=>api.decideFulfillmentException(item.id,{status:'WAITING_REPLENISHMENT',responsibility:item.responsibility,resolutionNote:note}),'已登记等待补送')}}>等待补送</Button>}{can('OPERATOR')&&['REGISTERED','WAITING_REPLENISHMENT'].includes(item.status)&&<Button type="link" onClick={()=>{const note=resolutionNote('请填写确认部分退款的处置依据');if(note)void act(`community-refund-${item.id}`,()=>api.decideFulfillmentException(item.id,{status:'REFUND_CONFIRMED',responsibility:item.responsibility,resolutionNote:note}),'已确认部分退款')}}>确认部分退款</Button>}{can('FINANCE')&&item.status==='REFUND_CONFIRMED'&&<Popconfirm title="按订单快照价执行本次已确认异常退款？" description={<div>{item.refundBreakdown.map((line)=><div key={line.salesOrderItemId}>订单 {line.orderNo} · {line.productName}/{line.skuName}<br/>异常 {line.exceptionQuantity} 件 · 已退 {line.refundedQuantity} 件 · 本退 {line.refundableQuantity} 件 × {money(line.unitPriceCents)} = <b>{money(line.refundableAmountCents)}</b><br/>订单可退余额 {money(line.orderRefundableBalanceCents)}</div>)}<div>本次合计：<b>{money(item.refundableAmountCents)}</b></div></div>} onConfirm={()=>{const note=resolutionNote('请填写财务二次确认说明');if(note)void act(`community-refund-execute-${item.id}`,()=>api.executePartialRefund(item.id,note),'已提交部分退款')}}><Button type="link" danger>核对后执行退款</Button></Popconfirm>}</>}]} /></section>
+      <Alert style={{marginTop:16}} type="warning" showIcon message="历史兼容入口" description="旧采购与中心仓、供应商应付和历史撮合结算仍保留为只读兼容能力，不属于新社区团购的日常操作路径。" />
+    </>
+  );
   const networkPage = (
     <>
       <header className="section-header">
@@ -2709,28 +2768,28 @@ export function App() {
     <>
       <header className="section-header">
         <div>
-          <h1>财务与结算</h1>
-          <p>订单在领取核销后进入结算。</p>
+          <h1>财务记录</h1>
+          <p>平台销售退款记录与历史撮合结算分开保留；社区团购不产生商户佣金或自提点结算。</p>
         </div>
       </header>
       <section className="stats">
         <StatCard
-          label="待结算商户款"
+          label="历史撮合待结算（兼容）"
           value={money(
             settlements.reduce(
               (sum, item) => sum + item.merchantReceivableCents,
               0,
             ),
           )}
-          note="按已生成结算单统计"
+          note="仅历史撮合订单，只读兼容"
           tone="green"
         />
         <StatCard
-          label="平台服务费"
+          label="历史平台服务费（兼容）"
           value={money(
             settlements.reduce((sum, item) => sum + item.commissionCents, 0),
           )}
-          note="按订单规则计提"
+          note="不用于社区团购毛利"
           tone="red"
         />
         <StatCard
@@ -2854,11 +2913,14 @@ export function App() {
       </section>
     </>
   );
+  // The former warehouse screen is intentionally not routable from the daily UI.
+  // Retain the component source while legacy compatibility endpoints remain available.
+  void platformPage;
   const content = {
     dashboard,
     campaigns: campaignPage,
     commerce: commercePage,
-    platform: platformPage,
+    platform: communityOperationsPage,
     network: networkPage,
     verifiers: verifierPage,
     fulfillment: fulfillmentPage,
@@ -2871,11 +2933,10 @@ export function App() {
     { key: "campaigns", label: "团期", icon: <CarOutlined />, roles: ["OPERATOR"] },
     { key: "network", label: "收货区域", icon: <EnvironmentOutlined />, roles: ["OPERATOR"] },
     { key: "verifiers", label: "核销员授权", icon: <AuditOutlined />, roles: ["OPERATOR"] },
-    { key: "fulfillment", label: "配送与领取", icon: <CarOutlined />, roles: ["FULFILLMENT", "PICKUP_VERIFIER"] },
     { key: "service", label: "客服与售后", icon: <AuditOutlined />, roles: ["OPERATOR", "CUSTOMER_SERVICE", "FINANCE"] },
-    { key: "finance", label: "历史撮合结算（兼容）", icon: <WalletOutlined />, roles: ["FINANCE"] },
+    { key: "finance", label: "财务记录", icon: <WalletOutlined />, roles: ["FINANCE"] },
     { key: "audit", label: "操作记录", icon: <AuditOutlined />, roles: [] },
-    { key: "platform", label: "采购与中心仓", icon: <ShopOutlined />, roles: ["PROCUREMENT", "WAREHOUSE_RECEIVER", "QUALITY_INSPECTOR", "WAREHOUSE_OPERATOR", "FULFILLMENT", "FINANCE", "OPERATOR"] },
+    { key: "platform", label: "配送与领取", icon: <CarOutlined />, roles: ["PICKUP_VERIFIER", "FULFILLMENT", "OPERATOR", "SUPER_ADMIN"] },
   ].filter((item) => can(...item.roles)) as Array<{ key: Page; label: string; icon: React.ReactNode }>;
   return (
     <div className="shell">
@@ -3037,6 +3098,9 @@ export function App() {
         saved={refresh}
         outboundOrders={(platformOutboundOrdersQ.data ?? []).filter((item) => item.status === 'DISPATCHED')}
       />
+      <CommunityProductModal open={modal === 'community-product'} close={()=>{setModal(null);setSelectedCommunitySku(null);}} onSaved={refresh} sku={selectedCommunitySku} />
+      <CommunityCampaignModal open={modal === 'community-campaign'} close={()=>setModal(null)} skus={platformSkusQ.data??[]} areas={areas} points={pickupPoints} onSaved={refresh} />
+      <CommunityArrivalModal open={modal === 'community-arrival'} close={()=>{setModal(null);setSelectedCommunityDelivery(null);}} saved={refresh} delivery={selectedCommunityDelivery} />
     </div>
   );
 }

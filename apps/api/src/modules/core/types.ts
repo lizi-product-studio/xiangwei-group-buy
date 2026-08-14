@@ -4,7 +4,7 @@ import type { CampaignStatus, MoneyCents, OrderStatus } from '@hometown/domain';
  * Legacy marketplace rows are immutable compatibility data. Platform procurement
  * is the only model allowed for new mode-B campaigns and orders.
  */
-export type BusinessModelVersion = 'LEGACY_MARKETPLACE' | 'PLATFORM_PROCUREMENT';
+export type BusinessModelVersion = 'LEGACY_MARKETPLACE' | 'PLATFORM_PROCUREMENT' | 'PLATFORM_COMMUNITY';
 export type PaymentRoute = 'LEGACY_COMBINE' | 'PLATFORM_DIRECT';
 
 export interface Campaign {
@@ -20,6 +20,8 @@ export interface Campaign {
   skuIds: string[];
   items: CampaignItemSnapshot[];
   platformItems: PlatformCampaignItem[];
+  /** Lightweight community-group-buy snapshots never carry supplier or warehouse semantics. */
+  communityItems?: CommunityCampaignItem[];
   status: CampaignStatus;
   version: number;
   createdAt: string;
@@ -53,6 +55,20 @@ export interface PlatformCampaignItem {
   imageUrl: string | null;
   retailPriceCents: MoneyCents;
   purchasePriceCents: MoneyCents;
+  sellableQuantity: number;
+  reservedQuantity: number;
+}
+
+/** Immutable platform catalogue/price snapshot for the lightweight community flow. */
+export interface CommunityCampaignItem {
+  platformSkuId: string;
+  productId: string;
+  title: string;
+  category: string;
+  skuName: string;
+  origin: string;
+  imageUrl: string | null;
+  retailPriceCents: MoneyCents;
   sellableQuantity: number;
   reservedQuantity: number;
 }
@@ -95,6 +111,8 @@ export interface OrderItem {
   exceptionQuantity:number;
   refundedQuantity:number;
   refundedAmountCents:MoneyCents;
+  /** Only used by PLATFORM_COMMUNITY; existing rows intentionally remain zero. */
+  pickedUpQuantity:number;
 }
 
 export interface Order {
@@ -128,6 +146,7 @@ export interface DeliveryPlan {
   id:string; campaignId:string; serviceAreaId:string; pickupPointId:string|null; status:DeliveryPlanStatus;
   siteName:string|null; address:string|null; arrivalStartAt:string|null; arrivalEndAt:string|null;
   contactName:string|null; contactPhone:string|null; vehicleOrderNo:string|null; driverName:string|null; driverPhone:string|null; vehiclePlate:string|null;
+  logisticsPlatform?:string|null; estimatedArrivalAt?:string|null;
   remark:string|null; confirmedAt:string|null; bookedAt:string|null; dispatchedAt:string|null; arrivedAt:string|null; createdAt:string; updatedAt:string;
 }
 export interface PickupCredential { orderId:string; codeHash:string; status:'ACTIVE'|'USED'; expiresAt:string }
@@ -171,7 +190,7 @@ export interface PlatformPartialRefund {
 export interface Warehouse { id:string; name:string; address:string; status:'ACTIVE'|'SUSPENDED'; createdAt:string; updatedAt:string }
 export interface Supplier { id:string; legacyMerchantId:string|null; name:string; status:'DRAFT'|'ACTIVE'|'SUSPENDED'; contactName:string|null; contactPhone:string|null; createdAt:string; updatedAt:string }
 export interface SupplierQualification { id:string; supplierId:string; qualificationType:string; qualificationNo:string|null; expiresAt:string|null; status:'PENDING'|'APPROVED'|'REJECTED'|'EXPIRED'; evidenceSummary:string|null; createdAt:string; updatedAt:string }
-export interface PlatformSku { id:string; productId:string; name:string; retailPriceCents:MoneyCents; status:'ACTIVE'|'INACTIVE'; product:{id:string;title:string;category:string;origin:string;imageUrl:string|null;storageType:'NORMAL_TEMPERATURE';status:'DRAFT'|'ACTIVE'|'OFF_SHELF'}; createdAt:string; updatedAt:string }
+export interface PlatformSku { id:string; productId:string; name:string; retailPriceCents:MoneyCents; defaultSellableQuantity?:number; referencePurchaseCostCents?:MoneyCents|null; supplierNote?:string|null; status:'ACTIVE'|'INACTIVE'; product:{id:string;title:string;category:string;origin:string;imageUrl:string|null;storageType:'NORMAL_TEMPERATURE';status:'DRAFT'|'ACTIVE'|'OFF_SHELF'}; createdAt:string; updatedAt:string }
 export interface SupplierSkuOffer { id:string; supplierId:string; platformSkuId:string; purchasePriceCents:MoneyCents|null; minimumPurchaseQuantity:number; leadTimeDays:number; status:'DRAFT'|'ACTIVE'|'SUSPENDED'; createdAt:string; updatedAt:string }
 export interface PurchaseOrderItem { id:string; purchaseOrderId:string; platformSkuId:string; supplierOfferId:string; plannedQuantity:number; purchaseUnitCents:MoneyCents; createdAt:string }
 /** A supplemental PO retains the original short-receipt evidence instead of
@@ -197,7 +216,11 @@ export interface FulfillmentExceptionItem { id:string; exceptionId:string; platf
 export interface FulfillmentException { id:string; campaignId:string; orderId:string|null; clientRequestId:string|null; outboundOrderId:string|null; deliveryPlanId:string|null; sourceStage:'SUPPLIER_RECEIPT'|'WAREHOUSE'|'TRANSIT'|'PICKUP_HANDOVER'|'CUSTOMER_CLAIM'; status:FulfillmentExceptionStatus; responsibility:ExceptionResponsibility; registeredBy:string; confirmedBy:string|null; resolutionNote:string|null; registeredAt:string; confirmedAt:string|null; items:FulfillmentExceptionItem[] }
 /** Deterministic paid-time allocation of a shortage to one platform sales line. */
 export interface FulfillmentAllocation { id:string; exceptionId:string; exceptionItemId:string; salesOrderItemId:string; orderId:string; platformSkuId:string; fulfilledQuantity:number; exceptionQuantity:number; refundedQuantity:number; createdAt:string; refundedAt:string|null }
-export interface PlatformSalesLine { id:string; orderId:string; platformSkuId:string; quantity:number; unitPriceCents:MoneyCents; purchaseUnitCents:MoneyCents; amountCents:MoneyCents; fulfilledQuantity:number; exceptionQuantity:number; refundedQuantity:number; refundedAmountCents:MoneyCents; paidAt:string|null }
+export interface PlatformSalesLine { id:string; orderId:string; platformSkuId:string; quantity:number; unitPriceCents:MoneyCents; purchaseUnitCents:MoneyCents; amountCents:MoneyCents; fulfilledQuantity:number; exceptionQuantity:number; refundedQuantity:number; refundedAmountCents:MoneyCents; pickedUpQuantity:number; paidAt:string|null }
+export interface CommunityDeliveryItem { id:string; communityDeliveryId:string; platformSkuId:string; expectedQuantity:number; receivedQuantity:number; rejectedQuantity:number; shortQuantity:number; damagedQuantity:number; reason:FulfillmentExceptionType|null; evidenceNote:string|null; evidenceUrl:string|null }
+export interface CommunityDeliveryConfirmation { id:string; dispatchBatchId:string; campaignId:string; deliveryPlanId:string; status:'COMPLETED'|'EXCEPTION'; confirmedBy:string; receivedBy:string; confirmationNote:string|null; confirmedAt:string; items:CommunityDeliveryItem[] }
+export interface CommunityPickupReceiptItem { id:string; communityPickupReceiptId:string; platformSkuId:string; quantity:number }
+export interface CommunityPickupReceipt { id:string; orderId:string; deliveryPlanId:string; verifierId:string; requestKey:string; createdAt:string; items:CommunityPickupReceiptItem[] }
 export interface LedgerLine {accountCode:string;ownerId:string|null;direction:'DEBIT'|'CREDIT';amountCents:MoneyCents}
 /**
  * Immutable accounting evidence. Marketplace events remain isolated from the

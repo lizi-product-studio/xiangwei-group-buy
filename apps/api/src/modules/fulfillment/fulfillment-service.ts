@@ -1,5 +1,5 @@
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
-import { BusinessError, transitionCampaign, transitionOrder } from '@hometown/domain';
+import { BusinessError, moneyCents, transitionCampaign, transitionOrder } from '@hometown/domain';
 import type { CommerceStore } from '../core/store.js';
 import type { DispatchBatch, Order } from '../core/types.js';
 import type { LedgerService } from '../finance/ledger-service.js';
@@ -34,9 +34,14 @@ export class FulfillmentService {
 
   public async createBatch(campaignId: string): Promise<DispatchBatch> {
     return this.store.transaction(async (store) => {
-      const campaign = await store.getCampaign(campaignId);
+      // Lock the campaign before looking for an existing batch.  A repeated
+      // click must return the first lightweight batch rather than creating a
+      // second vehicle journey for the same one-point group.
+      const campaign = await store.getCampaignForUpdate(campaignId);
       if (!campaign) throw new BusinessError('RESOURCE_NOT_FOUND', '团期不存在', 404);
-      if(campaign.businessModelVersion==='PLATFORM_PROCUREMENT')throw new BusinessError('GOODS_RECEIPT_REQUIRED','平台采购团期必须完成采购、中心仓验收、分拣和出库后再交接，不能使用历史发车批次',409);
+      const existing=(await store.listDispatchBatches()).find((batch)=>batch.campaignId===campaignId);
+      if(existing)return existing;
+      if(campaign.businessModelVersion==='PLATFORM_PROCUREMENT')throw new BusinessError('GOODS_RECEIPT_REQUIRED','平台采购团期必须完成采购、中心仓验收、分拣和出库后再交接，不能使用轻量配送批次',409);
       if (campaign.status !== 'LOCKED') throw new BusinessError('INVALID_STATE_TRANSITION', '只有已成团锁单的团期可以创建发车批次', 409);
       const plan = await this.deliveryPlanForCampaign(campaignId, store);
       if (plan.status !== 'VEHICLE_BOOKED') {
@@ -94,6 +99,11 @@ export class FulfillmentService {
   public async receive(id: string, deliveryPlanId: string): Promise<{ batch: DispatchBatch; readyOrders: number }> {
     return this.store.transaction(async (store) => {
       const batch = await this.batch(id, store);
+      const campaign = await store.getCampaignForUpdate(batch.campaignId);
+      if (!campaign) throw new BusinessError('RESOURCE_NOT_FOUND', '团期不存在', 404);
+      if (campaign.businessModelVersion === 'PLATFORM_COMMUNITY') {
+        throw new BusinessError('INVALID_STATE_TRANSITION', '社区团购必须由绑定点位按逐商品实到数量确认到货，不能使用通用确认到货接口', 409);
+      }
       if (batch.status !== 'IN_TRANSIT' && batch.status !== 'ARRIVED') {
         throw new BusinessError('INVALID_STATE_TRANSITION', '只有运输中的批次可以确认到货', 409);
       }
@@ -137,9 +147,9 @@ export class FulfillmentService {
     return { code: this.code(orderId), expiresAt: credential.expiresAt };
   }
 
-  public async verify(orderId: string, deliveryPlanId: string, code: string, verifierId: string, bypassPointAuthorization = false): Promise<Order> {
+  public async verify(orderId: string, deliveryPlanId: string, code: string, verifierId: string, bypassPointAuthorization = false, requestedItems?:Array<{platformSkuId:string;quantity:number}>): Promise<Order> {
     const result = await this.store.transaction(async (store) => {
-      const order = await store.getOrder(orderId);
+      const order = await store.getOrderForUpdate(orderId);
       if (!order) throw new BusinessError('RESOURCE_NOT_FOUND', '订单不存在', 404);
       if (order.deliveryPlanId !== deliveryPlanId) throw new BusinessError('FORBIDDEN', '订单不属于当前到货点', 403);
       const plan=await store.getDeliveryPlan(deliveryPlanId);
@@ -149,6 +159,26 @@ export class FulfillmentService {
       const pickupPoint=(await store.listPickupPoints(plan.serviceAreaId)).find((item)=>item.id===plan.pickupPointId);
       if(!pickupPoint||pickupPoint.status!=='ACTIVE')throw new BusinessError('FORBIDDEN','当前自提点未启用，不能核销',403);
       if(!bypassPointAuthorization&&!(await store.hasActivePickupVerifierAssignment(verifierId,plan.pickupPointId)))throw new BusinessError('FORBIDDEN','当前核销人员未获该自提点授权',403);
+      if (order.businessModelVersion === 'PLATFORM_COMMUNITY') {
+        const selected=requestedItems??order.items.filter((item)=>item.fulfilledQuantity-item.pickedUpQuantity>0).map((item)=>({platformSkuId:item.skuId,quantity:item.fulfilledQuantity-item.pickedUpQuantity}));
+        const merged=new Map<string,number>();for(const item of selected)merged.set(item.platformSkuId,(merged.get(item.platformSkuId)??0)+item.quantity);
+        if(!merged.size)throw new BusinessError('INVALID_STATE_TRANSITION','订单没有可领取的商品',409);
+        const requestKey=createHmac('sha256',this.secret).update(JSON.stringify([...merged.entries()].sort(([left],[right])=>left.localeCompare(right)))).digest('hex');
+        if(await store.getCommunityPickupReceipt(order.id,requestKey))return order;
+        const credential = await store.getPickupCredential(orderId);
+        if (!credential || credential.status !== 'ACTIVE') throw new BusinessError('PICKUP_CODE_UNAVAILABLE', '取货码无效', 409);
+        const expected = Buffer.from(credential.codeHash, 'hex'); const actual = Buffer.from(this.hash(code), 'hex');
+        if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) throw new BusinessError('PICKUP_CODE_INVALID', '取货码不正确', 409);
+        if (Date.parse(credential.expiresAt) < Date.now()) throw new BusinessError('PICKUP_CODE_EXPIRED', '取货码已过期', 409);
+        if (order.status !== 'READY_FOR_PICKUP') throw new BusinessError('INVALID_STATE_TRANSITION', '订单当前不可核销', 409);
+        const receipt={id:randomUUID(),orderId:order.id,deliveryPlanId,verifierId,requestKey,createdAt:new Date().toISOString(),items:[...merged.entries()].map(([platformSkuId,quantity])=>({id:randomUUID(),communityPickupReceiptId:'',platformSkuId,quantity}))};receipt.items.forEach((item)=>item.communityPickupReceiptId=receipt.id);
+        if(!await store.saveCommunityPickupReceipt(receipt)){const duplicate=await store.getCommunityPickupReceipt(order.id,requestKey);if(duplicate)return order;throw new BusinessError('CONCURRENT_MODIFICATION','领取操作正在处理中，请刷新后重试',409);}
+        for(const [skuId,quantity] of merged){const item=order.items.find((value)=>value.skuId===skuId);if(!item||quantity>item.fulfilledQuantity-item.pickedUpQuantity)throw new BusinessError('VALIDATION_ERROR','提货数量不能超过当前待领取数量',400,{platformSkuId:skuId});item.pickedUpQuantity+=quantity;const persisted={id:item.salesOrderItemId!,orderId:order.id,platformSkuId:item.skuId,quantity:item.quantity,unitPriceCents:item.unitPriceCents,purchaseUnitCents:item.purchaseUnitCents??moneyCents(0),amountCents:item.amountCents,fulfilledQuantity:item.fulfilledQuantity,pickedUpQuantity:item.pickedUpQuantity,exceptionQuantity:item.exceptionQuantity,refundedQuantity:item.refundedQuantity,refundedAmountCents:item.refundedAmountCents,paidAt:order.paidAt};if(!await store.updatePlatformSalesLine(persisted))throw new BusinessError('CONCURRENT_MODIFICATION','订单商品已被并发领取，请刷新后重试',409);}
+        const allCollected=order.items.filter((item)=>item.fulfilledQuantity>0).every((item)=>item.pickedUpQuantity===item.fulfilledQuantity);
+        await store.saveAuditLog({id:randomUUID(),actorId:verifierId,action:allCollected?'COMMUNITY_PICKUP_COMPLETED':'COMMUNITY_PICKUP_PARTIAL','resourceType':'COMMUNITY_PICKUP_RECEIPT',resourceId:receipt.id,requestId:requestKey,beforeData:null,afterData:{orderId:order.id,items:receipt.items},createdAt:receipt.createdAt});
+        if(allCollected){order.status=transitionOrder(order.status,'PICKED_UP');order.pickedUpAt=receipt.createdAt;credential.status='USED';await store.savePickupCredential(credential);await store.savePickupRecord(order.id,deliveryPlanId,verifierId);await store.saveOrderStatus(order);await this.ledger.recordPickup(store,order);}
+        return order;
+      }
       if (await store.pickupRecordExists(orderId)) return order;
       const credential = await store.getPickupCredential(orderId);
       if (!credential || credential.status !== 'ACTIVE') throw new BusinessError('PICKUP_CODE_UNAVAILABLE', '取货码无效', 409);

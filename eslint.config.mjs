@@ -3,7 +3,14 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['**/dist/**', '**/coverage/**', '**/node_modules/**', '**/miniprogram_npm/**'],
+    ignores: [
+      '**/dist/**',
+      '**/coverage/**',
+      '**/node_modules/**',
+      '**/miniprogram_npm/**',
+      '**/test-results/**',
+      '**/playwright-report/**',
+    ],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,

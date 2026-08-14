@@ -5,7 +5,7 @@ import type { FulfillmentException, LedgerLine, LedgerTransaction, Order, Platfo
 
 export class LedgerService {
   public async recordPayment(store:CommerceStore,order:Order):Promise<void>{
-    if(order.businessModelVersion==='PLATFORM_PROCUREMENT'){
+    if(order.businessModelVersion!=='LEGACY_MARKETPLACE'){
       await this.append(store,order.id,'PAYMENT_SUCCEEDED',[{accountCode:'PLATFORM_PAYMENT_CLEARING',ownerId:null,direction:'DEBIT',amountCents:order.totalCents},{accountCode:'PLATFORM_CONTRACT_LIABILITY',ownerId:null,direction:'CREDIT',amountCents:order.totalCents}]);
       return;
     }
@@ -18,7 +18,7 @@ export class LedgerService {
     await this.append(store,order.id,'PAYMENT_SUCCEEDED',lines);
   }
   public async recordRefund(store:CommerceStore,order:Order):Promise<void>{
-    if(order.businessModelVersion==='PLATFORM_PROCUREMENT'){
+    if(order.businessModelVersion!=='LEGACY_MARKETPLACE'){
       // Before handover the customer payment is still a contract liability.
       // Once the order has been picked up, revenue has already been recognised;
       // a subsequent after-sale refund therefore reverses revenue rather than
@@ -41,7 +41,7 @@ export class LedgerService {
     await this.append(store,order.id,'REFUND_SUCCEEDED',lines);
   }
   public async recordPickup(store:CommerceStore,order:Order):Promise<void>{
-    if(order.businessModelVersion==='PLATFORM_PROCUREMENT'){
+    if(order.businessModelVersion!=='LEGACY_MARKETPLACE'){
       const amount=moneyCents(order.items.reduce((sum,item)=>sum+Number(item.unitPriceCents)*item.fulfilledQuantity,0));
       const cost=order.items.reduce((sum,item)=>sum+Number(item.purchaseUnitCents??0)*item.fulfilledQuantity,0);
       const lines:LedgerLine[]=[{accountCode:'PLATFORM_CONTRACT_LIABILITY',ownerId:null,direction:'DEBIT',amountCents:amount},{accountCode:'PLATFORM_SALES_REVENUE',ownerId:null,direction:'CREDIT',amountCents:amount}];
