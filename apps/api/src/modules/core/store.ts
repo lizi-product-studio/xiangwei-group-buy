@@ -1,5 +1,5 @@
 import { moneyCents, type MoneyCents } from '@hometown/domain';
-import type { AdminCredential, AfterSale, AuditLog, AuthSession, Campaign, CampaignItemSnapshot, CommunityCampaignItem, CommunityDeliveryConfirmation, CommunityPickupReceipt, DeliveryPlan, DispatchBatch, FulfillmentAllocation, FulfillmentException, GoodsReceipt, InventoryBalance, InventoryLot, InventoryMovement, LedgerTransaction, Merchant, NotificationPreference, Order, OrderNotification, OutboundOrder, Payment, PickupCredential, PickupHandover, PickupPoint, PickupVerifierAssignment, PlatformCampaignItem, PlatformPartialRefund, PlatformRefund, PlatformSalesLine, PlatformSku, PrivacyConsent, Product, PurchaseOrder, Refund, Role, ServiceArea, ServiceAreaInterest, Settlement, SortingTask, Supplier, SupplierPayable, SupplierQualification, SupplierSkuOffer, Sku, User, Warehouse } from './types.js';
+import type { AdminCredential, AfterSale, AuditLog, AuthSession, Campaign, CampaignItemSnapshot, CommunityCampaignItem, CommunityDeliveryConfirmation, CommunityPickupReceipt, DeliveryPlan, DispatchBatch, FulfillmentAllocation, FulfillmentException, GoodsReceipt, InternalStaff, InventoryBalance, InventoryLot, InventoryMovement, LedgerTransaction, Merchant, NotificationPreference, Order, OrderNotification, OutboundOrder, Payment, PickupCredential, PickupHandover, PickupPoint, PickupVerifierAssignment, PlatformCampaignItem, PlatformPartialRefund, PlatformRefund, PlatformSalesLine, PlatformSku, PrivacyConsent, Product, PurchaseOrder, Refund, Role, ServiceArea, ServiceAreaInterest, Settlement, SortingTask, StaffPickupPointAssignment, Supplier, SupplierPayable, SupplierQualification, SupplierSkuOffer, Sku, User, Warehouse } from './types.js';
 import type { PlatformStore } from '../platform/platform-store.js';
 
 export interface IdempotencyRecord {
@@ -49,12 +49,16 @@ export interface CommerceStore extends PlatformStore {
   getPickupCredential(orderId:string):Promise<PickupCredential|null>; savePickupCredential(value:PickupCredential):Promise<void>;
   pickupRecordExists(orderId:string):Promise<boolean>; savePickupRecord(orderId:string,deliveryPlanId:string,verifierId:string):Promise<void>;
   grantPickupVerifier(userId:string,pickupPointId:string):Promise<void>; revokePickupVerifier(userId:string,pickupPointId:string):Promise<void>; hasActivePickupVerifierAssignment(userId:string,pickupPointId:string):Promise<boolean>; listPickupVerifierAssignments(userId?:string):Promise<PickupVerifierAssignment[]>;
+  /** New staff-point authorization. Falls back to legacy verifier events only for non-staff accounts. */
+  hasActivePickupPointAssignment(userId:string,pickupPointId:string):Promise<boolean>;
   findUserByWechatOpenId(openId:string):Promise<User|null>; saveUser(value:User):Promise<void>;
   getUser(id:string):Promise<User|null>;
   savePrivacyConsent(userId:string,documentVersion:string):Promise<void>; getPrivacyConsent(userId:string,documentVersion:string):Promise<PrivacyConsent|null>;
-  findAdminCredential(username:string):Promise<AdminCredential|null>; saveAdminCredential(value:AdminCredential):Promise<void>; saveUserRole(userId:string,role:Role):Promise<void>;
+  findAdminCredential(username:string):Promise<AdminCredential|null>; findAdminCredentialByUserId(userId:string):Promise<AdminCredential|null>; saveAdminCredential(value:AdminCredential):Promise<void>; saveUserRole(userId:string,role:Role):Promise<void>; replaceUserRoles(userId:string,roles:Role[]):Promise<void>;
+  getInternalStaff(userId:string):Promise<InternalStaff|null>; listInternalStaff(query?:string):Promise<InternalStaff[]>; saveInternalStaff(value:InternalStaff):Promise<void>;
+  listStaffPickupPointAssignments(staffUserId?:string):Promise<StaffPickupPointAssignment[]>; replaceStaffPickupPointAssignments(staffUserId:string,assignments:StaffPickupPointAssignment[]):Promise<void>;
   getAuthSession(tokenHash:string):Promise<AuthSession|null>; saveAuthSession(value:AuthSession):Promise<void>;
-  deleteAuthSession(tokenHash:string):Promise<void>;
+  deleteAuthSession(tokenHash:string):Promise<void>; deleteAuthSessionsByUser(userId:string):Promise<void>;
   getPaymentByOrder(orderId:string):Promise<Payment|null>; getPaymentByOrderForUpdate(orderId:string):Promise<Payment|null>; savePayment(value:Payment):Promise<void>; savePaymentIfStatus(value:Payment, expectedStatuses:Payment['status'][]):Promise<boolean>;
   /** Atomically claims a new or expired provider-initiation lease for this payment. */
   claimPaymentInitiation(value:Payment,leaseUntil:string,now:string,claimToken:string):Promise<boolean>;
@@ -99,6 +103,7 @@ export class MemoryStore implements CommerceStore {
   private readonly usersByOpenId = new Map<string,User>(); private readonly usersById = new Map<string,User>(); private readonly sessions = new Map<string,AuthSession>();
   private readonly privacyConsents = new Map<string,PrivacyConsent>();
   private readonly adminCredentials = new Map<string,AdminCredential>(); private readonly userRoles = new Map<string,Set<Role>>();
+  private readonly internalStaff = new Map<string,InternalStaff>(); private readonly staffPickupPointAssignments = new Map<string,StaffPickupPointAssignment>();
   private readonly payments = new Map<string,Payment>(); private readonly paymentCallbacks = new Set<string>();
   // The in-memory adapter serializes transactions for tests. Track callback
   // claims per transaction so a thrown handler mirrors MySQL rollback semantics.
@@ -323,17 +328,26 @@ export class MemoryStore implements CommerceStore {
   public async revokePickupVerifier(userId:string,pickupPointId:string):Promise<void>{this.pickupVerifierAssignments.push({id:crypto.randomUUID(),userId,pickupPointId,action:'REVOKED',createdAt:new Date().toISOString()});}
   public async hasActivePickupVerifierAssignment(userId:string,pickupPointId:string):Promise<boolean>{const assignment=[...this.pickupVerifierAssignments].reverse().find((item)=>item.userId===userId&&item.pickupPointId===pickupPointId);return assignment?.action==='GRANTED';}
   public async listPickupVerifierAssignments(userId?:string):Promise<PickupVerifierAssignment[]>{return this.pickupVerifierAssignments.filter((item)=>!userId||item.userId===userId).map((item)=>structuredClone(item));}
+  public async hasActivePickupPointAssignment(userId:string,pickupPointId:string):Promise<boolean>{const staff=this.internalStaff.get(userId);if(staff)return staff.status==='ACTIVE'&&staff.role==='PICKUP_MANAGER'&&this.staffPickupPointAssignments.has(`${userId}:${pickupPointId}`);return this.hasActivePickupVerifierAssignment(userId,pickupPointId);}
   public async findUserByWechatOpenId(openId:string):Promise<User|null>{const value=this.usersByOpenId.get(openId);return value?structuredClone(value):null;}
   public async saveUser(value:User):Promise<void>{const copy=structuredClone(value);this.usersById.set(value.id,copy);if(value.wechatOpenId)this.usersByOpenId.set(value.wechatOpenId,copy);}
   public async getUser(id:string):Promise<User|null>{const value=this.usersById.get(id);return value?structuredClone(value):null;}
   public async savePrivacyConsent(userId:string,documentVersion:string):Promise<void>{const key=`${userId}:${documentVersion}`;if(!this.privacyConsents.has(key))this.privacyConsents.set(key,{userId,documentVersion,consentedAt:new Date().toISOString()});}
   public async getPrivacyConsent(userId:string,documentVersion:string):Promise<PrivacyConsent|null>{const value=this.privacyConsents.get(`${userId}:${documentVersion}`);return value?structuredClone(value):null;}
   public async findAdminCredential(username:string):Promise<AdminCredential|null>{const value=this.adminCredentials.get(username.toLowerCase());return value?{...structuredClone(value),roles:[...(this.userRoles.get(value.userId)??new Set(value.roles))]}:null;}
+  public async findAdminCredentialByUserId(userId:string):Promise<AdminCredential|null>{const value=[...this.adminCredentials.values()].find((item)=>item.userId===userId);return value?{...structuredClone(value),roles:[...(this.userRoles.get(userId)??new Set(value.roles))]}:null;}
   public async saveAdminCredential(value:AdminCredential):Promise<void>{this.adminCredentials.set(value.username.toLowerCase(),structuredClone(value));}
   public async saveUserRole(userId:string,role:Role):Promise<void>{const roles=this.userRoles.get(userId)??new Set<Role>();roles.add(role);this.userRoles.set(userId,roles);}
-  public async getAuthSession(tokenHash:string):Promise<AuthSession|null>{const value=this.sessions.get(tokenHash);return value?structuredClone(value):null;}
+  public async replaceUserRoles(userId:string,roles:Role[]):Promise<void>{this.userRoles.set(userId,new Set(roles));}
+  public async getInternalStaff(userId:string):Promise<InternalStaff|null>{const value=this.internalStaff.get(userId);return value?structuredClone(value):null;}
+  public async listInternalStaff(query?:string):Promise<InternalStaff[]>{const normalized=query?.trim().toLowerCase();return[...this.internalStaff.values()].filter((item)=>!normalized||[item.staffNo,item.displayName,item.phone,item.role,item.status].some((value)=>value.toLowerCase().includes(normalized))).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).map((item)=>structuredClone(item));}
+  public async saveInternalStaff(value:InternalStaff):Promise<void>{this.internalStaff.set(value.userId,structuredClone(value));}
+  public async listStaffPickupPointAssignments(staffUserId?:string):Promise<StaffPickupPointAssignment[]>{return[...this.staffPickupPointAssignments.values()].filter((item)=>!staffUserId||item.staffUserId===staffUserId).map((item)=>structuredClone(item));}
+  public async replaceStaffPickupPointAssignments(staffUserId:string,assignments:StaffPickupPointAssignment[]):Promise<void>{for(const key of [...this.staffPickupPointAssignments.keys()])if(key.startsWith(`${staffUserId}:`))this.staffPickupPointAssignments.delete(key);for(const assignment of assignments)this.staffPickupPointAssignments.set(`${assignment.staffUserId}:${assignment.pickupPointId}`,structuredClone(assignment));}
+  public async getAuthSession(tokenHash:string):Promise<AuthSession|null>{const value=this.sessions.get(tokenHash);if(!value)return null;const user=this.usersById.get(value.userId);const staff=this.internalStaff.get(value.userId);if(!user||user.status!=='ACTIVE'||(staff&&staff.status!=='ACTIVE'))return null;return{...structuredClone(value),roles:[...(this.userRoles.get(value.userId)??new Set(value.roles))]};}
   public async saveAuthSession(value:AuthSession):Promise<void>{this.sessions.set(value.tokenHash,structuredClone(value));}
   public async deleteAuthSession(tokenHash:string):Promise<void>{this.sessions.delete(tokenHash);}
+  public async deleteAuthSessionsByUser(userId:string):Promise<void>{for(const [token,session] of this.sessions)if(session.userId===userId)this.sessions.delete(token);}
   public async getPaymentByOrder(orderId:string):Promise<Payment|null>{const value=this.payments.get(orderId);return value?structuredClone(value):null;}
   public async getPaymentByOrderForUpdate(orderId:string):Promise<Payment|null>{return this.getPaymentByOrder(orderId);}
   public async savePayment(value:Payment):Promise<void>{this.payments.set(value.orderId,structuredClone(value));}

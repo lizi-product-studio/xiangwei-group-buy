@@ -25,6 +25,9 @@ export interface PickupOrderLookup{id:string;orderNo:string;deliveryPlanId:strin
 /** Append-only point-access event. The UI derives current access from the latest event per user and point. */
 export interface PickupVerifierAssignment{id:string;userId:string;pickupPointId:string;action:'GRANTED'|'REVOKED';createdAt:string}
 export interface PickupVerifierAssignmentChange{userId:string;pickupPointId:string;active:boolean;changed:boolean}
+export type InternalStaffRole='SUPER_ADMIN'|'OPERATOR'|'CUSTOMER_SERVICE'|'FINANCE'|'PICKUP_MANAGER';
+export type InternalStaffStatus='PENDING_ACTIVATION'|'ACTIVE'|'SUSPENDED';
+export interface InternalStaff{userId:string;staffNo:string;displayName:string;phone:string;role:InternalStaffRole;status:InternalStaffStatus;pickupPointIds:string[];createdAt:string;activatedAt:string|null;suspendedAt:string|null;suspensionReason:string|null}
 export interface DispatchBatch{id:string;campaignId:string;serviceAreaId:string;status:'DRAFT'|'IN_TRANSIT'|'ARRIVED'|'CLOSED';createdAt:string;dispatchedAt:string|null;arrivedAt:string|null}
 export interface Settlement{id:string;orderId:string;outOrderNo:string;status:'CREATED'|'PROCESSING'|'SUCCEEDED'|'FAILED';commissionCents:number;merchantReceivableCents:number;createdAt:string}
 export interface Refund{id:string;orderId:string;providerRefundNo:string;status:'CREATED'|'PROCESSING'|'SUCCEEDED'|'FAILED';amountCents:number;createdAt:string}
@@ -63,6 +66,7 @@ async function request<T>(path:string,init:RequestInit={}):Promise<T>{
 
 export const api={
   login:async(username:string,password:string)=>{const data=await request<{accessToken:string;expiresAt:string;roles:string[]}>('/api/v1/auth/admin/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username,password})});auth.save(data.accessToken,data.roles);return data;},
+  activateStaff:async(username:string,initialCredential:string,newPassword:string)=>{const data=await request<{accessToken:string;expiresAt:string;roles:string[]}>('/api/v1/auth/admin/activate',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username,initialCredential,newPassword})});auth.save(data.accessToken,data.roles);return data;},
   logout:()=>request<void>('/api/v1/auth/logout',{method:'POST'}),
   // The operations view must never fall back to the public, OPEN-only campaign feed.
   listCampaigns:()=>request<Campaign[]>('/api/v1/admin/campaigns'),
@@ -121,6 +125,10 @@ export const api={
   listNetworkPresets:()=>request<NetworkPreset[]>('/api/v1/admin/network-presets'),
   activateNetworkPreset:(presetId:'BAODING_COUNTIES')=>request<NetworkActivationResult>(`/api/v1/admin/network-presets/${presetId}/activate`,{method:'POST',body:JSON.stringify({orderEnabled:true})}),
   listPickupPoints:()=>request<PickupPoint[]>('/api/v1/admin/pickup-points'),
+  listInternalStaff:(query='')=>request<InternalStaff[]>(`/api/v1/admin/staff${query?`?query=${encodeURIComponent(query)}`:''}`),
+  createInternalStaff:(payload:{displayName:string;username:string;phone:string;role:InternalStaffRole;status?:'PENDING_ACTIVATION'|'SUSPENDED';pickupPointIds:string[]})=>request<{staff:InternalStaff;initialCredential:string}>('/api/v1/admin/staff',{method:'POST',body:JSON.stringify(payload)}),
+  updateInternalStaff:(id:string,payload:{displayName?:string;phone?:string;role?:InternalStaffRole;status?:InternalStaffStatus;pickupPointIds?:string[];reason?:string})=>request<InternalStaff>(`/api/v1/admin/staff/${id}`,{method:'PATCH',body:JSON.stringify(payload)}),
+  resetInternalStaffCredential:(id:string,reason:string)=>request<{staff:InternalStaff;initialCredential:string}>(`/api/v1/admin/staff/${id}/reset-credential`,{method:'POST',body:JSON.stringify({reason})}),
   listPickupVerifierAssignments:(userId?:string)=>request<PickupVerifierAssignment[]>(`/api/v1/admin/pickup-verifier-assignments${userId?`?userId=${encodeURIComponent(userId)}`:''}`),
   grantPickupVerifier:(payload:{userId:string;pickupPointId:string})=>request<PickupVerifierAssignmentChange>('/api/v1/admin/pickup-verifier-assignments/grant',{method:'POST',body:JSON.stringify(payload)}),
   revokePickupVerifier:(payload:{userId:string;pickupPointId:string})=>request<PickupVerifierAssignmentChange>('/api/v1/admin/pickup-verifier-assignments/revoke',{method:'POST',body:JSON.stringify(payload)}),

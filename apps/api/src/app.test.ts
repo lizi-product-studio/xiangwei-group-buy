@@ -21,6 +21,7 @@ const pointId = 'pickup-demo-001';
 const procurement = { 'x-demo-user-id': 'procurement-1', 'x-demo-role': 'PROCUREMENT' };
 const warehouse = { 'x-demo-user-id': 'warehouse-1', 'x-demo-role': 'WAREHOUSE_OPERATOR' };
 const warehouseReceiver = { 'x-demo-user-id': 'warehouse-receiver-1', 'x-demo-role': 'WAREHOUSE_RECEIVER' };
+const superAdmin = { 'x-demo-user-id': 'demo-super-admin', 'x-demo-role': 'SUPER_ADMIN' };
 
 describe('API regression', () => {
   let app: FastifyInstance;
@@ -87,7 +88,7 @@ describe('API regression', () => {
     expect((await app.inject({ method: 'POST', url: `/api/v1/admin/dispatch-batches/${batchId}/dispatch`, headers: fulfillment })).statusCode).toBe(200);
     expect((await app.inject({ method: 'POST', url: `/api/v1/pickup/batches/${batchId}/receive`, headers: fulfillment, payload: { deliveryPlanId: planId } })).statusCode).toBe(200);
     const code = await app.inject({ method: 'GET', url: `/api/v1/pickup-code?orderId=${orderId}`, headers: customer });
-    expect((await app.inject({ method: 'POST', url: '/api/v1/admin/pickup-verifier-assignments/grant', headers: operator, payload: { userId: 'fulfillment-1', pickupPointId: pointId } })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'POST', url: '/api/v1/admin/pickup-verifier-assignments/grant', headers: superAdmin, payload: { userId: 'fulfillment-1', pickupPointId: pointId } })).statusCode).toBe(200);
     const verified = await app.inject({ method: 'POST', url: '/api/v1/pickup/verify', headers: fulfillment, payload: { orderId, deliveryPlanId: planId, code: code.json().data.code } });
     expect(verified.statusCode, verified.body).toBe(200);
     return planId;
@@ -127,7 +128,7 @@ describe('API regression', () => {
     expect(genericCommunityReceive.statusCode,genericCommunityReceive.body).toBe(409);
     expect((await store.getDeliveryPlanByCampaign(campaignId))?.status).toBe('IN_TRANSIT');
     expect((await app.inject({method:'GET',url:`/api/v1/pickup-code?orderId=${orderId}`,headers:customer})).statusCode).toBe(409);
-    expect((await app.inject({method:'POST',url:'/api/v1/admin/pickup-verifier-assignments/grant',headers:operator,payload:{userId:'verifier-1',pickupPointId:pointId}})).statusCode).toBe(200);
+    expect((await app.inject({method:'POST',url:'/api/v1/admin/pickup-verifier-assignments/grant',headers:superAdmin,payload:{userId:'verifier-1',pickupPointId:pointId}})).statusCode).toBe(200);
     const verifierDeliveries=await app.inject({method:'GET',url:'/api/v1/admin/community/deliveries',headers:verifier});expect(verifierDeliveries.statusCode,verifierDeliveries.body).toBe(200);expect(verifierDeliveries.json().data).toEqual([expect.objectContaining({campaignId,dispatchBatchId:batchId,expectedItems:[expect.objectContaining({platformSkuId:'community-sku-a',expectedQuantity:2}),expect.objectContaining({platformSkuId:'community-sku-b',expectedQuantity:3})]})]);expect(verifierDeliveries.body).not.toContain('purchasePriceCents');expect((await app.inject({method:'GET',url:'/api/v1/admin/platform/skus',headers:verifier})).statusCode).toBe(403);
     const arrival={receivedBy:'点位负责人',confirmationNote:'现场已清点',items:[{platformSkuId:'community-sku-a',receivedQuantity:2,rejectedQuantity:0,shortQuantity:0,damagedQuantity:0,reason:null,evidenceNote:null,evidenceUrl:null},{platformSkuId:'community-sku-b',receivedQuantity:2,rejectedQuantity:0,shortQuantity:1,damagedQuantity:0,reason:'TRANSIT_SHORTAGE',evidenceNote:'现场少一袋，已拍照',evidenceUrl:null}]};
     const confirmations=await Promise.all([app.inject({method:'POST',url:`/api/v1/admin/community/dispatch-batches/${batchId}/arrival`,headers:verifier,payload:arrival}),app.inject({method:'POST',url:`/api/v1/admin/community/dispatch-batches/${batchId}/arrival`,headers:verifier,payload:arrival})]);for(const confirmation of confirmations)expect(confirmation.statusCode,confirmation.body).toBe(200);
@@ -302,7 +303,7 @@ describe('API regression', () => {
     const orderId=(await app.inject({method:'POST',url:'/api/v1/orders',headers:{...customer,'idempotency-key':'quality-claim-001'},payload:{campaignId,serviceAreaId:'service-bd-lianchi',pickupPointId:pointId,items:[{skuId,quantity:1}]}})).json().data.id as string;await pay(orderId);vi.useFakeTimers();vi.setSystemTime(new Date(Date.now()+3600_001));try{expect((await app.inject({method:'POST',url:`/api/v1/admin/campaigns/${campaignId}/close`,headers:operator})).statusCode).toBe(200);}finally{vi.useRealTimers();}
     const po=(await app.inject({method:'GET',url:'/api/v1/admin/platform/purchase-orders',headers:procurement})).json().data[0] as {id:string;items:Array<{id:string}>};expect((await app.inject({method:'POST',url:`/api/v1/admin/platform/purchase-orders/${po.id}/receive`,headers:warehouse,payload:{items:[{purchaseOrderItemId:po.items[0]!.id,acceptedQuantity:1,rejectedQuantity:0,batchNo:'LOT-CLAIM',productionDate:'2026-08-01',expiresAt:'2027-08-01',inspectionNote:null}]}})).statusCode).toBe(200);expect((await app.inject({method:'POST',url:`/api/v1/admin/platform/campaigns/${campaignId}/sorting`,headers:warehouse})).statusCode).toBe(200);expect((await app.inject({method:'POST',url:`/api/v1/admin/platform/campaigns/${campaignId}/sorting/complete`,headers:warehouse})).statusCode).toBe(200);
     const plan=await store.getDeliveryPlanByCampaign(campaignId);if(!plan)throw new Error('plan expected');expect((await app.inject({method:'POST',url:`/api/v1/admin/delivery-plans/${plan.id}/book-vehicle`,headers:fulfillment,payload:{vehicleOrderNo:'CLAIM-1',driverName:'配送员',driverPhone:'13900000000',vehiclePlate:'冀F1111'}})).statusCode).toBe(200);const outbound=(await app.inject({method:'POST',url:`/api/v1/admin/platform/campaigns/${campaignId}/outbound`,headers:warehouse,payload:{carrierReference:'质量售后'}})).json().data as {id:string;items:Array<{platformSkuId:string;quantity:number}>};expect((await app.inject({method:'POST',url:`/api/v1/admin/platform/outbound/${outbound.id}/handover`,headers:fulfillment,payload:{receivedBy:'fulfillment-1',exceptionNote:null,items:outbound.items.map((item)=>({platformSkuId:item.platformSkuId,receivedQuantity:item.quantity}))}})).statusCode).toBe(200);
-    const code=(await app.inject({method:'GET',url:`/api/v1/pickup-code?orderId=${orderId}`,headers:customer})).json().data.code as string;const grant=await app.inject({method:'POST',url:'/api/v1/admin/pickup-verifier-assignments/grant',headers:operator,payload:{userId:'fulfillment-1',pickupPointId:pointId}});expect([200,409]).toContain(grant.statusCode);expect((await app.inject({method:'POST',url:'/api/v1/pickup/verify',headers:fulfillment,payload:{orderId,deliveryPlanId:plan.id,code}})).statusCode).toBe(200);
+    const code=(await app.inject({method:'GET',url:`/api/v1/pickup-code?orderId=${orderId}`,headers:customer})).json().data.code as string;const grant=await app.inject({method:'POST',url:'/api/v1/admin/pickup-verifier-assignments/grant',headers:superAdmin,payload:{userId:'fulfillment-1',pickupPointId:pointId}});expect([200,409]).toContain(grant.statusCode);expect((await app.inject({method:'POST',url:'/api/v1/pickup/verify',headers:fulfillment,payload:{orderId,deliveryPlanId:plan.id,code}})).statusCode).toBe(200);
     const rejectedLegacyAfterSale=await app.inject({method:'POST',url:`/api/v1/orders/${orderId}/after-sales`,headers:customer,payload:{reason:'商品质量问题',description:'已领取模式 B 商品必须进入明细异常链'}});expect(rejectedLegacyAfterSale.statusCode).toBe(409);const payload={clientRequestId:'quality-claim-request-001',items:[{platformSkuId:skuId,quantity:1,reason:'QUALITY_CLAIM',description:'商品开封后发现明显质量问题',evidenceUrl:null}]};const auditFailure=vi.spyOn(store,'saveAuditLog').mockRejectedValueOnce(new Error('injected audit persistence failure'));const rejectedClaim=await app.inject({method:'POST',url:`/api/v1/orders/${orderId}/fulfillment-claims`,headers:customer,payload});expect(rejectedClaim.statusCode).toBe(500);expect((await app.inject({method:'GET',url:`/api/v1/orders/${orderId}`,headers:customer})).json().data.items).toMatchObject([{fulfilledQuantity:1,exceptionQuantity:0}]);expect((await store.listFulfillmentExceptions()).filter((item)=>item.orderId===orderId)).toHaveLength(0);auditFailure.mockRestore();const first=await app.inject({method:'POST',url:`/api/v1/orders/${orderId}/fulfillment-claims`,headers:customer,payload});const retry=await app.inject({method:'POST',url:`/api/v1/orders/${orderId}/fulfillment-claims`,headers:customer,payload});expect(first.statusCode,first.body).toBe(201);expect(retry.statusCode,retry.body).toBe(201);expect(retry.json().data.id).toBe(first.json().data.id);const claimId=first.json().data.id as string;const claimAudits=(await store.listAuditLogs(30)).filter((item)=>item.action==='FULFILLMENT_EXCEPTION_CUSTOMER_CLAIMED'&&item.resourceId===claimId);expect(claimAudits).toHaveLength(1);expect(claimAudits[0]?.afterData).toMatchObject({exception:{id:claimId},allocations:[{exceptionId:claimId}],salesLines:[{before:{fulfilledQuantity:1,exceptionQuantity:0},after:{fulfilledQuantity:0,exceptionQuantity:1}}]});
     expect((await app.inject({method:'POST',url:`/api/v1/admin/platform/fulfillment-exceptions/${claimId}/decision`,headers:operator,payload:{status:'REFUND_CONFIRMED',responsibility:'PLATFORM',resolutionNote:'核实质量问题，按订单快照价退款'}})).statusCode).toBe(200);expect((await app.inject({method:'POST',url:`/api/v1/admin/platform/fulfillment-exceptions/${claimId}/partial-refund`,headers:finance,payload:{confirmationNote:'已复核质量申报与单价'}})).statusCode).toBe(200);const order=await app.inject({method:'GET',url:`/api/v1/orders/${orderId}`,headers:customer});expect(order.json().data).toMatchObject({status:'REFUNDED',items:[{fulfilledQuantity:0,exceptionQuantity:1,refundedQuantity:1,refundedAmountCents:2000}],partialRefunds:[{amountCents:2000,status:'SUCCEEDED'}]});
   });
@@ -715,7 +716,7 @@ describe('API regression', () => {
     await app.inject({method:'POST',url:`/api/v1/pickup/batches/${batchId}/receive`,headers:fulfillment,payload:{deliveryPlanId:planId}});
     const code=(await app.inject({method:'GET',url:`/api/v1/pickup-code?orderId=${orderId}`,headers:customer})).json().data.code as string;
     expect((await app.inject({method:'POST',url:'/api/v1/pickup/verify',headers:fulfillment,payload:{orderId,deliveryPlanId:planId,code}})).statusCode).toBe(403);
-    const granted=await app.inject({method:'POST',url:'/api/v1/admin/pickup-verifier-assignments/grant',headers:operator,payload:{userId:'fulfillment-1',pickupPointId:pointId}});
+    const granted=await app.inject({method:'POST',url:'/api/v1/admin/pickup-verifier-assignments/grant',headers:superAdmin,payload:{userId:'fulfillment-1',pickupPointId:pointId}});
     expect(granted.statusCode,granted.body).toBe(200);
     expect((await app.inject({method:'POST',url:'/api/v1/pickup/verify',headers:fulfillment,payload:{orderId,deliveryPlanId:planId,code}})).statusCode).toBe(200);
   });
@@ -731,7 +732,7 @@ describe('API regression', () => {
     expect((await app.inject({method:'GET',url:lookupUrl,headers:verifierLookup})).statusCode).toBe(404);
     expect((await app.inject({method:'GET',url:`/api/v1/admin/orders?orderNo=${encodeURIComponent(order.orderNo)}`,headers:verifierLookup})).statusCode).toBe(403);
     expect((await app.inject({method:'GET',url:'/api/v1/admin/campaigns',headers:verifierLookup})).statusCode).toBe(403);
-    expect((await app.inject({method:'POST',url:'/api/v1/admin/pickup-verifier-assignments/grant',headers:operator,payload:{userId:'verifier-lookup',pickupPointId:pointId}})).statusCode).toBe(200);
+    expect((await app.inject({method:'POST',url:'/api/v1/admin/pickup-verifier-assignments/grant',headers:superAdmin,payload:{userId:'verifier-lookup',pickupPointId:pointId}})).statusCode).toBe(200);
     expect((await app.inject({method:'GET',url:lookupUrl,headers:verifierLookup})).statusCode).toBe(404);
     expect((await app.inject({method:'POST',url:`/api/v1/admin/delivery-plans/${plan.id}/book-vehicle`,headers:fulfillment,payload:{vehicleOrderNo:'HL-LOOKUP',driverName:'Test',driverPhone:'13900000000',vehiclePlate:'JI-LOOKUP'}})).statusCode).toBe(200);
     const batch=(await app.inject({method:'POST',url:'/api/v1/admin/dispatch-batches',headers:fulfillment,payload:{campaignId}})).json().data.id as string;
@@ -762,10 +763,11 @@ describe('API regression', () => {
     expect((await app.inject({method:'POST',url:'/api/v1/admin/pickup-verifier-assignments/grant',headers:pickupManager,payload:{userId:'missing-verifier',pickupPointId:pointId}})).statusCode).toBe(403);
     expect((await app.inject({method:'POST',url:'/api/v1/admin/pickup-verifier-assignments/grant',headers:pickupManager,payload:{userId:'blocked-verifier',pickupPointId:pointId}})).statusCode).toBe(403);
     expect((await app.inject({method:'POST',url:'/api/v1/admin/pickup-verifier-assignments/grant',headers:pickupManager,payload:{userId:'verifier-1',pickupPointId:'pickup-suspended'}})).statusCode).toBe(403);
-    const alternateGrant=await app.inject({method:'POST',url:'/api/v1/admin/pickup-verifier-assignments/grant',headers:operator,payload:alternateAssignment});
+    expect((await app.inject({method:'POST',url:'/api/v1/admin/pickup-verifier-assignments/grant',headers:operator,payload:alternateAssignment})).statusCode).toBe(403);
+    const alternateGrant=await app.inject({method:'POST',url:'/api/v1/admin/pickup-verifier-assignments/grant',headers:superAdmin,payload:alternateAssignment});
     expect(alternateGrant.statusCode,alternateGrant.body).toBe(200);
     expect(alternateGrant.json().data).toMatchObject({...alternateAssignment,active:true,changed:true});
-    const listed=await app.inject({method:'GET',url:'/api/v1/admin/pickup-verifier-assignments?userId=verifier-1',headers:operator});
+    const listed=await app.inject({method:'GET',url:'/api/v1/admin/pickup-verifier-assignments?userId=verifier-1',headers:superAdmin});
     expect(listed.statusCode,listed.body).toBe(200);
     expect(listed.json().data).toEqual(expect.arrayContaining([expect.objectContaining({...alternateAssignment,action:'GRANTED'})]));
 
@@ -778,13 +780,13 @@ describe('API regression', () => {
     const code=(await app.inject({method:'GET',url:`/api/v1/pickup-code?orderId=${orderId}`,headers:customer})).json().data.code as string;
     expect((await app.inject({method:'POST',url:'/api/v1/pickup/verify',headers:verifier,payload:{orderId,deliveryPlanId:planId,code}})).statusCode).toBe(403);
     const planAssignment={userId:'verifier-1',pickupPointId:pointId};
-    expect((await app.inject({method:'POST',url:'/api/v1/admin/pickup-verifier-assignments/grant',headers:operator,payload:planAssignment})).json().data).toMatchObject({active:true,changed:true});
+    expect((await app.inject({method:'POST',url:'/api/v1/admin/pickup-verifier-assignments/grant',headers:superAdmin,payload:planAssignment})).json().data).toMatchObject({active:true,changed:true});
     expect((await app.inject({method:'POST',url:'/api/v1/admin/pickup-verifier-assignments/revoke',headers:pickupManager,payload:planAssignment})).statusCode).toBe(403);
-    const revoked=await app.inject({method:'POST',url:'/api/v1/admin/pickup-verifier-assignments/revoke',headers:operator,payload:planAssignment});
+    const revoked=await app.inject({method:'POST',url:'/api/v1/admin/pickup-verifier-assignments/revoke',headers:superAdmin,payload:planAssignment});
     expect(revoked.statusCode,revoked.body).toBe(200);
     expect(revoked.json().data).toMatchObject({...planAssignment,active:false,changed:true});
     expect((await app.inject({method:'POST',url:'/api/v1/pickup/verify',headers:verifier,payload:{orderId,deliveryPlanId:planId,code}})).statusCode).toBe(403);
-    expect((await app.inject({method:'POST',url:'/api/v1/admin/pickup-verifier-assignments/grant',headers:operator,payload:planAssignment})).json().data).toMatchObject({active:true,changed:true});
+    expect((await app.inject({method:'POST',url:'/api/v1/admin/pickup-verifier-assignments/grant',headers:superAdmin,payload:planAssignment})).json().data).toMatchObject({active:true,changed:true});
     expect((await app.inject({method:'POST',url:'/api/v1/pickup/verify',headers:verifier,payload:{orderId,deliveryPlanId:planId,code}})).statusCode).toBe(200);
     expect((await store.listAuditLogs(20)).filter((item)=>item.resourceType==='PICKUP_VERIFIER_ASSIGNMENT').map((item)=>item.action)).toEqual(expect.arrayContaining(['PICKUP_VERIFIER_POINT_GRANTED','PICKUP_VERIFIER_POINT_REVOKED']));
   });
@@ -805,7 +807,6 @@ describe('API regression', () => {
 
   it('blocks inactive verifier and pickup point verification, including SuperAdmin, while allowing deactivation cleanup',async()=>{
     const now=new Date().toISOString();
-    const superAdmin={'x-demo-user-id':'demo-super-admin','x-demo-role':'SUPER_ADMIN'};
     await store.saveUser({id:'verifier-active-check',wechatOpenId:null,status:'ACTIVE',createdAt:now});
     const campaignId=await createCampaign();const orderId=await createOrder(campaignId);await pay(orderId);await close(campaignId);
     const plan=await store.getDeliveryPlanByCampaign(campaignId);if(!plan)throw new Error('expected delivery plan');const planId=plan.id;
@@ -818,18 +819,18 @@ describe('API regression', () => {
     const lookupUrl=`/api/v1/pickup/orders/lookup?deliveryPlanId=${encodeURIComponent(planId)}&orderNo=${encodeURIComponent((await store.getOrder(orderId))!.orderNo)}`;
     expect((await app.inject({method:'GET',url:lookupUrl,headers:superAdmin})).statusCode).toBe(200);
     expect((await app.inject({method:'POST',url:'/api/v1/pickup/verify',headers:superAdmin,payload:{orderId,deliveryPlanId:planId,code}})).statusCode).toBe(200);
-    expect((await app.inject({method:'POST',url:'/api/v1/admin/pickup-verifier-assignments/grant',headers:operator,payload:assignment})).statusCode).toBe(200);
+    expect((await app.inject({method:'POST',url:'/api/v1/admin/pickup-verifier-assignments/grant',headers:superAdmin,payload:assignment})).statusCode).toBe(200);
     const pickupPoint=(await store.listPickupPoints()).find((item)=>item.id===pointId);if(!pickupPoint)throw new Error('expected pickup point');
     await store.savePickupPoint({...pickupPoint,status:'SUSPENDED'});
     const verifierHeaders={'x-demo-user-id':'verifier-active-check','x-demo-role':'PICKUP_VERIFIER'};
     const verifyPayload={orderId,deliveryPlanId:planId,code};
     expect((await app.inject({method:'POST',url:'/api/v1/pickup/verify',headers:verifierHeaders,payload:verifyPayload})).statusCode).toBe(403);
     expect((await app.inject({method:'POST',url:'/api/v1/pickup/verify',headers:superAdmin,payload:verifyPayload})).statusCode).toBe(403);
-    expect((await app.inject({method:'POST',url:'/api/v1/admin/pickup-verifier-assignments/revoke',headers:operator,payload:assignment})).json().data).toMatchObject({active:false,changed:true});
+    expect((await app.inject({method:'POST',url:'/api/v1/admin/pickup-verifier-assignments/revoke',headers:superAdmin,payload:assignment})).json().data).toMatchObject({active:false,changed:true});
     await store.savePickupPoint({...pickupPoint,status:'ACTIVE'});
-    expect((await app.inject({method:'POST',url:'/api/v1/admin/pickup-verifier-assignments/grant',headers:operator,payload:assignment})).statusCode).toBe(200);
+    expect((await app.inject({method:'POST',url:'/api/v1/admin/pickup-verifier-assignments/grant',headers:superAdmin,payload:assignment})).statusCode).toBe(200);
     await store.saveUser({id:'verifier-active-check',wechatOpenId:null,status:'BLOCKED',createdAt:now});
     expect((await app.inject({method:'POST',url:'/api/v1/pickup/verify',headers:verifierHeaders,payload:verifyPayload})).statusCode).toBe(403);
-    expect((await app.inject({method:'POST',url:'/api/v1/admin/pickup-verifier-assignments/revoke',headers:operator,payload:assignment})).json().data).toMatchObject({active:false,changed:true});
+    expect((await app.inject({method:'POST',url:'/api/v1/admin/pickup-verifier-assignments/revoke',headers:superAdmin,payload:assignment})).json().data).toMatchObject({active:false,changed:true});
   });
 });

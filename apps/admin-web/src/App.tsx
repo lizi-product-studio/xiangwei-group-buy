@@ -56,20 +56,14 @@ import {
   type PickupPoint,
   type ServiceAreaInterest,
   type AfterSale,
+  type InternalStaff,
+  type InternalStaffRole,
   type OrderNotification,
+  type Refund,
+  type Settlement,
 } from "./api.ts";
 
-type Page =
-  | "dashboard"
-  | "campaigns"
-  | "commerce"
-  | "platform"
-  | "network"
-  | "verifiers"
-  | "fulfillment"
-  | "service"
-  | "finance"
-  | "audit";
+type Page = "dashboard" | "products" | "campaigns" | "orders" | "logistics" | "pickup-points" | "service" | "finance" | "settings" | "point-workbench";
 const money = (cents: number) =>
   new Intl.NumberFormat("zh-CN", { style: "currency", currency: "CNY" }).format(
     cents / 100,
@@ -114,9 +108,14 @@ const statusMeta: Record<string, { label: string; color: string }> = {
   PICKED_UP: { label: "已领取", color: "success" },
   REFUNDING: { label: "退款中", color: "warning" },
   REFUNDED: { label: "已退款", color: "default" },
+  PENDING_ACTIVATION: { label: "待激活", color: "warning" },
+  SUCCEEDED: { label: "已完成", color: "success" },
+  FAILED: { label: "处理失败", color: "error" },
+  INACTIVE: { label: "已停用", color: "default" },
+  PARTIALLY_PICKED_UP: { label: "部分提货", color: "processing" },
 };
 const StatusTag = ({ value }: { value: string }) => {
-  const meta = statusMeta[value] ?? { label: value, color: "default" };
+  const meta = statusMeta[value] ?? { label: "待处理", color: "default" };
   return <Tag color={meta.color}>{meta.label}</Tag>;
 };
 function PanelTitle({
@@ -161,6 +160,7 @@ function StatCard({
 function Login({ onSuccess }: { onSuccess: () => void }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [activationUsername,setActivationUsername]=useState<string|null>(null);
   const submit = async (value: { username: string; password: string }) => {
     setLoading(true);
     setError("");
@@ -168,12 +168,20 @@ function Login({ onSuccess }: { onSuccess: () => void }) {
       await api.login(value.username, value.password);
       onSuccess();
     } catch (reason) {
+      if((reason as {code?:string})?.code==='ACTIVATION_REQUIRED')setActivationUsername(value.username);
       setError(
         reason instanceof Error ? reason.message : "登录失败，请稍后重试",
       );
     } finally {
       setLoading(false);
     }
+  };
+  const activate=async(value:{initialCredential:string;newPassword:string})=>{
+    if(!activationUsername)return;
+    setLoading(true);setError("");
+    try{await api.activateStaff(activationUsername,value.initialCredential,value.newPassword);onSuccess();}
+    catch(reason){setError(reason instanceof Error?reason.message:'激活失败，请稍后重试');}
+    finally{setLoading(false);}
   };
   return (
     <main className="login-page">
@@ -187,9 +195,15 @@ function Login({ onSuccess }: { onSuccess: () => void }) {
         <p>把今天需要人工确认的地点、车辆和到货任务放在一个工作台处理。</p>
       </section>
       <section className="login-card">
-        <h2>登录运营工作台</h2>
+        <h2>{activationUsername?'首次激活账号':'登录运营工作台'}</h2>
         {error && <Alert type="error" showIcon title={error} />}
-        <Form layout="vertical" size="large" onFinish={submit}>
+        {activationUsername?<Form layout="vertical" size="large" onFinish={activate}>
+          <Alert type="info" showIcon message="请设置自己的登录密码" description={`账号 ${activationUsername} 需要使用管理员一次性提供的初始凭据完成激活。初始凭据不会再次显示。`} style={{marginBottom:16}}/>
+          <Form.Item label="一次性初始凭据" name="initialCredential" rules={[{required:true,min:12}]}><Input.Password autoComplete="one-time-code" /></Form.Item>
+          <Form.Item label="新密码" name="newPassword" rules={[{required:true,min:12}]}><Input.Password autoComplete="new-password" /></Form.Item>
+          <Button type="primary" htmlType="submit" block loading={loading}>激活并进入工作台</Button>
+          <Button type="link" block onClick={()=>{setActivationUsername(null);setError('');}}>返回登录</Button>
+        </Form>:<Form layout="vertical" size="large" onFinish={submit}>
           <Form.Item
             label="管理员账号"
             name="username"
@@ -207,7 +221,7 @@ function Login({ onSuccess }: { onSuccess: () => void }) {
           <Button type="primary" htmlType="submit" block loading={loading}>
             进入工作台
           </Button>
-        </Form>
+        </Form>}
       </section>
     </main>
   );
@@ -1177,7 +1191,7 @@ function VerifyPickupModal({
       const detail = apiError instanceof Error ? apiError.message : "核销失败，请稍后重试";
       setError(
         apiError.code === "FORBIDDEN"
-          ? `${detail}。请联系运营人员在“核销员授权”中为当前账号授予此自提点权限。`
+          ? `${detail}。请联系平台负责人在“自提点管理”的负责人账号中核对当前员工与点位范围。`
           : detail,
       );
     } finally {
@@ -1366,12 +1380,12 @@ function PickupHandoverModal({
   </Modal>;
 }
 
-function CommunityProductModal({open,close,onSaved,sku}:{open:boolean;close:()=>void;onSaved:()=>void;sku:PlatformSku|null}){
+function CommunityProductModal({open,close,onSaved,sku,showCommercialDetails}:{open:boolean;close:()=>void;onSaved:()=>void;sku:PlatformSku|null;showCommercialDetails:boolean}){
   const [form]=Form.useForm<{title:string;category:string;origin:string;imageUrl:string|null;skuName:string;retailPriceCents:number;defaultSellableQuantity:number;referencePurchaseCostCents:number|null;supplierNote:string|null}>();
   const [saving,setSaving]=useState(false);
-  const save=async(value:{title:string;category:string;origin:string;imageUrl:string|null;skuName:string;retailPriceCents:number;defaultSellableQuantity:number;referencePurchaseCostCents:number|null;supplierNote:string|null})=>{setSaving(true);try{const payload={...value,status:sku?.status??'ACTIVE'} as const;await api.savePlatformSku(sku?{...payload,id:sku.id,productId:sku.productId}:payload);message.success('平台商品已保存，可加入新团期');form.resetFields();onSaved();close();}catch(error){message.error(error instanceof Error?error.message:'保存失败');}finally{setSaving(false);}};
+  const save=async(value:{title:string;category:string;origin:string;imageUrl:string|null;skuName:string;retailPriceCents:number;defaultSellableQuantity:number;referencePurchaseCostCents:number|null;supplierNote:string|null})=>{setSaving(true);try{const payload={...value,referencePurchaseCostCents:value.referencePurchaseCostCents??null,supplierNote:value.supplierNote??null,status:sku?.status??'ACTIVE'} as const;await api.savePlatformSku(sku?{...payload,id:sku.id,productId:sku.productId}:payload);message.success('平台商品已保存，可加入新团期');form.resetFields();onSaved();close();}catch(error){message.error(error instanceof Error?error.message:'保存失败');}finally{setSaving(false);}};
   const initialValues=sku?{title:sku.product.title,category:sku.product.category,origin:sku.product.origin,imageUrl:sku.product.imageUrl,skuName:sku.name,retailPriceCents:sku.retailPriceCents,defaultSellableQuantity:sku.defaultSellableQuantity??0,referencePurchaseCostCents:sku.referencePurchaseCostCents??null,supplierNote:sku.supplierNote??null}:{category:'地方特产',origin:'保定',imageUrl:null,defaultSellableQuantity:0,referencePurchaseCostCents:null,supplierNote:null};
-  return <Modal open={open} onCancel={close} footer={null} destroyOnHidden title={sku?'编辑平台商品':'新增平台商品'}><Alert type="info" showIcon message="商品是长期资料" description="采购成本和供应商备注仅作内部参考，不会进入消费者订单、退款或点位人员视图。" style={{marginBottom:16}}/><Form key={sku?.id??'new'} form={form} layout="vertical" initialValues={initialValues} onFinish={(value)=>void save(value)}><div className="form-grid"><Form.Item label="商品名称" name="title" rules={[{required:true,min:2}]}><Input /></Form.Item><Form.Item label="规格" name="skuName" rules={[{required:true,min:1}]}><Input /></Form.Item></div><div className="form-grid"><Form.Item label="分类" name="category" rules={[{required:true}]}><Input /></Form.Item><Form.Item label="产地" name="origin" rules={[{required:true}]}><Input /></Form.Item></div><div className="form-grid"><Form.Item label="默认零售价（分）" name="retailPriceCents" rules={[{required:true}]}><InputNumber min={1} precision={0} style={{width:'100%'}} /></Form.Item><Form.Item label="默认可售数量" name="defaultSellableQuantity" rules={[{required:true}]}><InputNumber min={0} precision={0} style={{width:'100%'}} /></Form.Item></div><Form.Item label="图片 URL（可选）" name="imageUrl"><Input /></Form.Item><Form.Item label="采购成本（分，可选）" name="referencePurchaseCostCents"><InputNumber min={1} precision={0} style={{width:'100%'}} /></Form.Item><Form.Item label="供应商备注（可选）" name="supplierNote"><Input.TextArea rows={2} maxLength={500} /></Form.Item><Button htmlType="submit" type="primary" loading={saving}>保存平台商品</Button></Form></Modal>;
+  return <Modal open={open} onCancel={close} footer={null} destroyOnHidden title={sku?'编辑平台商品':'新增平台商品'}><Alert type="info" showIcon message="商品是长期资料" description="采购成本和供应商备注仅作内部参考，不会进入消费者订单、退款或点位人员视图。" style={{marginBottom:16}}/><Form key={sku?.id??'new'} form={form} layout="vertical" initialValues={initialValues} onFinish={(value)=>void save(value)}><div className="form-grid"><Form.Item label="商品名称" name="title" rules={[{required:true,min:2}]}><Input /></Form.Item><Form.Item label="规格" name="skuName" rules={[{required:true,min:1}]}><Input /></Form.Item></div><div className="form-grid"><Form.Item label="分类" name="category" rules={[{required:true}]}><Input /></Form.Item><Form.Item label="产地" name="origin" rules={[{required:true}]}><Input /></Form.Item></div><div className="form-grid"><Form.Item label="默认零售价（分）" name="retailPriceCents" rules={[{required:true}]}><InputNumber min={1} precision={0} style={{width:'100%'}} /></Form.Item><Form.Item label="默认可售数量" name="defaultSellableQuantity" rules={[{required:true}]}><InputNumber min={0} precision={0} style={{width:'100%'}} /></Form.Item></div><Form.Item label="图片 URL（可选）" name="imageUrl"><Input /></Form.Item>{showCommercialDetails&&<><Form.Item label="采购成本（分，可选）" name="referencePurchaseCostCents"><InputNumber min={1} precision={0} style={{width:'100%'}} /></Form.Item><Form.Item label="供应商备注（可选）" name="supplierNote"><Input.TextArea rows={2} maxLength={500} /></Form.Item></>}<Button htmlType="submit" type="primary" loading={saving}>保存平台商品</Button></Form></Modal>;
 }
 
 function CommunityCampaignModal({open,close,skus,areas,points,onSaved}:{open:boolean;close:()=>void;skus:PlatformSku[];areas:ServiceArea[];points:PickupPoint[];onSaved:()=>void}){
@@ -1384,7 +1398,31 @@ function CommunityArrivalModal({open,close,saved,delivery}:{open:boolean;close:(
   const [form]=Form.useForm<{receivedBy:string;confirmationNote:string|null;items:Array<{platformSkuId:string;receivedQuantity:number;rejectedQuantity:number;shortQuantity:number;damagedQuantity:number;reason:string|null;evidenceNote:string|null;evidenceUrl:string|null}>}>();const [saving,setSaving]=useState(false);
   useEffect(()=>{if(delivery)form.setFieldsValue({receivedBy:'',confirmationNote:null,items:delivery.expectedItems.map((item)=>({platformSkuId:item.platformSkuId,receivedQuantity:item.expectedQuantity,rejectedQuantity:0,shortQuantity:0,damagedQuantity:0,reason:null,evidenceNote:null,evidenceUrl:null}))});},[delivery,form]);
   const save=async(value:{receivedBy:string;confirmationNote:string|null;items:Array<{platformSkuId:string;receivedQuantity:number;rejectedQuantity:number;shortQuantity:number;damagedQuantity:number;reason:string|null;evidenceNote:string|null;evidenceUrl:string|null}>})=>{if(!delivery?.dispatchBatchId)return;setSaving(true);try{await api.confirmCommunityArrival(delivery.dispatchBatchId,{...value,confirmationNote:value.confirmationNote||null,items:value.items.map((item)=>({...item,reason:item.reason||null,evidenceNote:item.evidenceNote||null,evidenceUrl:item.evidenceUrl||null}))});message.success('已登记逐商品实到，正常数量已开放领取');await saved();close();}catch(error){message.error(error instanceof Error?error.message:'到货确认失败');}finally{setSaving(false);}};
-  return <Modal open={open} onCancel={close} footer={null} width={760} destroyOnHidden title="点位逐商品确认到货"><Alert showIcon type="info" message="只登记现场事实" description="实到、拒收、短少、破损之和必须等于应到数。差异商品须填写原因和文字证据；只有正常实到数量开放领取。" style={{marginBottom:16}}/><Form form={form} layout="vertical" onFinish={(value)=>void save(value)}><Form.Item label="接货人" name="receivedBy" rules={[{required:true,min:2}]}><Input /></Form.Item><Form.Item label="交接说明（可选）" name="confirmationNote"><Input.TextArea rows={2} maxLength={500}/></Form.Item>{delivery?.expectedItems.map((item,index)=><section className="panel" key={item.platformSkuId} style={{padding:12,marginBottom:12}}><b>{item.title} · {item.skuName}</b><span className="cell-note">应到 {item.expectedQuantity} 件</span><Form.Item hidden name={['items',index,'platformSkuId']}><Input /></Form.Item><div className="form-grid"><Form.Item label="实到" name={['items',index,'receivedQuantity']} rules={[{required:true}]}><InputNumber min={0} precision={0} style={{width:'100%'}}/></Form.Item><Form.Item label="拒收" name={['items',index,'rejectedQuantity']} rules={[{required:true}]}><InputNumber min={0} precision={0} style={{width:'100%'}}/></Form.Item><Form.Item label="短少" name={['items',index,'shortQuantity']} rules={[{required:true}]}><InputNumber min={0} precision={0} style={{width:'100%'}}/></Form.Item><Form.Item label="破损" name={['items',index,'damagedQuantity']} rules={[{required:true}]}><InputNumber min={0} precision={0} style={{width:'100%'}}/></Form.Item></div><div className="form-grid"><Form.Item label="差异原因（有差异时必填）" name={['items',index,'reason']}><Select allowClear options={['TRANSIT_SHORTAGE','TRANSIT_DAMAGE','WRONG_POINT','PICKUP_POINT_REJECTED','PACKAGE_DAMAGED'].map((value)=>({value,label:value}))}/></Form.Item><Form.Item label="文字证据（有差异时必填）" name={['items',index,'evidenceNote']}><Input maxLength={500}/></Form.Item></div><Form.Item label="照片/证据 URL（可选）" name={['items',index,'evidenceUrl']}><Input /></Form.Item></section>)}<Button htmlType="submit" type="primary" loading={saving}>确认到货与差异</Button></Form></Modal>;
+  return <Modal open={open} onCancel={close} footer={null} width={760} destroyOnHidden title="点位逐商品确认到货"><Alert showIcon type="info" message="只登记现场事实" description="实到、拒收、短少、破损之和必须等于应到数。差异商品须填写原因和文字证据；只有正常实到数量开放领取。" style={{marginBottom:16}}/><Form form={form} layout="vertical" onFinish={(value)=>void save(value)}><Form.Item label="接货人" name="receivedBy" rules={[{required:true,min:2}]}><Input /></Form.Item><Form.Item label="交接说明（可选）" name="confirmationNote"><Input.TextArea rows={2} maxLength={500}/></Form.Item>{delivery?.expectedItems.map((item,index)=><section className="panel" key={item.platformSkuId} style={{padding:12,marginBottom:12}}><b>{item.title} · {item.skuName}</b><span className="cell-note">应到 {item.expectedQuantity} 件</span><Form.Item hidden name={['items',index,'platformSkuId']}><Input /></Form.Item><div className="form-grid"><Form.Item label="实到" name={['items',index,'receivedQuantity']} rules={[{required:true}]}><InputNumber min={0} precision={0} style={{width:'100%'}}/></Form.Item><Form.Item label="拒收" name={['items',index,'rejectedQuantity']} rules={[{required:true}]}><InputNumber min={0} precision={0} style={{width:'100%'}}/></Form.Item><Form.Item label="短少" name={['items',index,'shortQuantity']} rules={[{required:true}]}><InputNumber min={0} precision={0} style={{width:'100%'}}/></Form.Item><Form.Item label="破损" name={['items',index,'damagedQuantity']} rules={[{required:true}]}><InputNumber min={0} precision={0} style={{width:'100%'}}/></Form.Item></div><div className="form-grid"><Form.Item label="差异原因（有差异时必填）" name={['items',index,'reason']}><Select allowClear options={[{value:'TRANSIT_SHORTAGE',label:'运输短少'},{value:'TRANSIT_DAMAGE',label:'运输破损'},{value:'WRONG_POINT',label:'错发点位'},{value:'PICKUP_POINT_REJECTED',label:'点位拒收'},{value:'PACKAGE_DAMAGED',label:'包装破损'}]}/></Form.Item><Form.Item label="文字证据（有差异时必填）" name={['items',index,'evidenceNote']}><Input maxLength={500}/></Form.Item></div><Form.Item label="照片/证据 URL（可选）" name={['items',index,'evidenceUrl']}><Input /></Form.Item></section>)}<Button htmlType="submit" type="primary" loading={saving}>确认到货与差异</Button></Form></Modal>;
+}
+
+const staffRoleOptions:Array<{value:InternalStaffRole;label:string}>=[
+  {value:'SUPER_ADMIN',label:'平台负责人'}, {value:'OPERATOR',label:'运营'}, {value:'CUSTOMER_SERVICE',label:'客服'}, {value:'FINANCE',label:'财务'}, {value:'PICKUP_MANAGER',label:'自提点负责人'},
+];
+
+function StaffCreateModal({open,close,pickupPoints,saved}:{open:boolean;close:()=>void;pickupPoints:PickupPoint[];saved:()=>Promise<unknown>}){
+  const [form]=Form.useForm<{displayName:string;username:string;phone:string;role:InternalStaffRole;pickupPointIds:string[];status:'PENDING_ACTIVATION'|'SUSPENDED'}>();
+  const [saving,setSaving]=useState(false);const role=Form.useWatch('role',form);
+  const submit=async(value:{displayName:string;username:string;phone:string;role:InternalStaffRole;pickupPointIds:string[];status:'PENDING_ACTIVATION'|'SUSPENDED'})=>{setSaving(true);try{const result=await api.createInternalStaff(value);Modal.success({title:'员工已创建，请安全转交一次性初始凭据',content:<div><p>{result.staff.displayName}（{result.staff.staffNo}）创建完成。此凭据仅显示一次，员工首次登录必须修改密码。</p><Input value={result.initialCredential} readOnly onFocus={(event)=>event.currentTarget.select()} /></div>,okText:'我已记录并安全转交'});form.resetFields();await saved();close();}catch(error){message.error(error instanceof Error?error.message:'创建员工失败');}finally{setSaving(false);}};
+  return <Modal open={open} onCancel={close} footer={null} destroyOnHidden title="新增内部员工"><Alert type="info" showIcon message="员工账号与消费者账号隔离" description="创建后生成一次性初始凭据，明文不会在目录或后续页面再次显示。" style={{marginBottom:16}}/><Form form={form} layout="vertical" initialValues={{role:'PICKUP_MANAGER',pickupPointIds:[],status:'PENDING_ACTIVATION'}} onFinish={(value)=>void submit(value)}><div className="form-grid"><Form.Item label="员工姓名" name="displayName" rules={[{required:true,min:2}]}><Input /></Form.Item><Form.Item label="登录账号" name="username" rules={[{required:true,min:3,pattern:/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/}]}><Input autoComplete="off" /></Form.Item></div><Form.Item label="联系手机号" name="phone" rules={[{required:true,pattern:/^1[3-9]\d{9}$/}]}><Input inputMode="numeric" /></Form.Item><div className="form-grid"><Form.Item label="角色" name="role" rules={[{required:true}]}><Select options={staffRoleOptions}/></Form.Item><Form.Item label="创建状态" name="status" rules={[{required:true}]}><Select options={[{value:'PENDING_ACTIVATION',label:'待激活'},{value:'SUSPENDED',label:'已停用'}]}/></Form.Item></div>{role==='PICKUP_MANAGER'&&<Form.Item label="负责自提点" name="pickupPointIds" rules={[{required:true,message:'自提点负责人至少绑定一个启用点位'}]}><Select mode="multiple" options={pickupPoints.filter((point)=>point.status==='ACTIVE').map((point)=>({value:point.id,label:`${point.name} · ${point.address}`}))}/></Form.Item>}<Button type="primary" htmlType="submit" loading={saving}>创建并生成初始凭据</Button></Form></Modal>;
+}
+
+function StaffScopeModal({open,close,staff,pickupPoints,saved}:{open:boolean;close:()=>void;staff:InternalStaff|null;pickupPoints:PickupPoint[];saved:()=>Promise<unknown>}){
+  const [form]=Form.useForm<{role:InternalStaffRole;status:'PENDING_ACTIVATION'|'ACTIVE'|'SUSPENDED';pickupPointIds:string[];reason?:string}>(); const [saving,setSaving]=useState(false);const role=Form.useWatch('role',form);const status=Form.useWatch('status',form);
+  const submit=async(value:{role:InternalStaffRole;status:'PENDING_ACTIVATION'|'ACTIVE'|'SUSPENDED';pickupPointIds:string[];reason?:string})=>{if(!staff)return;setSaving(true);try{const reason=value.reason?.trim();await api.updateInternalStaff(staff.userId,{role:value.role,status:value.status,pickupPointIds:value.pickupPointIds,...(reason?{reason}:{})});await saved();message.success('员工角色与点位范围已更新，原会话已回收');close();}catch(error){message.error(error instanceof Error?error.message:'更新员工失败');}finally{setSaving(false);}};
+  return <Modal open={open} onCancel={close} footer={null} destroyOnHidden title="调整员工角色与点位"><Form key={staff?.userId??'none'} form={form} layout="vertical" initialValues={staff?{role:staff.role,status:staff.status,pickupPointIds:staff.pickupPointIds}:{}} onFinish={(value)=>void submit(value)}><Alert type="warning" showIcon message="变更会立即回收该员工已登录会话" description="自提点负责人必须保留至少一个启用点位；停用时必须记录原因。" style={{marginBottom:16}}/><Form.Item label="员工" ><Input value={staff?`${staff.displayName} · ${staff.staffNo}`:''} disabled /></Form.Item><div className="form-grid"><Form.Item label="角色" name="role" rules={[{required:true}]}><Select options={staffRoleOptions}/></Form.Item><Form.Item label="状态" name="status" rules={[{required:true}]}><Select options={[{value:'PENDING_ACTIVATION',label:'待激活'},{value:'ACTIVE',label:'启用'},{value:'SUSPENDED',label:'已停用'}]}/></Form.Item></div>{role==='PICKUP_MANAGER'&&<Form.Item label="负责自提点" name="pickupPointIds" rules={[{required:true,message:'至少选择一个启用自提点'}]}><Select mode="multiple" options={pickupPoints.filter((point)=>point.status==='ACTIVE').map((point)=>({value:point.id,label:point.name}))}/></Form.Item>}{status==='SUSPENDED'&&<Form.Item label="停用原因" name="reason" rules={[{required:true,min:2}]}><Input.TextArea rows={3} maxLength={500}/></Form.Item>}<Button type="primary" htmlType="submit" loading={saving}>保存并回收会话</Button></Form></Modal>;
+}
+
+function PickupPointCreateModal({open,close,areas,saved}:{open:boolean;close:()=>void;areas:ServiceArea[];saved:()=>Promise<unknown>}){
+  const [form]=Form.useForm<{serviceAreaId:string;name:string;address:string;capacityPerDay:number|null}>();
+  const [saving,setSaving]=useState(false);
+  const submit=async(value:{serviceAreaId:string;name:string;address:string;capacityPerDay:number|null})=>{setSaving(true);try{await api.createPickupPoint({...value,name:value.name.trim(),address:value.address.trim()});await saved();message.success('自提点已创建');form.resetFields();close();}catch(error){message.error(error instanceof Error?error.message:'创建自提点失败');}finally{setSaving(false);}};
+  return <Modal open={open} onCancel={close} footer={null} destroyOnHidden title="新增自提点"><Alert type="info" showIcon message="先开通服务区域，再创建固定自提点" description="自提点创建后可绑定负责人；负责人只能看到自己绑定点位的配送和待领取订单。" style={{marginBottom:16}}/><Form form={form} layout="vertical" onFinish={(value)=>void submit(value)}><Form.Item label="服务区域" name="serviceAreaId" rules={[{required:true}]}><Select options={areas.filter((item)=>item.orderEnabled).map((item)=>({value:item.id,label:item.name}))}/></Form.Item><Form.Item label="自提点名称" name="name" rules={[{required:true,min:2}]}><Input maxLength={100}/></Form.Item><Form.Item label="详细地址" name="address" rules={[{required:true,min:5}]}><Input.TextArea rows={3} maxLength={500}/></Form.Item><Form.Item label="预计日容量（可选）" name="capacityPerDay"><InputNumber min={1} precision={0} style={{width:'100%'}}/></Form.Item><Button type="primary" htmlType="submit" loading={saving}>创建自提点</Button></Form></Modal>;
 }
 
 export function App() {
@@ -1396,6 +1434,7 @@ export function App() {
   const [selectedPlan, setSelectedPlan] = useState<DeliveryPlan | null>(null);
   const [selectedCommunityDelivery, setSelectedCommunityDelivery] = useState<CommunityDelivery | null>(null);
   const [selectedCommunitySku, setSelectedCommunitySku] = useState<PlatformSku | null>(null);
+  const [selectedStaff,setSelectedStaff]=useState<InternalStaff|null>(null);
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(
     null,
   );
@@ -1415,12 +1454,11 @@ export function App() {
     return () => window.removeEventListener("admin-auth-expired", expired);
   }, []);
   const enabled = loggedIn;
-  const canReadCampaigns = can("OPERATOR", "FULFILLMENT", "FINANCE");
+  const isPointWorkbenchUser=(roles.includes('PICKUP_MANAGER')||roles.includes('PICKUP_VERIFIER'))&&!roles.some((role)=>['OPERATOR','FULFILLMENT','SUPER_ADMIN','FINANCE','CUSTOMER_SERVICE'].includes(role));
+  const canReadCampaigns = can("OPERATOR", "FULFILLMENT");
   const canReadOperations = can("OPERATOR", "FULFILLMENT");
-  const canManagePickupVerifiers = can("OPERATOR");
-  const canUsePickupVerifier = roles.includes("PICKUP_VERIFIER")
-    && !roles.some((role) => ["OPERATOR", "FULFILLMENT", "SUPER_ADMIN"].includes(role));
-  const canReadOrders = can("OPERATOR", "FULFILLMENT", "FINANCE");
+  const canUsePickupVerifier = isPointWorkbenchUser;
+  const canReadOrders = can("OPERATOR", "FULFILLMENT", "FINANCE", "CUSTOMER_SERVICE");
   const campaignsQ = useQuery({
     queryKey: ["campaigns"],
     queryFn: api.listCampaigns,
@@ -1443,11 +1481,11 @@ export function App() {
     enabled: enabled && can("OPERATOR"),
   });
   const pickupPointsQ = useQuery({ queryKey:["pickup-points"],queryFn:api.listPickupPoints,enabled: enabled && can("OPERATOR") });
-  const verifierAssignmentsQ = useQuery({
-    queryKey: ["pickup-verifier-assignments"],
-    queryFn: () => api.listPickupVerifierAssignments(),
-    enabled: enabled && canManagePickupVerifiers,
-  });
+  const staffQ=useQuery({queryKey:['internal-staff'],queryFn:()=>api.listInternalStaff(),enabled:enabled&&can('SUPER_ADMIN')});
+  // The historical verifier assignment screen is retained only for compatibility.
+  // It is deliberately not fetched or exposed through the normal staff workflow.
+  const verifierAssignmentsQ = { isLoading: false };
+  const activeVerifierAssignments: PickupVerifierAssignment[] = [];
   const directoryQ = useQuery({
     queryKey: ["region-directory"],
     queryFn: api.listRegionDirectory,
@@ -1476,7 +1514,7 @@ export function App() {
   const refundsQ = useQuery({
     queryKey: ["refunds"],
     queryFn: api.listRefunds,
-    enabled: enabled && can("FINANCE", "OPERATOR"),
+    enabled: enabled && can("FINANCE"),
   });
   const auditQ = useQuery({
     queryKey: ["audit"],
@@ -1493,7 +1531,7 @@ export function App() {
     queryFn: api.listAfterSales,
     enabled: enabled && can("OPERATOR", "CUSTOMER_SERVICE", "FINANCE"),
   });
-  const platformSuppliersQ=useQuery({queryKey:['platform-suppliers'],queryFn:api.listPlatformSuppliers,enabled:enabled&&can('PROCUREMENT','FINANCE','OPERATOR')});
+  const platformSuppliersQ=useQuery({queryKey:['platform-suppliers'],queryFn:api.listPlatformSuppliers,enabled:enabled&&can('PROCUREMENT','FINANCE')});
   const platformSkusQ=useQuery({queryKey:['platform-skus'],queryFn:api.listPlatformSkus,enabled:enabled&&can('PROCUREMENT','OPERATOR')});
   const communityCampaignsQ=useQuery({queryKey:['community-campaigns'],queryFn:api.listCommunityCampaigns,enabled:enabled&&can('OPERATOR','FULFILLMENT')});
   const communityDeliveriesQ=useQuery({queryKey:['community-deliveries'],queryFn:api.listCommunityDeliveries,enabled:enabled&&(can('OPERATOR','FULFILLMENT')||canUsePickupVerifier)});
@@ -1538,7 +1576,7 @@ export function App() {
   const products = productsQ.data ?? [];
   const areas = areasQ.data ?? [];
   const pickupPoints = pickupPointsQ.data ?? [];
-  const verifierAssignments = verifierAssignmentsQ.data ?? [];
+  const staffMembers=staffQ.data??[];
   const directory = directoryQ.data ?? [];
   const plans = plansQ.data ?? [];
   const platformSortingTasks = platformSortingTasksQ.data ?? [];
@@ -1550,17 +1588,17 @@ export function App() {
   const loading = [campaignsQ, areasQ, plansQ, ordersQ, batchesQ].some(
     (query) => query.isLoading,
   );
-  const pageQueries = {
-    dashboard: canUsePickupVerifier ? [plansQ] : [campaignsQ, areasQ, plansQ, ordersQ, batchesQ],
-    campaigns: [campaignsQ, areasQ, plansQ],
-    commerce: [merchantsQ, productsQ],
-    network: [areasQ, directoryQ, campaignsQ],
-    verifiers: [verifierAssignmentsQ, pickupPointsQ],
-    fulfillment: canUsePickupVerifier ? [plansQ] : [plansQ, campaignsQ, areasQ, batchesQ, ordersQ],
-    service: [interestsQ, manualNotificationsQ, afterSalesQ],
-    platform: [platformSkusQ, communityCampaignsQ, communityDeliveriesQ, fulfillmentExceptionsQ],
-    finance: [settlementsQ, refundsQ],
-    audit: [auditQ],
+  const pageQueries: Record<Page, Array<{ isError: boolean; refetch: () => Promise<unknown> }>> = {
+    dashboard: isPointWorkbenchUser ? [communityDeliveriesQ] : [communityCampaignsQ, communityDeliveriesQ, ordersQ, fulfillmentExceptionsQ],
+    products: [platformSkusQ],
+    campaigns: [communityCampaignsQ, areasQ, pickupPointsQ],
+    orders: [ordersQ],
+    logistics: [communityDeliveriesQ, batchesQ],
+    "pickup-points": [areasQ, directoryQ, pickupPointsQ, staffQ],
+    service: [afterSalesQ, fulfillmentExceptionsQ, manualNotificationsQ],
+    finance: [refundsQ, settlementsQ],
+    settings: [staffQ, auditQ, manualNotificationsQ],
+    "point-workbench": [communityDeliveriesQ, plansQ],
   };
   const failedPageQueries = pageQueries[page].filter((query) => query.isError);
   const retryPageQueries = () => {
@@ -1578,28 +1616,11 @@ export function App() {
     () => new Map(directory.map((item) => [item.regionCode, item.path])),
     [directory],
   );
-  const activeVerifierAssignments = useMemo(() => {
-    const latestByPair = new Map<string, PickupVerifierAssignment>();
-    for (const assignment of verifierAssignments) {
-      const key = `${assignment.userId}:${assignment.pickupPointId}`;
-      const previous = latestByPair.get(key);
-      if (!previous || assignment.createdAt >= previous.createdAt) {
-        latestByPair.set(key, assignment);
-      }
-    }
-    return [...latestByPair.values()]
-      .filter((assignment) => assignment.action === "GRANTED")
-      .sort((left, right) => `${left.userId}:${left.pickupPointId}`.localeCompare(`${right.userId}:${right.pickupPointId}`));
-  }, [verifierAssignments]);
-  if (!loggedIn)
-    return (
-      <Login
-        onSuccess={() => {
-          setLoggedIn(true);
-          void refresh();
-        }}
-      />
-    );
+  useEffect(()=>{
+    if(isPointWorkbenchUser&&page!=='point-workbench')setPage('point-workbench');
+    else if(!isPointWorkbenchUser&&!can('OPERATOR')&&can('FINANCE')&&page==='dashboard')setPage('finance');
+    else if(!isPointWorkbenchUser&&!can('OPERATOR')&&!can('FINANCE')&&can('CUSTOMER_SERVICE')&&page==='dashboard')setPage('orders');
+  },[isPointWorkbenchUser,page,roles.join(',')]);
   const openSite = (plan: DeliveryPlan) => {
     setSelectedPlan(plan);
     setModal("site");
@@ -1664,6 +1685,15 @@ export function App() {
     }
     return columns;
   }, [canUsePickupVerifier, campaigns, areas, plans, busy]);
+  if (!loggedIn)
+    return (
+      <Login
+        onSuccess={() => {
+          setLoggedIn(true);
+          void refresh();
+        }}
+      />
+    );
   const openPostpone = (campaign: Campaign) => {
     setSelectedCampaign(campaign);
     setModal("campaign-postpone");
@@ -1783,19 +1813,19 @@ export function App() {
       <section className="task-section">
         <PanelTitle eyebrow="需要处理" title="履约待办" />
         <div className="attention-grid">
-          <button onClick={() => setPage("fulfillment")}>
+          <button onClick={() => setPage("logistics")}>
             <span>待确认到货地点</span>
             <b>
               {plans.filter((item) => item.status === "PENDING_SITE").length}
             </b>
           </button>
-          <button onClick={() => setPage("fulfillment")}>
+          <button onClick={() => setPage("logistics")}>
             <span>待登记约车</span>
             <b>
               {plans.filter((item) => item.status === "SITE_CONFIRMED").length}
             </b>
           </button>
-          <button onClick={() => setPage("fulfillment")}>
+          <button onClick={() => setPage("logistics")}>
             <span>可创建发车批次</span>
             <b>
               {
@@ -1807,7 +1837,7 @@ export function App() {
               }
             </b>
           </button>
-          <button onClick={() => setPage("fulfillment")}>
+          <button onClick={() => setPage("logistics")}>
             <span>运输中待确认到货</span>
             <b>{plans.filter((item) => item.status === "IN_TRANSIT").length}</b>
           </button>
@@ -2768,8 +2798,8 @@ export function App() {
     <>
       <header className="section-header">
         <div>
-          <h1>财务记录</h1>
-          <p>平台销售退款记录与历史撮合结算分开保留；社区团购不产生商户佣金或自提点结算。</p>
+          <h1>财务管理</h1>
+          <p>查看平台退款记录与对账信息；社区团购不产生商户佣金或自提点结算。</p>
         </div>
       </header>
       <section className="stats">
@@ -2803,6 +2833,8 @@ export function App() {
           tone="amber"
         />
       </section>
+      <section className="panel"><PanelTitle eyebrow="平台资金" title="退款记录"/><Table<Refund> rowKey="id" loading={refundsQ.isLoading} dataSource={refunds} pagination={{pageSize:10}} scroll={{x:720}} columns={[{title:'订单',dataIndex:'orderId'},{title:'退款单号',dataIndex:'providerRefundNo'},{title:'金额',dataIndex:'amountCents',render:(value:number)=>money(value)},{title:'状态',dataIndex:'status',render:(value:string)=><StatusTag value={value}/>},{title:'创建时间',dataIndex:'createdAt',render:(value:string)=>dateTime.format(new Date(value))}]}/></section>
+      <section className="panel panel--spaced"><PanelTitle eyebrow="历史兼容 · 只读" title="历史撮合结算"/><Alert type="info" showIcon message="仅用于历史订单追溯" description="新社区团购不创建商户结算或平台佣金。" style={{marginBottom:12}}/><Table<Settlement> rowKey="id" dataSource={settlements} pagination={{pageSize:8}} columns={[{title:'历史订单',dataIndex:'outOrderNo'},{title:'应收金额',dataIndex:'merchantReceivableCents',render:(value:number)=>money(value)},{title:'历史服务费',dataIndex:'commissionCents',render:(value:number)=>money(value)},{title:'状态',dataIndex:'status',render:(value:string)=><StatusTag value={value}/>}]}/></section>
     </>
   );
   const auditPage = (
@@ -2913,31 +2945,145 @@ export function App() {
       </section>
     </>
   );
-  // The former warehouse screen is intentionally not routable from the daily UI.
-  // Retain the component source while legacy compatibility endpoints remain available.
-  void platformPage;
+  const productManagementPage = (
+    <>
+      <header className="section-header">
+        <div><span className="eyebrow">长期资料</span><h1>商品管理</h1><p>维护平台商品的展示、规格、默认售价与默认可售数量；商品加入并发布团期后才会对消费者可见。</p></div>
+        {can('OPERATOR') && <Button type="primary" icon={<PlusOutlined />} onClick={()=>{setSelectedCommunitySku(null);setModal('community-product');}}>新增商品</Button>}
+      </header>
+      <section className="panel">
+        <Table<PlatformSku> rowKey="id" loading={platformSkusQ.isLoading} dataSource={platformSkusQ.data??[]} pagination={{pageSize:10}} scroll={{x:760}} columns={[
+          {title:'商品',render:(_,item)=><div><b>{item.product.title}</b><small className="cell-note">{item.product.category} · {item.name}</small></div>},
+          {title:'默认零售价',dataIndex:'retailPriceCents',render:(value:number)=>money(value)},
+          {title:'默认可售数量',dataIndex:'defaultSellableQuantity'},
+          {title:'状态',dataIndex:'status',render:(value:string)=><StatusTag value={value}/>},
+          {title:'操作',render:(_,item)=>can('OPERATOR')?<div className="table-actions"><Button type="link" onClick={()=>{setSelectedCommunitySku(item);setModal('community-product');}}>编辑</Button>{item.status==='ACTIVE'&&<Popconfirm title="停用商品？已发布团期不受影响。" onConfirm={()=>void act(`community-sku-off-${item.id}`,()=>api.savePlatformSku({id:item.id,productId:item.productId,title:item.product.title,category:item.product.category,origin:item.product.origin,imageUrl:item.product.imageUrl,skuName:item.name,retailPriceCents:item.retailPriceCents,defaultSellableQuantity:item.defaultSellableQuantity??0,referencePurchaseCostCents:item.referencePurchaseCostCents??null,supplierNote:item.supplierNote??null,status:'INACTIVE'}),'商品已停用')}><Button type="link" danger>停用</Button></Popconfirm>}</div>:<span className="muted">只读</span>},
+        ]}/>
+      </section>
+    </>
+  );
+  const communityCampaignPage = (
+    <>
+      <header className="section-header">
+        <div><span className="eyebrow">上架与收单</span><h1>团期管理</h1><p>选择已启用商品，设置本团售价、数量、时间、区域和固定自提点；发布后才进入消费者可见范围。</p></div>
+        {can('OPERATOR') && <Button type="primary" icon={<PlusOutlined />} onClick={()=>setModal('community-campaign')}>创建团期</Button>}
+      </header>
+      <section className="panel">
+        <Table<Campaign> rowKey="id" loading={communityCampaignsQ.isLoading} dataSource={communityCampaignsQ.data??[]} pagination={{pageSize:10}} scroll={{x:760}} columns={[
+          {title:'团期',dataIndex:'title',render:(value:string,item)=><div><b>{value}</b><small className="cell-note">{areaName(item.serviceAreaId)} · {item.items?.length??0} 个商品</small></div>},
+          {title:'固定自提点',render:(_,item)=>plans.find((plan)=>plan.campaignId===item.id)?.siteName??'已在团期创建时绑定'},
+          {title:'状态',dataIndex:'status',render:(value:string)=><StatusTag value={value}/>},
+          {title:'下一步',render:(_,item)=>item.status==='DRAFT'&&can('OPERATOR')?<Button type="link" onClick={()=>void act(`community-open-${item.id}`,()=>api.openCampaign(item.id),'团期已发布开售')}>发布开售</Button>:item.status==='OPEN'?<span className="muted">等待截单</span>:<span className="muted">履约进度请到物流管理查看</span>},
+        ]}/>
+      </section>
+    </>
+  );
+  const orderManagementPage = (
+    <>
+      <header className="section-header"><div><span className="eyebrow">销售订单</span><h1>订单管理</h1><p>按团期与自提点查看订单、支付与售后进度；商品配置、发车和退款执行在各自工作页面完成。</p></div></header>
+      <section className="panel"><Table<Order> rowKey="id" loading={ordersQ.isLoading} dataSource={orders} pagination={{pageSize:12}} scroll={{x:760}} columns={[
+        {title:'订单号',dataIndex:'orderNo'},
+        {title:'团期',dataIndex:'campaignId',render:(value:string)=>campaignName(value)},
+        {title:'自提点',dataIndex:'pickupPointId',render:(value:string)=>pickupPoints.find((item)=>item.id===value)?.name??value},
+        {title:'状态',dataIndex:'status',render:(value:string)=><StatusTag value={value}/>},
+        {title:'实付金额',dataIndex:'totalCents',render:(value:number)=>money(value)},
+        {title:'支付时间',dataIndex:'paidAt',render:(value:string|null)=>value?dateTime.format(new Date(value)):'—'},
+      ]}/></section>
+    </>
+  );
+  const logisticsManagementPage = (
+    <>
+      <header className="section-header"><div><span className="eyebrow">备货完成到自提点</span><h1>物流管理</h1><p>仅处理人工运单、确认发车和点位交接结果；正式到货必须由点位负责人现场逐商品确认。</p></div></header>
+      <Alert type="info" showIcon message="人工录入货拉拉/配送信息" description="团期截单后创建配送批次，录入平台、运单号、司机、车牌和预计到达时间后确认发车。物流单号不会自动把订单改为已到货。" style={{marginBottom:16}}/>
+      <section className="panel"><Table<CommunityDelivery> rowKey="id" loading={communityDeliveriesQ.isLoading} dataSource={communityDeliveriesQ.data??[]} pagination={{pageSize:10}} scroll={{x:860}} columns={[
+        {title:'团期',dataIndex:'campaignTitle'},
+        {title:'自提点',dataIndex:'siteName',render:(value:string|null,item)=>value??item.pickupPointId??'待绑定'},
+        {title:'配送状态',dataIndex:'status',render:(value:string)=><StatusTag value={value}/>},
+        {title:'货拉拉/运单',render:(_,item)=>item.vehicleOrderNo?`${item.logisticsPlatform??'配送'} · ${item.vehicleOrderNo}`:'待录入'},
+        {title:'发车/预计到达',render:(_,item)=><span className="cell-note">{item.dispatchedAt?`已发车 ${dateTime.format(new Date(item.dispatchedAt))}`:'未发车'}{item.estimatedArrivalAt?` · 预计 ${dateTime.format(new Date(item.estimatedArrivalAt))}`:''}</span>},
+        {title:'下一步',render:(_,item)=>{
+          const plan=plans.find((value)=>value.id===item.id);
+          const batch=batches.find((value)=>value.campaignId===item.campaignId);
+          if(item.status==='SITE_CONFIRMED'&&can('OPERATOR','FULFILLMENT'))return <Button type="link" onClick={()=>{if(plan){setSelectedPlan(plan);setModal('vehicle');}}}>录入运单</Button>;
+          if(item.status==='VEHICLE_BOOKED'&&can('OPERATOR','FULFILLMENT'))return batch?<Button type="link" onClick={()=>void act(`community-dispatch-${batch.id}`,()=>api.dispatchBatch(batch.id),'已确认发车，等待点位清点')}>确认发车</Button>:<Button type="link" onClick={()=>void act(`community-batch-${item.campaignId}`,()=>api.createBatch(item.campaignId),'配送已创建，请确认发车')}>创建配送</Button>;
+          if(item.status==='IN_TRANSIT')return <span className="muted">等待点位现场确认</span>;
+          return <span className="muted">查看点位交接结果</span>;
+        }},
+      ]}/></section>
+    </>
+  );
+  const pickupPointManagementPage = (
+    <>
+      <header className="section-header"><div><span className="eyebrow">场地与现场人员</span><h1>自提点管理</h1><p>维护收货区域、固定自提点和负责人账号范围；负责人只可处理自己绑定点位的到货与领取。</p></div></header>
+      <section className="panel"><PanelTitle eyebrow="服务区域" title="已开通区域" action={can('OPERATOR')?<Button onClick={()=>setModal('area')}>开通区域</Button>:undefined}/><Table<ServiceArea> rowKey="id" loading={areasQ.isLoading} dataSource={areas} pagination={{pageSize:6}} columns={[
+        {title:'区域',render:(_,item)=><div><b>{item.name}</b><small className="cell-note">{regionPathByCode.get(item.regionCode)??item.name}</small></div>},
+        {title:'收单状态',dataIndex:'orderEnabled',render:(value:boolean)=>value?<Tag color="success">收单中</Tag>:<Tag>已暂停</Tag>},
+        {title:'操作',render:(_,item)=>can('OPERATOR')?<Button type="link" onClick={()=>void act(`area-${item.id}`,()=>api.updateServiceAreaOrderStatus(item.id,!item.orderEnabled),item.orderEnabled?'已暂停收单':'已恢复收单')}>{item.orderEnabled?'暂停收单':'恢复收单'}</Button>:<span className="muted">只读</span>},
+      ]}/></section>
+      <section className="panel panel--spaced"><PanelTitle eyebrow="固定场地" title="自提点" action={can('OPERATOR')?<Button type="primary" onClick={()=>setModal('pickup-point')}>新增自提点</Button>:undefined}/><Table<PickupPoint> rowKey="id" loading={pickupPointsQ.isLoading} dataSource={pickupPoints} pagination={{pageSize:8}} columns={[
+        {title:'自提点',render:(_,item)=><div><b>{item.name}</b><small className="cell-note">{item.address}</small></div>},
+        {title:'服务区域',dataIndex:'serviceAreaId',render:(value:string)=>areaName(value)},
+        {title:'状态',dataIndex:'status',render:(value:string)=><StatusTag value={value}/>},
+        {title:'日容量',dataIndex:'capacityPerDay',render:(value:number|null)=>value??'未设置'},
+      ]}/></section>
+      <section className="panel panel--spaced"><PanelTitle eyebrow="负责人账号与权限" title="点位负责人" action={can('SUPER_ADMIN')?<Button type="primary" onClick={()=>setModal('staff-create')}>新增内部员工</Button>:<span className="panel__hint">仅平台负责人可创建、变更或停用员工账号</span>}/>{can('SUPER_ADMIN')?<Table<InternalStaff> rowKey="userId" dataSource={staffMembers.filter((item)=>item.role==='PICKUP_MANAGER')} pagination={{pageSize:8}} columns={[
+        {title:'员工',render:(_,item)=><div><b>{item.displayName}</b><small className="cell-note">{item.staffNo} · {item.phone}</small></div>},
+        {title:'负责点位',render:(_,item)=>item.pickupPointIds.map((id)=>pickupPoints.find((point)=>point.id===id)?.name??id).join('、')||'未绑定'},
+        {title:'状态',dataIndex:'status',render:(value:string)=><StatusTag value={value}/>},
+        {title:'操作',render:(_,item)=><Button type="link" onClick={()=>{setSelectedStaff(item);setModal('staff-scope');}}>变更范围/停用</Button>},
+      ]}/>:<Alert type="info" showIcon message="负责人账号由平台负责人维护" description="运营可以查看自提点，不会接触员工凭据、手机号或跨点位授权信息。"/>}</section>
+    </>
+  );
+  const pointWorkbenchPage = (
+    <>
+      <header className="section-header"><div><span className="eyebrow">仅限已绑定自提点</span><h1>点位工作台</h1><p>确认我的待到货配送，查询订单并核验提货码；成本、退款、商品和团期配置均不可访问。</p></div></header>
+      <section className="panel"><PanelTitle eyebrow="我的配送" title="待确认到货与待领取订单"/><Table<CommunityDelivery> rowKey="id" loading={communityDeliveriesQ.isLoading} dataSource={communityDeliveriesQ.data??[]} pagination={{pageSize:10}} scroll={{x:700}} columns={[
+        {title:'团期',dataIndex:'campaignTitle'}, {title:'自提点',dataIndex:'siteName'}, {title:'状态',dataIndex:'status',render:(value:string)=><StatusTag value={value}/>},
+        {title:'下一步',render:(_,item)=>{const plan=plans.find((value)=>value.id===item.id);if(item.status==='IN_TRANSIT'&&item.dispatchBatchId)return <Button type="link" onClick={()=>{setSelectedCommunityDelivery(item);setModal('community-arrival');}}>逐商品确认到货</Button>;if(item.status==='ARRIVED'&&plan)return <Button type="link" onClick={()=>openVerifier(plan)}>查询订单并确认领取</Button>;return <span className="muted">{item.status==='SITE_CONFIRMED'||item.status==='VEHICLE_BOOKED'?'等待发车':'等待现场下一步'}</span>;}}
+      ]}/></section>
+    </>
+  );
+  const settingsPage = (
+    <>
+      <header className="section-header"><div><span className="eyebrow">账号、权限与记录</span><h1>系统设置</h1><p>平台负责人维护内部员工、角色与点位范围；所有高风险操作都有审计记录，旧撮合数据只读兼容。</p></div>{can('SUPER_ADMIN')&&<Button type="primary" icon={<PlusOutlined/>} onClick={()=>setModal('staff-create')}>新增内部员工</Button>}</header>
+      {can('SUPER_ADMIN')&&<section className="panel"><PanelTitle eyebrow="账号生命周期" title="内部员工目录"/><Table<InternalStaff> rowKey="userId" loading={staffQ.isLoading} dataSource={staffMembers} pagination={{pageSize:10}} scroll={{x:820}} columns={[
+        {title:'员工',render:(_,item)=><div><b>{item.displayName}</b><small className="cell-note">{item.staffNo} · {item.phone}</small></div>},
+        {title:'角色',dataIndex:'role',render:(value:InternalStaffRole)=>staffRoleOptions.find((item)=>item.value===value)?.label??value},
+        {title:'点位范围',render:(_,item)=>item.pickupPointIds.map((id)=>pickupPoints.find((point)=>point.id===id)?.name??id).join('、')||'—'},
+        {title:'状态',dataIndex:'status',render:(value:string)=><StatusTag value={value}/>},
+        {title:'操作',render:(_,item)=><div className="table-actions"><Button type="link" onClick={()=>{setSelectedStaff(item);setModal('staff-scope');}}>变更/停用</Button><Button type="link" danger onClick={()=>{const reason=resolutionNote('请填写重置一次性凭据的原因');if(reason)void act(`staff-reset-${item.userId}`,async()=>{const result=await api.resetInternalStaffCredential(item.userId,reason);Modal.success({title:'新的一次性初始凭据',content:<Input value={result.initialCredential} readOnly onFocus={(event)=>event.currentTarget.select()}/>});},'已重置凭据并回收会话');}}>重置凭据</Button></div>},
+      ]}/></section>}
+      {can('SUPER_ADMIN')&&<section className="panel panel--spaced"><PanelTitle eyebrow="操作记录" title="关键审计"/><Table rowKey="id" dataSource={auditQ.data??[]} pagination={{pageSize:8}} columns={[{title:'时间',dataIndex:'createdAt',render:(value:string)=>dateTime.format(new Date(value))},{title:'操作',dataIndex:'action'},{title:'对象',render:(_,item)=>`${item.resourceType} · ${item.resourceId}`},{title:'操作人',dataIndex:'actorId'}]}/></section>}
+      <section className="panel panel--spaced"><PanelTitle eyebrow="历史兼容数据" title="旧撮合与通知记录"/><Alert type="info" showIcon message="历史撮合结算、旧核销授权和通知失败记录仅用于兼容与追溯" description="它们不属于日常运营入口；不会用于新社区团购的商品、团期、物流、点位或退款流程。"/></section>
+    </>
+  );
+  // Legacy marketplace and warehouse components remain in source for historical compatibility,
+  // but are intentionally not routable from the daily community operations navigation.
+  void platformPage; void communityOperationsPage; void commercePage; void verifierPage; void fulfillmentPage; void campaignPage; void networkPage; void auditPage;
   const content = {
     dashboard,
-    campaigns: campaignPage,
-    commerce: commercePage,
-    platform: communityOperationsPage,
-    network: networkPage,
-    verifiers: verifierPage,
-    fulfillment: fulfillmentPage,
+    products: productManagementPage,
+    campaigns: communityCampaignPage,
+    orders: orderManagementPage,
+    logistics: logisticsManagementPage,
+    "pickup-points": pickupPointManagementPage,
     service: servicePage,
     finance: financePage,
-    audit: auditPage,
+    settings: settingsPage,
+    "point-workbench": pointWorkbenchPage,
   }[page];
-  const nav = [
-    { key: "dashboard", label: "工作台", icon: <AppstoreOutlined />, roles: ["OPERATOR", "REVIEWER", "FULFILLMENT", "PICKUP_MANAGER", "PICKUP_VERIFIER", "CUSTOMER_SERVICE", "FINANCE"] },
-    { key: "campaigns", label: "团期", icon: <CarOutlined />, roles: ["OPERATOR"] },
-    { key: "network", label: "收货区域", icon: <EnvironmentOutlined />, roles: ["OPERATOR"] },
-    { key: "verifiers", label: "核销员授权", icon: <AuditOutlined />, roles: ["OPERATOR"] },
-    { key: "service", label: "客服与售后", icon: <AuditOutlined />, roles: ["OPERATOR", "CUSTOMER_SERVICE", "FINANCE"] },
-    { key: "finance", label: "财务记录", icon: <WalletOutlined />, roles: ["FINANCE"] },
-    { key: "audit", label: "操作记录", icon: <AuditOutlined />, roles: [] },
-    { key: "platform", label: "配送与领取", icon: <CarOutlined />, roles: ["PICKUP_VERIFIER", "FULFILLMENT", "OPERATOR", "SUPER_ADMIN"] },
-  ].filter((item) => can(...item.roles)) as Array<{ key: Page; label: string; icon: React.ReactNode }>;
+  const navGroups: Array<{label:string;items:Array<{key:Page;label:string;icon:React.ReactNode}>}> = isPointWorkbenchUser
+    ? [{label:'点位工作台',items:[{key:'point-workbench',label:'我的点位工作台',icon:<EnvironmentOutlined/>}]}]
+    : [
+      {label:'日常运营',items:[
+        ...(can('OPERATOR')?[{key:'dashboard' as Page,label:'工作台',icon:<AppstoreOutlined/>}]:[]),
+        ...(can('OPERATOR')?[{key:'products' as Page,label:'商品管理',icon:<AppstoreOutlined/>},{key:'campaigns' as Page,label:'团期管理',icon:<CarOutlined/>},{key:'orders' as Page,label:'订单管理',icon:<AuditOutlined/>}]:[]),
+        ...(can('CUSTOMER_SERVICE')?[{key:'orders' as Page,label:'订单管理',icon:<AuditOutlined/>}]:[]),
+      ]},
+      {label:'履约管理',items:can('OPERATOR','FULFILLMENT')?[{key:'logistics' as Page,label:'物流管理',icon:<CarOutlined/>},{key:'pickup-points' as Page,label:'自提点管理',icon:<EnvironmentOutlined/>}]:[]},
+      {label:'客户与资金',items:[...(can('OPERATOR','CUSTOMER_SERVICE','FINANCE')?[{key:'service' as Page,label:'售后与异常',icon:<AuditOutlined/>}]:[]),...(can('FINANCE')?[{key:'finance' as Page,label:'财务管理',icon:<WalletOutlined/>}]:[])]},
+      {label:'系统',items:can('SUPER_ADMIN')?[{key:'settings' as Page,label:'系统设置',icon:<AuditOutlined/>}]:[]},
+    ].filter((group)=>group.items.length>0);
   return (
     <div className="shell">
       {holder}
@@ -2950,15 +3096,20 @@ export function App() {
           </div>
         </div>
         <nav aria-label="主导航">
-          {nav.map((item) => (
-            <button
-              key={item.key}
-              className={`nav-item ${page === item.key ? "nav-item--active" : ""}`}
-              onClick={() => setPage(item.key)}
-            >
-              {item.icon}
-              {item.label}
-            </button>
+          {navGroups.map((group) => (
+            <div className="nav-group" key={group.label}>
+              <span className="nav-group__label">{group.label}</span>
+              {group.items.map((item) => (
+                <button
+                  key={item.key}
+                  className={`nav-item ${page === item.key ? "nav-item--active" : ""}`}
+                  onClick={() => setPage(item.key)}
+                >
+                  {item.icon}
+                  {item.label}
+                </button>
+              ))}
+            </div>
           ))}
         </nav>
         <div className="sidebar__foot">
@@ -3098,9 +3249,12 @@ export function App() {
         saved={refresh}
         outboundOrders={(platformOutboundOrdersQ.data ?? []).filter((item) => item.status === 'DISPATCHED')}
       />
-      <CommunityProductModal open={modal === 'community-product'} close={()=>{setModal(null);setSelectedCommunitySku(null);}} onSaved={refresh} sku={selectedCommunitySku} />
+      <CommunityProductModal open={modal === 'community-product'} close={()=>{setModal(null);setSelectedCommunitySku(null);}} onSaved={refresh} sku={selectedCommunitySku} showCommercialDetails={can('PROCUREMENT')} />
       <CommunityCampaignModal open={modal === 'community-campaign'} close={()=>setModal(null)} skus={platformSkusQ.data??[]} areas={areas} points={pickupPoints} onSaved={refresh} />
       <CommunityArrivalModal open={modal === 'community-arrival'} close={()=>{setModal(null);setSelectedCommunityDelivery(null);}} saved={refresh} delivery={selectedCommunityDelivery} />
+      <StaffCreateModal open={modal === 'staff-create'} close={()=>setModal(null)} pickupPoints={pickupPoints} saved={refresh} />
+      <StaffScopeModal open={modal === 'staff-scope'} close={()=>{setModal(null);setSelectedStaff(null);}} staff={selectedStaff} pickupPoints={pickupPoints} saved={refresh} />
+      <PickupPointCreateModal open={modal === 'pickup-point'} close={()=>setModal(null)} areas={areas} saved={refresh} />
     </div>
   );
 }

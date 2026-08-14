@@ -28,7 +28,9 @@ h1, h2, h3, p { margin: 0; }
 .brand__mark { display: grid; width: 42px; height: 42px; place-items: center; color: #fff; background: var(--brand); border-radius: 10px; font-size: 14px; font-weight: 800; letter-spacing: -1px; box-shadow: 0 7px 18px rgba(240, 82, 50, .18); }
 .brand b { display: block; font-size: 17px; letter-spacing: .02em; }
 .brand small { display: block; margin-top: 3px; color: #9298a3; font-size: 11px; }
-nav { display: grid; gap: 5px; }
+nav { display: grid; gap: 16px; }
+.nav-group { display: grid; gap: 5px; }
+.nav-group__label { padding: 0 10px; color: #a0a6af; font-size: 10px; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; }
 .nav-item { position: relative; display: flex; width: 100%; align-items: center; gap: 12px; padding: 11px 13px; color: #596270; background: transparent; border: 0; border-radius: 10px; cursor: pointer; text-align: left; transition: background .16s ease, color .16s ease; }
 .nav-item:hover { color: var(--ink); background: #f8f6f0; }
 .nav-item--active { color: var(--brand-dark); background: var(--brand-soft); font-weight: 700; }
@@ -174,7 +176,9 @@ main { min-height: 100vh; margin-left: 232px; padding: 30px clamp(24px, 3vw, 48p
 @media (max-width: 760px) {
   .sidebar { position: static; width: 100%; height: auto; padding: 14px; }
   .brand { padding-bottom: 12px; }
-  nav { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  nav { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .nav-group { display: contents; }
+  .nav-group__label { grid-column: 1 / -1; padding: 4px 4px 0; }
   .nav-item { width: 100%; min-height: 42px; padding: 10px; font-size: 13px; }
   .nav-item--active::before { display: none; }
   .sidebar__foot { display: none; }

@@ -10,6 +10,33 @@ export const wechatLoginSchema = z.object({
   privacyVersion: privacyNoticeVersionSchema,
 });
 export const adminLoginSchema = z.object({ username: z.string().trim().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{2,63}$/), password: z.string().min(12).max(128) });
+export const internalStaffRoleSchema=z.enum(['SUPER_ADMIN','OPERATOR','CUSTOMER_SERVICE','FINANCE','PICKUP_MANAGER']);
+export const internalStaffStatusSchema=z.enum(['PENDING_ACTIVATION','ACTIVE','SUSPENDED']);
+const internalStaffBaseSchema=z.object({
+  displayName:z.string().trim().min(2).max(80),
+  phone:mainlandChinaMobileSchema,
+  role:internalStaffRoleSchema,
+  pickupPointIds:z.array(identifierSchema).max(100).default([]),
+});
+export const createInternalStaffSchema=internalStaffBaseSchema.extend({
+  username:z.string().trim().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{2,63}$/),
+  status:z.enum(['PENDING_ACTIVATION','SUSPENDED']).default('PENDING_ACTIVATION'),
+});
+export const updateInternalStaffSchema=z.object({
+  displayName:z.string().trim().min(2).max(80).optional(),
+  phone:mainlandChinaMobileSchema.optional(),
+  role:internalStaffRoleSchema.optional(),
+  status:internalStaffStatusSchema.optional(),
+  pickupPointIds:z.array(identifierSchema).max(100).optional(),
+  reason:z.string().trim().min(2).max(500).optional(),
+}).refine((value)=>Object.keys(value).length>0,{message:'至少提供一项员工变更'});
+export const resetInternalStaffCredentialSchema=z.object({reason:z.string().trim().min(2).max(500)});
+export const activateAdminStaffSchema=z.object({
+  username:z.string().trim().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{2,63}$/),
+  initialCredential:z.string().min(12).max(128),
+  newPassword:z.string().min(12).max(128),
+});
+export const internalStaffDirectoryQuerySchema=z.object({query:z.string().trim().max(80).optional()});
 
 export const createCampaignSchema = z
   .object({
@@ -168,6 +195,8 @@ export type BatchCreatePickupPointsInput = z.infer<typeof batchCreatePickupPoint
 export type CreateDeliveryPlanInput = z.infer<typeof createDeliveryPlanSchema>;
 export type BookVehicleInput = z.infer<typeof bookVehicleSchema>;
 export type PickupVerifierAssignmentInput = z.infer<typeof pickupVerifierAssignmentSchema>;
+export type CreateInternalStaffInput=z.infer<typeof createInternalStaffSchema>;
+export type UpdateInternalStaffInput=z.infer<typeof updateInternalStaffSchema>;
 
 export interface ApiErrorResponse {
   code: string;

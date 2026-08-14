@@ -2,12 +2,13 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
-import { activateNetworkPresetSchema, adminLoginSchema, batchCreatePickupPointsSchema, bookVehicleSchema, communityArrivalSchema, communityCampaignSchema, createAfterSaleSchema, createCampaignSchema, createDeliveryPlanSchema, createDispatchBatchSchema, createMerchantSchema, createPickupPointSchema, createProductSchema, createServiceAreaInterestSchema, exceptionDecisionSchema, fulfillmentClaimSchema, goodsReceiptSchema, identifierSchema, networkPresetIdSchema, notificationPreferenceSchema, openServiceAreaSchema, orderRequestSchema, outboundSchema, partialRefundExecutionSchema, pickupHandoverSchema, pickupOrderLookupQuerySchema, pickupVerifierAssignmentQuerySchema, pickupVerifierAssignmentSchema, platformCampaignSchema, platformSkuSchema, postponeCampaignSchema, receiveBatchSchema, regionDirectoryQuerySchema, resolveAfterSaleRefundSchema, reviewDecisionSchema, supplierOfferSchema, supplierPayablePaymentSchema, supplierQualificationSchema, supplierSchema, transferReinspectionSchema, updateAfterSaleStatusSchema, updateCampaignSchema, updateMerchantSchema, updateMerchantStatusSchema, updateProductSchema, updateServiceAreaInterestStatusSchema, updateServiceAreaOrderStatusSchema, verifyPickupSchema, warehouseExceptionSchema, warehouseSchema, wechatLoginSchema } from '@hometown/api-contracts';
+import { activateAdminStaffSchema, activateNetworkPresetSchema, adminLoginSchema, batchCreatePickupPointsSchema, bookVehicleSchema, communityArrivalSchema, communityCampaignSchema, createAfterSaleSchema, createCampaignSchema, createDeliveryPlanSchema, createDispatchBatchSchema, createInternalStaffSchema, createMerchantSchema, createPickupPointSchema, createProductSchema, createServiceAreaInterestSchema, exceptionDecisionSchema, fulfillmentClaimSchema, goodsReceiptSchema, identifierSchema, internalStaffDirectoryQuerySchema, networkPresetIdSchema, notificationPreferenceSchema, openServiceAreaSchema, orderRequestSchema, outboundSchema, partialRefundExecutionSchema, pickupHandoverSchema, pickupOrderLookupQuerySchema, pickupVerifierAssignmentQuerySchema, pickupVerifierAssignmentSchema, platformCampaignSchema, platformSkuSchema, postponeCampaignSchema, receiveBatchSchema, regionDirectoryQuerySchema, resetInternalStaffCredentialSchema, resolveAfterSaleRefundSchema, reviewDecisionSchema, supplierOfferSchema, supplierPayablePaymentSchema, supplierQualificationSchema, supplierSchema, transferReinspectionSchema, updateAfterSaleStatusSchema, updateCampaignSchema, updateInternalStaffSchema, updateMerchantSchema, updateMerchantStatusSchema, updateProductSchema, updateServiceAreaInterestStatusSchema, updateServiceAreaOrderStatusSchema, verifyPickupSchema, warehouseExceptionSchema, warehouseSchema, wechatLoginSchema } from '@hometown/api-contracts';
 import { BusinessError, moneyCents } from '@hometown/domain';
 import type { AppConfig } from './config.js';
 import { readDemoActor, requireActor } from './modules/auth/auth.js';
 import { AuthService, WechatApiCodeExchange, type WechatCodeExchange } from './modules/auth/wechat-auth.js';
 import { AdminAuthService } from './modules/auth/admin-auth.js';
+import { StaffService } from './modules/auth/staff-service.js';
 import { CampaignService } from './modules/campaigns/campaign-service.js';
 import { NoopCampaignScheduler, RedisCampaignScheduler, type CampaignScheduler } from './modules/campaigns/campaign-scheduler.js';
 import { MemoryStore, type CommerceStore } from './modules/core/store.js';
@@ -96,6 +97,15 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     )
     : null;
   const adminAuthService=new AdminAuthService(store,dependencies.config.AUTH_SESSION_TTL_SECONDS);
+  const staffService=new StaffService(store);
+  const maskPhone=(phone:string):string=>phone.length===11?`${phone.slice(0,3)}****${phone.slice(-4)}`:'***';
+  const staffView=(staff:Awaited<ReturnType<typeof staffService.get>>)=>({...staff,phone:maskPhone(staff.phone)});
+  const withoutCommercialSku=<T extends {referencePurchaseCostCents?:unknown;supplierNote?:unknown}>(value:T):Omit<T,'referencePurchaseCostCents'|'supplierNote'>=>{
+    const copy={...value};
+    delete (copy as Partial<T>).referencePurchaseCostCents;
+    delete (copy as Partial<T>).supplierNote;
+    return copy as Omit<T,'referencePurchaseCostCents'|'supplierNote'>;
+  };
   const audit=async(request:FastifyRequest,actorId:string,action:string,resourceType:string,resourceId:string,beforeData:unknown,afterData:unknown)=>store.saveAuditLog({id:crypto.randomUUID(),actorId,action,resourceType,resourceId,requestId:request.id,beforeData,afterData,createdAt:new Date().toISOString()});
   const setPickupVerifierAssignment=async(request:FastifyRequest,actorId:string,input:{userId:string;pickupPointId:string},active:boolean)=>store.transaction(async(transactionStore)=>{
     const user=await transactionStore.getUser(input.userId);
@@ -115,6 +125,13 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     await transactionStore.saveAuditLog({id:crypto.randomUUID(),actorId,action:active?'PICKUP_VERIFIER_POINT_GRANTED':'PICKUP_VERIFIER_POINT_REVOKED',resourceType:'PICKUP_VERIFIER_ASSIGNMENT',resourceId:`${input.userId}:${input.pickupPointId}`,requestId:request.id,beforeData:before,afterData:after,createdAt:new Date().toISOString()});
     return after;
   });
+  const assertActivePickupPointAccess=async(actor:{userId:string;roles:readonly string[]},pickupPointId:string):Promise<void>=>{
+    const user=await store.getUser(actor.userId);
+    const point=(await store.listPickupPoints()).find((item)=>item.id===pickupPointId);
+    if(!user||user.status!=='ACTIVE'||!point||point.status!=='ACTIVE')throw new BusinessError('FORBIDDEN','当前负责人或自提点不可用',403);
+    if(actor.roles.includes('SUPER_ADMIN'))return;
+    if(!(await store.hasActivePickupPointAssignment(actor.userId,pickupPointId)))throw new BusinessError('FORBIDDEN','当前人员未获该自提点授权',403);
+  };
   /** Consumer response: never leak operations notes, contacts, vehicle or driver details. */
   const publicDeliveryPlan=(plan:Awaited<ReturnType<CommerceStore['getDeliveryPlan']>>)=>plan?({
     id:plan.id,campaignId:plan.campaignId,serviceAreaId:plan.serviceAreaId,pickupPointId:plan.pickupPointId,status:plan.status,siteName:plan.siteName,address:plan.address,
@@ -249,6 +266,11 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     const input=adminLoginSchema.parse(request.body);
     return{data:await adminAuthService.login(input.username,input.password)};
   });
+  app.post('/api/v1/auth/admin/activate',{config:{rateLimit:{max:5,timeWindow:'5 minutes'}}},async(request)=>{
+    const input=activateAdminStaffSchema.parse(request.body);
+    await staffService.activate(input.username,input.initialCredential,input.newPassword,request.id);
+    return {data:await adminAuthService.login(input.username,input.newPassword)};
+  });
   app.post('/api/v1/auth/logout', async (request, reply) => {
     requireActor(request, ['USER', 'OPERATOR', 'REVIEWER', 'FULFILLMENT', 'PICKUP_MANAGER', 'PICKUP_VERIFIER', 'FINANCE', 'SUPER_ADMIN']);
     await authService?.logout(request.headers.authorization);
@@ -294,13 +316,11 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
   });
   app.get('/api/v1/admin/delivery-plans', async (request) => { requireActor(request, ['OPERATOR','FULFILLMENT','SUPER_ADMIN']); return { data: await deliveryPlans.list() }; });
   app.get('/api/v1/pickup/delivery-plans', async (request) => {
-    const actor=requireActor(request,['PICKUP_VERIFIER','FULFILLMENT','SUPER_ADMIN']);
+    const actor=requireActor(request,['PICKUP_MANAGER','PICKUP_VERIFIER','FULFILLMENT','SUPER_ADMIN']);
     const plans=await deliveryPlans.list();
     if(actor.roles.includes('SUPER_ADMIN')||actor.roles.includes('FULFILLMENT'))return {data:plans};
-    const verifier=await store.getUser(actor.userId);
-    if(!verifier||verifier.status!=='ACTIVE')throw new BusinessError('FORBIDDEN','当前核销人员不可用',403);
     const activePointIds=new Set((await store.listPickupPoints()).filter((point)=>point.status==='ACTIVE').map((point)=>point.id));
-    const allowed=await Promise.all(plans.map(async(plan)=>plan.status==='ARRIVED'&&plan.pickupPointId&&activePointIds.has(plan.pickupPointId)&&(await store.hasActivePickupVerifierAssignment(actor.userId,plan.pickupPointId))?plan:null));
+    const allowed=await Promise.all(plans.map(async(plan)=>plan.status==='ARRIVED'&&plan.pickupPointId&&activePointIds.has(plan.pickupPointId)&&(await store.hasActivePickupPointAssignment(actor.userId,plan.pickupPointId))?plan:null));
     return {data:allowed.filter((plan):plan is NonNullable<typeof plan>=>plan!==null).map((plan)=>({
       id:plan.id,campaignId:plan.campaignId,serviceAreaId:plan.serviceAreaId,pickupPointId:plan.pickupPointId,status:plan.status,
       siteName:plan.siteName,address:plan.address,arrivalStartAt:plan.arrivalStartAt,arrivalEndAt:plan.arrivalEndAt,
@@ -385,17 +405,42 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     await audit(request,actor.userId,input.orderEnabled?'SERVICE_AREA_OPENED':'SERVICE_AREA_PAUSED','SERVICE_AREA',id,existing,area);return {data:area};
   });
   app.get('/api/v1/admin/pickup-points', async (request) => { requireActor(request, ['OPERATOR','SUPER_ADMIN']); return { data: await store.listPickupPoints() }; });
+  app.get('/api/v1/admin/staff',async(request)=>{
+    requireActor(request,['SUPER_ADMIN']);
+    const {query}=internalStaffDirectoryQuerySchema.parse(request.query);
+    return {data:(await staffService.list(query)).map(staffView)};
+  });
+  app.get('/api/v1/admin/staff/:id',async(request)=>{
+    requireActor(request,['SUPER_ADMIN']);
+    return {data:staffView(await staffService.get(identifierSchema.parse((request.params as{id:string}).id)))};
+  });
+  app.post('/api/v1/admin/staff',async(request,reply)=>{
+    const actor=requireActor(request,['SUPER_ADMIN']);
+    const created=await staffService.create(createInternalStaffSchema.parse(request.body),actor.userId,request.id);
+    return reply.status(201).send({data:{staff:staffView(created.staff),initialCredential:created.initialCredential}});
+  });
+  app.patch('/api/v1/admin/staff/:id',async(request)=>{
+    const actor=requireActor(request,['SUPER_ADMIN']);
+    const staff=await staffService.update(identifierSchema.parse((request.params as{id:string}).id),updateInternalStaffSchema.parse(request.body),actor.userId,request.id);
+    return {data:staffView(staff)};
+  });
+  app.post('/api/v1/admin/staff/:id/reset-credential',async(request)=>{
+    const actor=requireActor(request,['SUPER_ADMIN']);
+    const {reason}=resetInternalStaffCredentialSchema.parse(request.body);
+    const result=await staffService.resetCredential(identifierSchema.parse((request.params as{id:string}).id),reason,actor.userId,request.id);
+    return {data:{staff:staffView(result.staff),initialCredential:result.initialCredential}};
+  });
   app.get('/api/v1/admin/pickup-verifier-assignments',async(request)=>{
-    requireActor(request,['OPERATOR','SUPER_ADMIN']);
+    requireActor(request,['SUPER_ADMIN']);
     const {userId}=pickupVerifierAssignmentQuerySchema.parse(request.query);
     return{data:await store.listPickupVerifierAssignments(userId)};
   });
   app.post('/api/v1/admin/pickup-verifier-assignments/grant',async(request)=>{
-    const actor=requireActor(request,['OPERATOR','SUPER_ADMIN']);
+    const actor=requireActor(request,['SUPER_ADMIN']);
     return{data:await setPickupVerifierAssignment(request,actor.userId,pickupVerifierAssignmentSchema.parse(request.body),true)};
   });
   app.post('/api/v1/admin/pickup-verifier-assignments/revoke',async(request)=>{
-    const actor=requireActor(request,['OPERATOR','SUPER_ADMIN']);
+    const actor=requireActor(request,['SUPER_ADMIN']);
     return{data:await setPickupVerifierAssignment(request,actor.userId,pickupVerifierAssignmentSchema.parse(request.body),false)};
   });
   app.get('/api/v1/admin/network-presets', async (request) => {
@@ -422,8 +467,8 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     return {data:result};
   });
   app.post('/api/v1/admin/pickup-points', async (request, reply) => {
-    requireActor(request, ['OPERATOR','SUPER_ADMIN']); const input=createPickupPointSchema.parse(request.body); const area=(await store.listServiceAreas()).find((item)=>item.id===input.serviceAreaId); if(!area)throw new BusinessError('RESOURCE_NOT_FOUND','服务区域不存在',404);
-    const pickup={id:crypto.randomUUID(),serviceAreaId:area.id,name:input.name,address:input.address,status:'ACTIVE' as const,capacityPerDay:input.capacityPerDay,operationMode:'SELF_OPERATED' as const,responsibilityOwner:null,siteLeadName:null,siteLeadPhone:null,createdAt:new Date().toISOString()}; await store.savePickupPoint(pickup); return reply.status(201).send({data:pickup});
+    const actor=requireActor(request, ['OPERATOR','SUPER_ADMIN']); const input=createPickupPointSchema.parse(request.body); const area=(await store.listServiceAreas()).find((item)=>item.id===input.serviceAreaId); if(!area)throw new BusinessError('RESOURCE_NOT_FOUND','服务区域不存在',404);
+    const pickup={id:crypto.randomUUID(),serviceAreaId:area.id,name:input.name,address:input.address,status:'ACTIVE' as const,capacityPerDay:input.capacityPerDay,operationMode:'SELF_OPERATED' as const,responsibilityOwner:null,siteLeadName:null,siteLeadPhone:null,createdAt:new Date().toISOString()}; await store.savePickupPoint(pickup); await audit(request,actor.userId,'PICKUP_POINT_CREATED','PICKUP_POINT',pickup.id,null,pickup); return reply.status(201).send({data:pickup});
   });
   app.post('/api/v1/admin/pickup-points/batch', async (request, reply) => {
     const actor=requireActor(request, ['OPERATOR','SUPER_ADMIN']);const input=batchCreatePickupPointsSchema.parse(request.body);
@@ -461,8 +506,8 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
   app.post('/api/v1/admin/platform/suppliers',async(request,reply)=>{const actor=requireActor(request,['PROCUREMENT','OPERATOR','SUPER_ADMIN']);const input=supplierSchema.parse(request.body);const now=new Date().toISOString();const value={id:crypto.randomUUID(),legacyMerchantId:null,...input,createdAt:now,updatedAt:now};await store.saveSupplier(value);await audit(request,actor.userId,'SUPPLIER_CREATED','SUPPLIER',value.id,null,value);return reply.status(201).send({data:value});});
   app.get('/api/v1/admin/platform/suppliers/:id/qualifications',async(request)=>{requireActor(request,['PROCUREMENT','OPERATOR','SUPER_ADMIN']);return{data:await store.listSupplierQualifications(identifierSchema.parse((request.params as{id:string}).id))};});
   app.post('/api/v1/admin/platform/suppliers/:id/qualifications',async(request,reply)=>{const actor=requireActor(request,['PROCUREMENT','OPERATOR','SUPER_ADMIN']);const supplierId=identifierSchema.parse((request.params as{id:string}).id);if(!await store.getSupplier(supplierId))throw new BusinessError('RESOURCE_NOT_FOUND','供应商不存在',404);const input=supplierQualificationSchema.parse(request.body);const now=new Date().toISOString();const value={id:crypto.randomUUID(),supplierId,...input,createdAt:now,updatedAt:now};await store.saveSupplierQualification(value);await audit(request,actor.userId,'SUPPLIER_QUALIFICATION_SAVED','SUPPLIER_QUALIFICATION',value.id,null,value);return reply.status(201).send({data:value});});
-  app.get('/api/v1/admin/platform/skus',async(request)=>{requireActor(request,['PROCUREMENT','OPERATOR','SUPER_ADMIN']);return{data:await store.listPlatformSkus()};});
-  app.post('/api/v1/admin/platform/skus',async(request,reply)=>{const actor=requireActor(request,['PROCUREMENT','OPERATOR','SUPER_ADMIN']);const input=platformSkuSchema.parse(request.body);const now=new Date().toISOString();const productId=input.productId??crypto.randomUUID();const existing=input.id?await store.getPlatformSku(input.id):null;const value={id:input.id??crypto.randomUUID(),productId,name:input.skuName,retailPriceCents:moneyCents(input.retailPriceCents),defaultSellableQuantity:input.defaultSellableQuantity,referencePurchaseCostCents:input.referencePurchaseCostCents===null?null:moneyCents(input.referencePurchaseCostCents),supplierNote:input.supplierNote,status:input.status,product:{id:productId,title:input.title,category:input.category,origin:input.origin,imageUrl:input.imageUrl,storageType:'NORMAL_TEMPERATURE' as const,status:input.status==='ACTIVE'?'ACTIVE' as const:'DRAFT' as const},createdAt:existing?.createdAt??now,updatedAt:now};await store.savePlatformSku(value);await audit(request,actor.userId,'PLATFORM_SKU_SAVED','PLATFORM_SKU',value.id,existing,value);return reply.status(existing?200:201).send({data:value});});
+  app.get('/api/v1/admin/platform/skus',async(request)=>{const actor=requireActor(request,['PROCUREMENT','OPERATOR','FINANCE','SUPER_ADMIN']);const commercial=actor.roles.some((role)=>['PROCUREMENT','FINANCE','SUPER_ADMIN'].includes(role));const values=await store.listPlatformSkus();return{data:commercial?values:values.map(withoutCommercialSku)};});
+  app.post('/api/v1/admin/platform/skus',async(request,reply)=>{const actor=requireActor(request,['PROCUREMENT','OPERATOR','SUPER_ADMIN']);const input=platformSkuSchema.parse(request.body);const now=new Date().toISOString();const productId=input.productId??crypto.randomUUID();const existing=input.id?await store.getPlatformSku(input.id):null;const commercial=actor.roles.some((role)=>['PROCUREMENT','SUPER_ADMIN'].includes(role));const value={id:input.id??crypto.randomUUID(),productId,name:input.skuName,retailPriceCents:moneyCents(input.retailPriceCents),defaultSellableQuantity:input.defaultSellableQuantity,referencePurchaseCostCents:commercial?(input.referencePurchaseCostCents===null?null:moneyCents(input.referencePurchaseCostCents)):(existing?.referencePurchaseCostCents??null),supplierNote:commercial?input.supplierNote:(existing?.supplierNote??null),status:input.status,product:{id:productId,title:input.title,category:input.category,origin:input.origin,imageUrl:input.imageUrl,storageType:'NORMAL_TEMPERATURE' as const,status:input.status==='ACTIVE'?'ACTIVE' as const:'DRAFT' as const},createdAt:existing?.createdAt??now,updatedAt:now};await store.savePlatformSku(value);await audit(request,actor.userId,'PLATFORM_SKU_SAVED','PLATFORM_SKU',value.id,existing,value);const response=commercial?value:withoutCommercialSku(value);return reply.status(existing?200:201).send({data:response});});
   app.get('/api/v1/admin/platform/offers',async(request)=>{requireActor(request,['PROCUREMENT','FINANCE','SUPER_ADMIN']);return{data:await store.listSupplierSkuOffers()};});
   app.post('/api/v1/admin/platform/offers',async(request,reply)=>{const actor=requireActor(request,['PROCUREMENT','SUPER_ADMIN']);const input=supplierOfferSchema.parse(request.body);const now=new Date().toISOString();const value={id:crypto.randomUUID(),...input,purchasePriceCents:input.purchasePriceCents===null?null:moneyCents(input.purchasePriceCents),createdAt:now,updatedAt:now};await store.saveSupplierSkuOffer(value);await audit(request,actor.userId,'SUPPLIER_OFFER_SAVED','SUPPLIER_SKU_OFFER',value.id,null,value);return reply.status(201).send({data:value});});
   app.post('/api/v1/admin/platform/campaigns',async(request,reply)=>{const actor=requireActor(request,['PROCUREMENT','OPERATOR','SUPER_ADMIN']);if(!dependencies.config.PLATFORM_PROCUREMENT_ENABLED)throw new BusinessError('BUSINESS_MODEL_NOT_ENABLED','平台采购模式尚未启用真实流量',409);const value=await platformProcurement.createCampaign(platformCampaignSchema.parse(request.body));await audit(request,actor.userId,'PLATFORM_CAMPAIGN_CREATED','CAMPAIGN',value.id,null,value);return reply.status(201).send({data:value});});
@@ -556,29 +601,27 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
   app.post('/api/v1/admin/dispatch-batches',async(request,reply)=>{requireActor(request,['FULFILLMENT','OPERATOR','SUPER_ADMIN']);const input=createDispatchBatchSchema.parse(request.body);return reply.status(201).send({data:await fulfillment.createBatch(input.campaignId)});});
   app.get('/api/v1/admin/dispatch-batches',async(request)=>{requireActor(request,['FULFILLMENT','OPERATOR','SUPER_ADMIN']);return{data:await store.listDispatchBatches()};});
   app.post('/api/v1/admin/dispatch-batches/:id/dispatch',async(request)=>{requireActor(request,['FULFILLMENT','OPERATOR','SUPER_ADMIN']);const id=identifierSchema.parse((request.params as{id:string}).id);return{data:await fulfillment.dispatch(id)};});
-  app.get('/api/v1/admin/community/deliveries',async(request)=>{const actor=requireActor(request,['OPERATOR','FULFILLMENT','PICKUP_VERIFIER','SUPER_ADMIN']);const plans=await store.listDeliveryPlans();const batches=await store.listDispatchBatches();const allowed=actor.roles.includes('SUPER_ADMIN')||actor.roles.includes('OPERATOR')||actor.roles.includes('FULFILLMENT');const actorUser=allowed?null:await store.getUser(actor.userId);if(!allowed&&actorUser?.status!=='ACTIVE')throw new BusinessError('FORBIDDEN','当前核销人员已停用',403);const points=allowed?[]:await store.listPickupPoints();const filtered=[];for(const plan of plans){const campaign=await store.getCampaign(plan.campaignId);if(!campaign||campaign.businessModelVersion!=='PLATFORM_COMMUNITY')continue;if(!allowed&&(!plan.pickupPointId||points.find((point)=>point.id===plan.pickupPointId)?.status!=='ACTIVE'||!(await store.hasActivePickupVerifierAssignment(actor.userId,plan.pickupPointId))))continue;const batch=batches.find((item)=>item.campaignId===campaign.id)??null;const items=await store.listCommunityCampaignItems(campaign.id);const expectedBySku=new Map<string,number>();for(const line of await store.listPlatformSalesLinesByCampaign(campaign.id))expectedBySku.set(line.platformSkuId,(expectedBySku.get(line.platformSkuId)??0)+line.quantity);const confirmation=batch?await store.getCommunityDeliveryConfirmationByBatch(batch.id):null;filtered.push({id:plan.id,campaignId:plan.campaignId,campaignTitle:campaign.title,pickupPointId:plan.pickupPointId,status:plan.status,siteName:plan.siteName,address:plan.address,vehicleOrderNo:plan.vehicleOrderNo,logisticsPlatform:plan.logisticsPlatform,driverName:plan.driverName,vehiclePlate:plan.vehiclePlate,estimatedArrivalAt:plan.estimatedArrivalAt,dispatchedAt:plan.dispatchedAt,arrivedAt:plan.arrivedAt,dispatchBatchId:batch?.status==='IN_TRANSIT'?batch.id:null,arrivalConfirmed:confirmation!==null,expectedItems:items.map((item)=>({platformSkuId:item.platformSkuId,title:item.title,skuName:item.skuName,expectedQuantity:expectedBySku.get(item.platformSkuId)??0})).filter((item)=>item.expectedQuantity>0)});}return{data:filtered};});
-  app.post('/api/v1/admin/community/dispatch-batches/:id/arrival',async(request)=>{const actor=requireActor(request,['PICKUP_VERIFIER','SUPER_ADMIN']);const id=identifierSchema.parse((request.params as{id:string}).id);const batch=await store.getDispatchBatch(id);if(!batch)throw new BusinessError('RESOURCE_NOT_FOUND','配送批次不存在',404);const plan=await store.getDeliveryPlanByCampaign(batch.campaignId);if(!plan?.pickupPointId)throw new BusinessError('FORBIDDEN','配送批次未绑定固定自提点',403);const verifier=await store.getUser(actor.userId);const point=(await store.listPickupPoints(plan.serviceAreaId)).find((item)=>item.id===plan.pickupPointId);if(!verifier||verifier.status!=='ACTIVE'||!point||point.status!=='ACTIVE')throw new BusinessError('FORBIDDEN','核销人员或自提点当前不可用',403);if(!actor.roles.includes('SUPER_ADMIN')&&!(await store.hasActivePickupVerifierAssignment(actor.userId,plan.pickupPointId)))throw new BusinessError('FORBIDDEN','当前人员未获该自提点到货确认授权',403);return{data:await communityFulfillment.confirmArrival(id,actor.userId,communityArrivalSchema.parse(request.body),request.id)};});
+  app.get('/api/v1/admin/community/deliveries',async(request)=>{const actor=requireActor(request,['OPERATOR','FULFILLMENT','PICKUP_MANAGER','PICKUP_VERIFIER','SUPER_ADMIN']);const plans=await store.listDeliveryPlans();const batches=await store.listDispatchBatches();const allowed=actor.roles.includes('SUPER_ADMIN')||actor.roles.includes('OPERATOR')||actor.roles.includes('FULFILLMENT');const filtered=[];for(const plan of plans){const campaign=await store.getCampaign(plan.campaignId);if(!campaign||campaign.businessModelVersion!=='PLATFORM_COMMUNITY')continue;if(!allowed&&(!plan.pickupPointId||!(await store.hasActivePickupPointAssignment(actor.userId,plan.pickupPointId))))continue;const batch=batches.find((item)=>item.campaignId===campaign.id)??null;const items=await store.listCommunityCampaignItems(campaign.id);const expectedBySku=new Map<string,number>();for(const line of await store.listPlatformSalesLinesByCampaign(campaign.id))expectedBySku.set(line.platformSkuId,(expectedBySku.get(line.platformSkuId)??0)+line.quantity);const confirmation=batch?await store.getCommunityDeliveryConfirmationByBatch(batch.id):null;filtered.push({id:plan.id,campaignId:plan.campaignId,campaignTitle:campaign.title,pickupPointId:plan.pickupPointId,status:plan.status,siteName:plan.siteName,address:plan.address,vehicleOrderNo:plan.vehicleOrderNo,logisticsPlatform:plan.logisticsPlatform,driverName:plan.driverName,vehiclePlate:plan.vehiclePlate,estimatedArrivalAt:plan.estimatedArrivalAt,dispatchedAt:plan.dispatchedAt,arrivedAt:plan.arrivedAt,dispatchBatchId:batch?.status==='IN_TRANSIT'?batch.id:null,arrivalConfirmed:confirmation!==null,expectedItems:items.map((item)=>({platformSkuId:item.platformSkuId,title:item.title,skuName:item.skuName,expectedQuantity:expectedBySku.get(item.platformSkuId)??0})).filter((item)=>item.expectedQuantity>0)});}return{data:filtered};});
+  app.post('/api/v1/admin/community/dispatch-batches/:id/arrival',async(request)=>{const actor=requireActor(request,['PICKUP_MANAGER','PICKUP_VERIFIER','SUPER_ADMIN']);const id=identifierSchema.parse((request.params as{id:string}).id);const batch=await store.getDispatchBatch(id);if(!batch)throw new BusinessError('RESOURCE_NOT_FOUND','配送批次不存在',404);const plan=await store.getDeliveryPlanByCampaign(batch.campaignId);if(!plan?.pickupPointId)throw new BusinessError('FORBIDDEN','配送批次未绑定固定自提点',403);await assertActivePickupPointAccess(actor,plan.pickupPointId);return{data:await communityFulfillment.confirmArrival(id,actor.userId,communityArrivalSchema.parse(request.body),request.id)};});
   app.post('/api/v1/pickup/batches/:id/receive',async(request)=>{requireActor(request,['FULFILLMENT','OPERATOR','SUPER_ADMIN']);const id=identifierSchema.parse((request.params as{id:string}).id);const batch=await store.getDispatchBatch(id);if(!batch)throw new BusinessError('RESOURCE_NOT_FOUND','发车批次不存在',404);const campaign=await store.getCampaign(batch.campaignId);if(!campaign)throw new BusinessError('RESOURCE_NOT_FOUND','团期不存在',404);if(campaign.businessModelVersion==='PLATFORM_COMMUNITY')throw new BusinessError('INVALID_STATE_TRANSITION','社区团购必须使用点位逐商品到货确认入口',409);const input=receiveBatchSchema.parse(request.body);return{data:await fulfillment.receive(id,input.deliveryPlanId)};});
   app.get('/api/v1/pickup-code',async(request)=>{const actor=requireActor(request,['USER','SUPER_ADMIN']);const query=request.query as{orderId?:string};const orderId=identifierSchema.parse(query.orderId);return{data:await fulfillment.getCode(orderId,actor.userId)};});
   app.get('/api/v1/pickup/orders/lookup',async(request)=>{
-    const actor=requireActor(request,['PICKUP_VERIFIER','FULFILLMENT','SUPER_ADMIN']);
+    const actor=requireActor(request,['PICKUP_MANAGER','PICKUP_VERIFIER','FULFILLMENT','SUPER_ADMIN']);
     const query=pickupOrderLookupQuerySchema.parse(request.query);
     const plan=await store.getDeliveryPlan(query.deliveryPlanId);
     if(!plan||!plan.pickupPointId||plan.status!=='ARRIVED')throw new BusinessError('RESOURCE_NOT_FOUND','配送计划不存在或当前不可核销',404);
     const pickupPoint=(await store.listPickupPoints(plan.serviceAreaId)).find((item)=>item.id===plan.pickupPointId);
     if(!pickupPoint||pickupPoint.status!=='ACTIVE')throw new BusinessError('FORBIDDEN','当前自提点未启用，不能核销',403);
-    const verifier=await store.getUser(actor.userId);
-    if(!verifier||verifier.status!=='ACTIVE')throw new BusinessError('FORBIDDEN','当前核销人员不可用',403);
-    if(!actor.roles.includes('SUPER_ADMIN')&&!(await store.hasActivePickupVerifierAssignment(actor.userId,plan.pickupPointId)))throw new BusinessError('FORBIDDEN','当前核销人员未获该自提点授权',403);
+    await assertActivePickupPointAccess(actor,plan.pickupPointId);
     const order=await store.getOrderByNo(query.orderNo);
     if(!order||order.deliveryPlanId!==plan.id||order.pickupPointId!==plan.pickupPointId)throw new BusinessError('RESOURCE_NOT_FOUND','未找到本领取点的订单',404);
     return {data:{id:order.id,orderNo:order.orderNo,deliveryPlanId:order.deliveryPlanId,status:order.status,items:order.items.map((item)=>({skuId:item.skuId,name:item.name,quantity:item.quantity,readyQuantity:item.fulfilledQuantity,alreadyPickedQuantity:item.pickedUpQuantity,remainingPickupQuantity:Math.max(0,item.fulfilledQuantity-item.pickedUpQuantity),exceptionQuantity:item.exceptionQuantity}))}};
   });
-  app.post('/api/v1/pickup/verify',async(request)=>{const actor=requireActor(request,['PICKUP_VERIFIER','FULFILLMENT','SUPER_ADMIN']);const input=verifyPickupSchema.parse(request.body);return{data:await fulfillment.verify(input.orderId,input.deliveryPlanId,input.code,actor.userId,actor.roles.includes('SUPER_ADMIN'),input.items)};});
+  app.post('/api/v1/pickup/verify',async(request)=>{const actor=requireActor(request,['PICKUP_MANAGER','PICKUP_VERIFIER','FULFILLMENT','SUPER_ADMIN']);const input=verifyPickupSchema.parse(request.body);return{data:await fulfillment.verify(input.orderId,input.deliveryPlanId,input.code,actor.userId,actor.roles.includes('SUPER_ADMIN'),input.items)};});
   app.get('/api/v1/admin/finance/ledger',async(request)=>{requireActor(request,['FINANCE','SUPER_ADMIN']);const query=request.query as{orderId?:string};return{data:await store.listLedgerTransactions(query.orderId)};});
   app.get('/api/v1/admin/finance/settlements',async(request)=>{requireActor(request,['FINANCE','SUPER_ADMIN']);const query=request.query as{orderId?:string};return{data:await store.listSettlements(query.orderId)};});
-  app.get('/api/v1/admin/finance/refunds',async(request)=>{requireActor(request,['FINANCE','OPERATOR','SUPER_ADMIN']);return{data:await store.listRefunds(500)};});
-  app.get('/api/v1/admin/orders',async(request)=>{requireActor(request,['OPERATOR','FULFILLMENT','FINANCE','SUPER_ADMIN']);const query=request.query as{orderNo?:string};if(query.orderNo){const value=await store.getOrderByNo(query.orderNo.trim());return{data:value?[value]:[]};}return{data:await store.listOrders(100)};});
+  app.get('/api/v1/admin/finance/refunds',async(request)=>{requireActor(request,['FINANCE','SUPER_ADMIN']);return{data:await store.listRefunds(500)};});
+  app.get('/api/v1/admin/orders',async(request)=>{requireActor(request,['OPERATOR','FULFILLMENT','FINANCE','CUSTOMER_SERVICE','SUPER_ADMIN']);const query=request.query as{orderNo?:string};if(query.orderNo){const value=await store.getOrderByNo(query.orderNo.trim());return{data:value?[value]:[]};}return{data:await store.listOrders(100)};});
   app.post('/api/v1/admin/orders/:id/refund',async(request)=>{const actor=requireActor(request,['FINANCE','SUPER_ADMIN']);const id=identifierSchema.parse((request.params as{id:string}).id);const before=await store.getOrder(id);if(before?.businessModelVersion!=='LEGACY_MARKETPLACE')throw new BusinessError('PARTIAL_REFUND_NOT_SUPPORTED','模式 B 订单只能从运营确认的履约异常执行退款',409);if((await store.listSettlements(id)).length)throw new BusinessError('SETTLEMENT_EXISTS','订单已生成结算单，不能自动退款，请转人工财务处理',409);await payments.requestFullRefund(id);const after=await store.getOrder(id);await audit(request,actor.userId,'ORDER_FULL_REFUND_REQUESTED','ORDER',id,before,after);return{data:after};});
   app.get('/api/v1/admin/audit-logs',async(request)=>{requireActor(request,['SUPER_ADMIN']);return{data:await store.listAuditLogs(500)};});
   app.get('/api/v1/admin/service-area-interests',async(request)=>{requireActor(request,['OPERATOR','CUSTOMER_SERVICE','SUPER_ADMIN']);return{data:await store.listServiceAreaInterests(500)};});

@@ -1,10 +1,31 @@
 import { afterAll,beforeAll,describe,expect,it } from 'vitest';
+import { execFile as execFileCallback } from 'node:child_process';
+import { promisify } from 'node:util';
+import mysql from 'mysql2/promise';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
 import { MysqlStore } from './modules/core/mysql-store.js';
 
 const databaseUrl=process.env.INTEGRATION_DATABASE_URL;const redisUrl=process.env.INTEGRATION_REDIS_URL;
+const migrationTestDatabaseUrl=process.env.MIGRATION_TEST_DATABASE_URL;
+const execFile=promisify(execFileCallback);
+
+function temporaryMigrationDatabaseUrl(baseUrl:string,databaseName:string):string{
+  const value=new URL(baseUrl);value.pathname=`/${databaseName}`;return value.toString();
+}
+
+function migrationServerUrl(baseUrl:string):string{
+  const value=new URL(baseUrl);value.pathname='/';return value.toString();
+}
+
+async function runMigrationProcess(url:string,stopAfter?:string,disableStaffRecovery=false):Promise<string>{
+  const result=await execFile(process.execPath,['--import','tsx','src/scripts/migrate.ts'],{
+    cwd:process.cwd(),
+    env:{...process.env,DATABASE_URL:url,NODE_ENV:'test',...(stopAfter?{MIGRATION_TEST_STOP_AFTER:stopAfter}:{}),...(disableStaffRecovery?{MIGRATION_TEST_DISABLE_0033_RECOVERY:'true'}:{})},
+  });
+  return `${result.stdout}\n${result.stderr}`;
+}
 describe.skipIf(!databaseUrl||!redisUrl)('real MySQL and Redis integration',()=>{
   let app:FastifyInstance;
   let store:MysqlStore;
@@ -120,4 +141,89 @@ describe.skipIf(!databaseUrl||!redisUrl)('real MySQL and Redis integration',()=>
     const purchaseOrders=await app.inject({method:'GET',url:'/api/v1/admin/platform/purchase-orders',headers:operator});
     expect((purchaseOrders.json().data as Array<{campaignId:string}>).filter((value)=>value.campaignId===campaignId)).toEqual([]);
   },15_000);
+
+  it.skipIf(!migrationTestDatabaseUrl)('recovers the 0033 partial-DDL failure without deleting migration artifacts or editing metadata manually',async()=>{
+    const databaseName=`hometown_migration_recovery_${crypto.randomUUID().replaceAll('-','')}`;
+    if(!databaseName.startsWith('hometown_migration_recovery_'))throw new Error('refusing to create an unexpected migration test database');
+    const server=mysql.createConnection({uri:migrationServerUrl(migrationTestDatabaseUrl!)});
+    await (await server).query(`CREATE DATABASE \`${databaseName}\``);
+    const scratchUrl=temporaryMigrationDatabaseUrl(migrationTestDatabaseUrl!,databaseName);
+    try{
+      await runMigrationProcess(scratchUrl,'0032_community_fulfillment.sql');
+      const scratch=await mysql.createConnection({uri:scratchUrl});
+      await scratch.query('ALTER TABLE admin_credentials ADD COLUMN must_change_password TINYINT(1) NOT NULL DEFAULT 0 AFTER password_hash');
+      await scratch.end();
+
+      await expect(runMigrationProcess(scratchUrl,undefined,true)).rejects.toBeDefined();
+      const failed=await mysql.createConnection({uri:scratchUrl});
+      const [failedRows]=await failed.query<Array<{state:string}>>("SELECT state FROM schema_migrations WHERE name = '0033_internal_staff_accounts.sql'");
+      const [partialStaffRows]=await failed.query('SHOW TABLES LIKE \'internal_staff\'');
+      const [partialAssignmentRows]=await failed.query('SHOW TABLES LIKE \'staff_pickup_point_assignments\'');
+      expect(failedRows).toEqual([{state:'FAILED'}]);
+      expect(partialStaffRows).toHaveLength(1);expect(partialAssignmentRows).toHaveLength(1);
+      await failed.end();
+
+      const output=await runMigrationProcess(scratchUrl);
+      expect(output).toContain('recovered 0033_internal_staff_accounts.sql');
+      const verified=await mysql.createConnection({uri:scratchUrl});
+      const [migrationRows]=await verified.query<Array<{state:string;error_message:string|null}>>(
+        "SELECT state,error_message FROM schema_migrations WHERE name = '0033_internal_staff_accounts.sql'",
+      );
+      expect(migrationRows).toEqual([{state:'APPLIED',error_message:null}]);
+      const [staffRows]=await verified.query('SHOW TABLES LIKE \'internal_staff\'');
+      const [assignmentRows]=await verified.query('SHOW TABLES LIKE \'staff_pickup_point_assignments\'');
+      expect(staffRows).toHaveLength(1);expect(assignmentRows).toHaveLength(1);
+      await verified.end();
+      await expect(runMigrationProcess(scratchUrl)).resolves.toBeDefined();
+    }finally{
+      const cleanup=await server;
+      await cleanup.query(`DROP DATABASE IF EXISTS \`${databaseName}\``);
+      await cleanup.end();
+    }
+  },30_000);
+
+  it.skipIf(!migrationTestDatabaseUrl)('refuses a same-named 0033 table whose phone column has an incompatible type',async()=>{
+    const databaseName=`hometown_migration_incompatible_${crypto.randomUUID().replaceAll('-','')}`;
+    if(!databaseName.startsWith('hometown_migration_incompatible_'))throw new Error('refusing to create an unexpected migration test database');
+    const server=mysql.createConnection({uri:migrationServerUrl(migrationTestDatabaseUrl!)});
+    await (await server).query(`CREATE DATABASE \`${databaseName}\``);
+    const scratchUrl=temporaryMigrationDatabaseUrl(migrationTestDatabaseUrl!,databaseName);
+    try{
+      await runMigrationProcess(scratchUrl,'0032_community_fulfillment.sql');
+      const scratch=await mysql.createConnection({uri:scratchUrl});
+      await scratch.query(`CREATE TABLE internal_staff (
+        user_id CHAR(36) PRIMARY KEY,
+        staff_no VARCHAR(32) NOT NULL,
+        display_name VARCHAR(80) NOT NULL,
+        phone INT NOT NULL,
+        role ENUM('SUPER_ADMIN','OPERATOR','CUSTOMER_SERVICE','FINANCE','PICKUP_MANAGER') NOT NULL,
+        status ENUM('PENDING_ACTIVATION','ACTIVE','SUSPENDED') NOT NULL DEFAULT 'PENDING_ACTIVATION',
+        created_by CHAR(36) NULL,
+        activated_at DATETIME(3) NULL,
+        suspended_at DATETIME(3) NULL,
+        suspension_reason VARCHAR(500) NULL,
+        created_at DATETIME(3) NOT NULL,
+        updated_at DATETIME(3) NOT NULL,
+        UNIQUE KEY uk_internal_staff_no (staff_no),
+        UNIQUE KEY uk_internal_staff_phone (phone),
+        INDEX idx_internal_staff_directory (status, role, display_name),
+        CONSTRAINT fk_internal_staff_user FOREIGN KEY (user_id) REFERENCES users(id)
+      ) ENGINE=InnoDB`);
+      await scratch.query('ALTER TABLE admin_credentials ADD COLUMN must_change_password TINYINT(1) NOT NULL DEFAULT 0 AFTER password_hash');
+      await scratch.end();
+
+      await expect(runMigrationProcess(scratchUrl,undefined,true)).rejects.toBeDefined();
+      await expect(runMigrationProcess(scratchUrl)).rejects.toBeDefined();
+      const verified=await mysql.createConnection({uri:scratchUrl});
+      const [migrationRows]=await verified.query<Array<{state:string}>>("SELECT state FROM schema_migrations WHERE name = '0033_internal_staff_accounts.sql'");
+      const [phoneRows]=await verified.query<Array<{Type:string;Null:string}>>('SHOW COLUMNS FROM internal_staff LIKE \'phone\'');
+      expect(migrationRows).toEqual([{state:'FAILED'}]);
+      expect(phoneRows).toMatchObject([{Type:'int',Null:'NO'}]);
+      await verified.end();
+    }finally{
+      const cleanup=await server;
+      await cleanup.query(`DROP DATABASE IF EXISTS \`${databaseName}\``);
+      await cleanup.end();
+    }
+  },30_000);
 });

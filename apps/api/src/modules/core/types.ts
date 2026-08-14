@@ -156,7 +156,12 @@ export interface User { id:string; wechatOpenId:string|null; status:'ACTIVE'|'BL
 /** Immutable evidence of a user's explicit acceptance of one privacy notice version. */
 export interface PrivacyConsent { userId:string; documentVersion:string; consentedAt:string }
 export interface AuthSession { tokenHash:string; userId:string; roles:Role[]; expiresAt:string }
-export interface AdminCredential { username:string; userId:string; passwordSalt:string; passwordHash:string; roles:Role[]; createdAt:string }
+export type InternalStaffRole='SUPER_ADMIN'|'OPERATOR'|'CUSTOMER_SERVICE'|'FINANCE'|'PICKUP_MANAGER';
+export type InternalStaffStatus='PENDING_ACTIVATION'|'ACTIVE'|'SUSPENDED';
+/** Internal employees are never inferred from consumer users or legacy verifier grants. */
+export interface InternalStaff { userId:string; staffNo:string; displayName:string; phone:string; role:InternalStaffRole; status:InternalStaffStatus; createdBy:string|null; activatedAt:string|null; suspendedAt:string|null; suspensionReason:string|null; createdAt:string; updatedAt:string }
+export interface StaffPickupPointAssignment { staffUserId:string; pickupPointId:string; assignedBy:string; createdAt:string; updatedAt:string }
+export interface AdminCredential { username:string; userId:string; passwordSalt:string; passwordHash:string; mustChangePassword:boolean; roles:Role[]; createdAt:string }
 /**
  * Append-only grant/revoke event. A verifier can use a pickup point only when
  * its most recent event for that point is GRANTED.

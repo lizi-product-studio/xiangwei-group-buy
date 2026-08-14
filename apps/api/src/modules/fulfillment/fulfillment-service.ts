@@ -158,7 +158,7 @@ export class FulfillmentService {
       if(!verifier||verifier.status!=='ACTIVE')throw new BusinessError('FORBIDDEN','当前核销人员不可用',403);
       const pickupPoint=(await store.listPickupPoints(plan.serviceAreaId)).find((item)=>item.id===plan.pickupPointId);
       if(!pickupPoint||pickupPoint.status!=='ACTIVE')throw new BusinessError('FORBIDDEN','当前自提点未启用，不能核销',403);
-      if(!bypassPointAuthorization&&!(await store.hasActivePickupVerifierAssignment(verifierId,plan.pickupPointId)))throw new BusinessError('FORBIDDEN','当前核销人员未获该自提点授权',403);
+      if(!bypassPointAuthorization&&!(await store.hasActivePickupPointAssignment(verifierId,plan.pickupPointId)))throw new BusinessError('FORBIDDEN','当前核销人员未获该自提点授权',403);
       if (order.businessModelVersion === 'PLATFORM_COMMUNITY') {
         const selected=requestedItems??order.items.filter((item)=>item.fulfilledQuantity-item.pickedUpQuantity>0).map((item)=>({platformSkuId:item.skuId,quantity:item.fulfilledQuantity-item.pickedUpQuantity}));
         const merged=new Map<string,number>();for(const item of selected)merged.set(item.platformSkuId,(merged.get(item.platformSkuId)??0)+item.quantity);
