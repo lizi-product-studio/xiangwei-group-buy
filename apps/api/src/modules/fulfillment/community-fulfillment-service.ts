@@ -46,7 +46,7 @@ export class CommunityFulfillmentService {
     });
   }
 
-  public async confirmArrival(batchId:string,actorId:string,input:CommunityArrivalInput,requestId:string):Promise<CommunityDeliveryConfirmation>{
+  public async confirmArrival(batchId:string,actorId:string,input:CommunityArrivalInput,requestId:string,emergencyProxy=false):Promise<CommunityDeliveryConfirmation>{
     return this.store.transaction(async(store)=>{
       const batch=await store.getDispatchBatch(batchId); if(!batch)throw new BusinessError('RESOURCE_NOT_FOUND','配送批次不存在',404);
       const campaign=await store.getCampaignForUpdate(batch.campaignId); if(!campaign||campaign.businessModelVersion!=='PLATFORM_COMMUNITY')throw new BusinessError('RESOURCE_NOT_FOUND','社区团期不存在',404);
@@ -74,7 +74,7 @@ export class CommunityFulfillmentService {
       for(const orderId of orderIds){const order=await store.getOrderForUpdate(orderId);if(!order||order.status!=='IN_TRANSIT')continue; const orderRows=updatedRows.filter((row)=>row.orderId===order.id);if(!orderRows.some((row)=>row.fulfilledQuantity>0))continue; order.status=transitionOrder(order.status,'READY_FOR_PICKUP');await store.saveOrderStatus(order);await store.savePickupCredential({orderId:order.id,codeHash:this.pickupHash(order.id),status:'ACTIVE',expiresAt:new Date(Date.now()+14*86_400_000).toISOString()});}
       batch.status='ARRIVED';batch.arrivedAt=now;await store.saveDispatchBatch(batch);plan.status='ARRIVED';plan.arrivedAt=now;plan.updatedAt=now;await store.saveDeliveryPlan(plan);
       if(!await store.saveCommunityDeliveryConfirmation(confirmation)){const raced=await store.getCommunityDeliveryConfirmationByBatch(batch.id);if(raced)return raced;throw new BusinessError('CONCURRENT_MODIFICATION','到货确认已被并发处理，请刷新后重试',409);}
-      await this.audit(store,actorId,requestId,'COMMUNITY_DELIVERY_CONFIRMED','COMMUNITY_DELIVERY',confirmation.id,null,{confirmation,exception,allocations});
+      await this.audit(store,actorId,requestId,emergencyProxy?'COMMUNITY_DELIVERY_EMERGENCY_CONFIRMED':'COMMUNITY_DELIVERY_CONFIRMED','COMMUNITY_DELIVERY',confirmation.id,null,{confirmation,exception,allocations,emergencyProxy});
       return confirmation;
     });
   }

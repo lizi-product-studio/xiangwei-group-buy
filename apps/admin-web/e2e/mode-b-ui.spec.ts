@@ -35,16 +35,26 @@ test('创建点位负责人后，只能在本点工作台完成到货、部分�
   const area = await call<{ id: string }>(request, '/api/v1/admin/service-areas', 'POST', { regionCode: '130606' });
   const point = await call<{ id: string; name: string }>(request, '/api/v1/admin/pickup-points', 'POST', { serviceAreaId: area.id, name: `E2E 点位 ${suffix}`, address: `保定市莲池区 E2E 路 ${suffix}`, capacityPerDay: 100 });
   const sku = await call<{ id: string }>(request, '/api/v1/admin/platform/skus', 'POST', { title: `E2E 干货 ${suffix}`, category: '干货', origin: '河北', imageUrl: null, skuName: '500g', retailPriceCents: 1200, defaultSellableQuantity: 10, referencePurchaseCostCents: null, supplierNote: null, status: 'ACTIVE' });
-  const campaign = await call<{ id: string }>(request, '/api/v1/admin/community/campaigns', 'POST', { title: `E2E 团期 ${suffix}`, serviceAreaId: area.id, pickupPointId: point.id, cutoffAt: new Date(Date.now() + 3_000).toISOString(), dispatchAt: new Date(Date.now() + 86_400_000).toISOString(), minTotalQuantity: 1, failureAction: 'CANCEL_AND_REFUND', items: [{ platformSkuId: sku.id, retailPriceCents: 1200, sellableQuantity: 3 }] });
-  await call(request, `/api/v1/admin/campaigns/${campaign.id}/open`, 'POST');
-  const order = await call<{ id: string; orderNo: string }>(request, '/api/v1/orders', 'POST', { campaignId: campaign.id, serviceAreaId: area.id, pickupPointId: point.id, items: [{ skuId: sku.id, quantity: 3 }] }, { ...demoSuper, 'idempotency-key': `staff-ui-order-${suffix}` });
-  await call(request, `/api/v1/orders/${order.id}/mock-pay`, 'POST');
+  const cutoffAt = new Date(Date.now() + 3_000).toISOString();
+  const normalCampaign = await call<{ id: string }>(request, '/api/v1/admin/community/campaigns', 'POST', { title: `E2E 正常到货团 ${suffix}`, serviceAreaId: area.id, pickupPointId: point.id, cutoffAt, dispatchAt: new Date(Date.now() + 86_400_000).toISOString(), minTotalQuantity: 1, failureAction: 'CANCEL_AND_REFUND', items: [{ platformSkuId: sku.id, retailPriceCents: 1200, sellableQuantity: 1 }] });
+  const exceptionCampaign = await call<{ id: string }>(request, '/api/v1/admin/community/campaigns', 'POST', { title: `E2E 差异到货团 ${suffix}`, serviceAreaId: area.id, pickupPointId: point.id, cutoffAt, dispatchAt: new Date(Date.now() + 86_400_000).toISOString(), minTotalQuantity: 1, failureAction: 'CANCEL_AND_REFUND', items: [{ platformSkuId: sku.id, retailPriceCents: 1200, sellableQuantity: 3 }] });
+  await call(request, `/api/v1/admin/campaigns/${normalCampaign.id}/open`, 'POST');
+  await call(request, `/api/v1/admin/campaigns/${exceptionCampaign.id}/open`, 'POST');
+  const normalOrder = await call<{ id: string; orderNo: string }>(request, '/api/v1/orders', 'POST', { campaignId: normalCampaign.id, serviceAreaId: area.id, pickupPointId: point.id, items: [{ skuId: sku.id, quantity: 1 }] }, { ...demoSuper, 'idempotency-key': `staff-ui-normal-order-${suffix}` });
+  const exceptionOrder = await call<{ id: string; orderNo: string }>(request, '/api/v1/orders', 'POST', { campaignId: exceptionCampaign.id, serviceAreaId: area.id, pickupPointId: point.id, items: [{ skuId: sku.id, quantity: 3 }] }, { ...demoSuper, 'idempotency-key': `staff-ui-exception-order-${suffix}` });
+  await call(request, `/api/v1/orders/${normalOrder.id}/mock-pay`, 'POST');
+  await call(request, `/api/v1/orders/${exceptionOrder.id}/mock-pay`, 'POST');
   await page.waitForTimeout(3_250);
-  await call(request, `/api/v1/admin/campaigns/${campaign.id}/close`, 'POST');
-  const delivery = (await call<Array<{ id: string }>>(request, '/api/v1/admin/community/deliveries', 'GET')).find((item) => item.id) ?? (() => { throw new Error('expected community delivery'); })();
-  await call(request, `/api/v1/admin/delivery-plans/${delivery.id}/book-vehicle`, 'POST', { logisticsPlatform: '货拉拉', vehicleOrderNo: `HL-${suffix}`, driverName: 'E2E 司机', driverPhone: '13900000000', vehiclePlate: '冀F12345', estimatedArrivalAt: new Date(Date.now() + 3_600_000).toISOString(), remark: null });
-  const batch = await call<{ id: string }>(request, '/api/v1/admin/dispatch-batches', 'POST', { campaignId: campaign.id });
-  await call(request, `/api/v1/admin/dispatch-batches/${batch.id}/dispatch`, 'POST');
+  await call(request, `/api/v1/admin/campaigns/${normalCampaign.id}/close`, 'POST');
+  await call(request, `/api/v1/admin/campaigns/${exceptionCampaign.id}/close`, 'POST');
+  const deliveries = await call<Array<{ id: string; campaignId: string }>>(request, '/api/v1/admin/community/deliveries', 'GET');
+  const normalDelivery = deliveries.find((item) => item.campaignId === normalCampaign.id) ?? (() => { throw new Error('expected normal community delivery'); })();
+  const exceptionDelivery = deliveries.find((item) => item.campaignId === exceptionCampaign.id) ?? (() => { throw new Error('expected exception community delivery'); })();
+  for (const [campaignId, delivery, suffixPart] of [[normalCampaign.id, normalDelivery, 'normal'], [exceptionCampaign.id, exceptionDelivery, 'exception']] as const) {
+    await call(request, `/api/v1/admin/delivery-plans/${delivery.id}/book-vehicle`, 'POST', { logisticsPlatform: '货拉拉', vehicleOrderNo: `HL-${suffix}-${suffixPart}`, driverName: 'E2E 司机', driverPhone: '13900000000', vehiclePlate: '冀F12345', estimatedArrivalAt: new Date(Date.now() + 3_600_000).toISOString(), remark: null });
+    const batch = await call<{ id: string }>(request, '/api/v1/admin/dispatch-batches', 'POST', { campaignId });
+    await call(request, `/api/v1/admin/dispatch-batches/${batch.id}/dispatch`, 'POST');
+  }
 
   await page.goto('/');
   await signIn(page, `e2e.admin.${suffix}`, 'e2e platform administrator password');
@@ -84,7 +94,15 @@ test('创建点位负责人后，只能在本点工作台完成到货、部分�
   await expect(page.getByText('商品管理', { exact: true })).toHaveCount(0);
   await expect(page.getByText('财务管理', { exact: true })).toHaveCount(0);
 
-  await page.getByRole('button', { name: '逐商品确认到货' }).click();
+  const normalRow = page.getByRole('row', { name: new RegExp(`E2E 正常到货团 ${suffix}`) });
+  await normalRow.getByRole('button', { name: '逐商品确认到货' }).click();
+  await page.getByLabel('接货人').fill('E2E 点位负责人');
+  await page.getByRole('button', { name: '确认到货与差异' }).click();
+  await expect(normalRow.getByText('已到货', { exact: true })).toBeVisible();
+  await expect(normalRow.getByRole('button', { name: '查询订单并确认领取' })).toBeVisible();
+
+  const exceptionRow = page.getByRole('row', { name: new RegExp(`E2E 差异到货团 ${suffix}`) });
+  await exceptionRow.getByRole('button', { name: '逐商品确认到货' }).click();
   await page.getByLabel('接货人').fill('E2E 点位负责人');
   await page.getByLabel('实到').fill('2');
   await page.getByLabel('短少').fill('1');
@@ -92,10 +110,12 @@ test('创建点位负责人后，只能在本点工作台完成到货、部分�
   await page.getByText('运输短少', { exact: true }).last().click();
   await page.getByLabel('文字证据（有差异时必填）').fill('现场清点短少一件');
   await page.getByRole('button', { name: '确认到货与差异' }).click();
+  await expect(exceptionRow.getByText('已到货（有差异）', { exact: true })).toBeVisible();
+  await expect(exceptionRow.getByText('存在配送差异，仅可核销正常实到商品')).toBeVisible();
 
-  const code = await call<{ code: string }>(request, `/api/v1/pickup-code?orderId=${order.id}`, 'GET');
-  await page.getByRole('button', { name: '查询订单并确认领取' }).click();
-  await page.getByLabel('订单号').fill(order.orderNo);
+  const code = await call<{ code: string }>(request, `/api/v1/pickup-code?orderId=${exceptionOrder.id}`, 'GET');
+  await exceptionRow.getByRole('button', { name: '查询订单并确认领取' }).click();
+  await page.getByLabel('订单号').fill(exceptionOrder.orderNo);
   await page.getByRole('button', { name: '查询订单商品' }).click();
   await expect(page.getByText(/待领 2 \/ 已领 0 \/ 异常 1/)).toBeVisible();
   await page.getByLabel('六码取货码').fill(code.code);
@@ -104,6 +124,14 @@ test('创建点位负责人后，只能在本点工作台完成到货、部分�
   const managerToken = await page.evaluate(() => localStorage.getItem('hometown-admin-token'));
   await signOut(page);
   await signIn(page, `e2e.admin.${suffix}`, 'e2e platform administrator password');
+  await page.getByRole('button', { name: '物流管理' }).click();
+  const operationsNormalRow = page.getByRole('row', { name: new RegExp(`E2E 正常到货团 ${suffix}`) });
+  const operationsExceptionRow = page.getByRole('row', { name: new RegExp(`E2E 差异到货团 ${suffix}`) });
+  await expect(operationsNormalRow.getByText('已到货', { exact: true })).toBeVisible();
+  await expect(operationsNormalRow.getByText('等待用户领取')).toBeVisible();
+  await expect(operationsExceptionRow.getByText('已到货（有差异）', { exact: true })).toBeVisible();
+  await expect(operationsExceptionRow.getByRole('button', { name: '处理配送异常' })).toBeVisible();
+  await expect(operationsExceptionRow.getByText('正常商品已可领取')).toBeVisible();
   await page.getByRole('button', { name: '系统设置' }).click();
   await page.getByRole('row', { name: new RegExp('E2E 点位负责人') }).getByRole('button', { name: '变更/停用' }).click();
   await page.getByLabel('状态').click();
