@@ -128,7 +128,7 @@ describe('API regression', () => {
     expect(genericCommunityReceive.statusCode,genericCommunityReceive.body).toBe(409);
     expect((await store.getDeliveryPlanByCampaign(campaignId))?.status).toBe('IN_TRANSIT');
     expect((await app.inject({method:'GET',url:`/api/v1/pickup-code?orderId=${orderId}`,headers:customer})).statusCode).toBe(409);
-    const arrival={receivedBy:'点位负责人',confirmationNote:'现场已清点',items:[{platformSkuId:'community-sku-a',receivedQuantity:2,rejectedQuantity:0,shortQuantity:0,damagedQuantity:0,reason:null,evidenceNote:null,evidenceUrl:null},{platformSkuId:'community-sku-b',receivedQuantity:2,rejectedQuantity:0,shortQuantity:1,damagedQuantity:0,reason:'TRANSIT_SHORTAGE',evidenceNote:'现场少一袋，已拍照',evidenceUrl:null}]};
+    const arrival={receivedBy:'点位负责人',confirmationNote:'现场已清点',items:[{platformSkuId:'community-sku-a',receivedQuantity:2,rejectedQuantity:0,shortQuantity:0,damagedQuantity:0,reason:null,evidenceNote:null},{platformSkuId:'community-sku-b',receivedQuantity:2,rejectedQuantity:0,shortQuantity:1,damagedQuantity:0,reason:'TRANSIT_SHORTAGE',evidenceNote:'现场少一袋，已拍照'}]};
     expect((await app.inject({method:'POST',url:`/api/v1/admin/community/dispatch-batches/${batchId}/arrival`,headers:operator,payload:arrival})).statusCode).toBe(403);
     expect((await app.inject({method:'POST',url:`/api/v1/admin/community/dispatch-batches/${batchId}/arrival`,headers:verifier,payload:arrival})).statusCode).toBe(403);
     const otherPointId='community-other-point';const now=new Date().toISOString();
@@ -138,6 +138,15 @@ describe('API regression', () => {
     expect((await app.inject({method:'POST',url:`/api/v1/admin/community/dispatch-batches/${batchId}/arrival`,headers:pickupManager,payload:arrival})).statusCode).toBe(403);
     expect((await app.inject({method:'POST',url:'/api/v1/admin/pickup-verifier-assignments/grant',headers:superAdmin,payload:{userId:'pickup-manager-1',pickupPointId:pointId}})).statusCode).toBe(200);
     const managerDeliveries=await app.inject({method:'GET',url:'/api/v1/admin/community/deliveries',headers:pickupManager});expect(managerDeliveries.statusCode,managerDeliveries.body).toBe(200);expect(managerDeliveries.json().data).toEqual([expect.objectContaining({campaignId,dispatchBatchId:batchId,expectedItems:[expect.objectContaining({platformSkuId:'community-sku-a',expectedQuantity:2}),expect.objectContaining({platformSkuId:'community-sku-b',expectedQuantity:3})]})]);expect(managerDeliveries.body).not.toContain('purchasePriceCents');expect((await app.inject({method:'GET',url:'/api/v1/admin/platform/skus',headers:pickupManager})).statusCode).toBe(403);
+    const arrivalWithExternalEvidence={...arrival,items:arrival.items.map((item,index)=>index===0?{...item,evidenceUrl:'https://evidence.example/unsafe'}:item)};
+    const rejectedArrivalEvidence=await app.inject({method:'POST',url:`/api/v1/admin/community/dispatch-batches/${batchId}/arrival`,headers:pickupManager,payload:arrivalWithExternalEvidence});
+    expect(rejectedArrivalEvidence.statusCode).toBe(400);expect(rejectedArrivalEvidence.json()).toMatchObject({code:'EVIDENCE_URL_NOT_ALLOWED'});
+    const rejectedNullArrivalEvidence=await app.inject({method:'POST',url:`/api/v1/admin/community/dispatch-batches/${batchId}/arrival`,headers:pickupManager,payload:{...arrival,evidenceUrl:null}});
+    expect(rejectedNullArrivalEvidence.statusCode).toBe(400);expect(rejectedNullArrivalEvidence.json()).toMatchObject({code:'EVIDENCE_URL_NOT_ALLOWED'});
+    const rejectedNestedArrivalEvidence=await app.inject({method:'POST',url:`/api/v1/admin/community/dispatch-batches/${batchId}/arrival`,headers:pickupManager,payload:{...arrival,items:arrival.items.map((item,index)=>index===0?{...item,metadata:{evidenceUrl:'https://evidence.example/nested'}}:item)}});
+    expect(rejectedNestedArrivalEvidence.statusCode).toBe(400);expect(rejectedNestedArrivalEvidence.json()).toMatchObject({code:'EVIDENCE_URL_NOT_ALLOWED'});
+    const rejectedArrivalAudits=(await store.listAuditLogs(20)).filter((entry)=>entry.action==='COMMUNITY_EVIDENCE_URL_REJECTED');
+    expect(rejectedArrivalAudits).toHaveLength(3);expect(JSON.stringify(rejectedArrivalAudits)).not.toContain('https://evidence.example/');
     const confirmations=await Promise.all([app.inject({method:'POST',url:`/api/v1/admin/community/dispatch-batches/${batchId}/arrival`,headers:pickupManager,payload:arrival}),app.inject({method:'POST',url:`/api/v1/admin/community/dispatch-batches/${batchId}/arrival`,headers:pickupManager,payload:arrival})]);for(const confirmation of confirmations)expect(confirmation.statusCode,confirmation.body).toBe(200);
     const arrivedDelivery=(await app.inject({method:'GET',url:'/api/v1/admin/community/deliveries',headers:operator})).json().data.find((item:{campaignId:string})=>item.campaignId===campaignId);
     expect(arrivedDelivery).toMatchObject({status:'ARRIVED',arrivalConfirmed:true,arrivalResult:'EXCEPTION'});
@@ -161,7 +170,7 @@ describe('API regression', () => {
     expect((await app.inject({method:'POST',url:`/api/v1/admin/delivery-plans/${emergencyPlan.id}/book-vehicle`,headers:fulfillment,payload:{vehicleOrderNo:'HL-EMERGENCY',driverName:'李师傅',driverPhone:'13900000000',vehiclePlate:'冀F-EMERGENCY'}})).statusCode).toBe(200);
     const emergencyBatch=(await app.inject({method:'POST',url:'/api/v1/admin/dispatch-batches',headers:fulfillment,payload:{campaignId:emergencyCampaign}})).json().data.id as string;
     expect((await app.inject({method:'POST',url:`/api/v1/admin/dispatch-batches/${emergencyBatch}/dispatch`,headers:fulfillment})).statusCode).toBe(200);
-    const emergencyArrival={receivedBy:'平台负责人',confirmationNote:null,items:[{platformSkuId:'community-sku-a',receivedQuantity:1,rejectedQuantity:0,shortQuantity:0,damagedQuantity:0,reason:null,evidenceNote:null,evidenceUrl:null}]};
+    const emergencyArrival={receivedBy:'平台负责人',confirmationNote:null,items:[{platformSkuId:'community-sku-a',receivedQuantity:1,rejectedQuantity:0,shortQuantity:0,damagedQuantity:0,reason:null,evidenceNote:null}]};
     expect((await app.inject({method:'POST',url:`/api/v1/admin/community/dispatch-batches/${emergencyBatch}/arrival`,headers:superAdmin,payload:emergencyArrival})).statusCode).toBe(400);
     const emergencyConfirmed=await app.inject({method:'POST',url:`/api/v1/admin/community/dispatch-batches/${emergencyBatch}/arrival`,headers:superAdmin,payload:{...emergencyArrival,emergencyReason:'点位负责人突发疾病，平台负责人现场代办'}});expect(emergencyConfirmed.statusCode,emergencyConfirmed.body).toBe(200);
     const emergencyAudit=(await store.listAuditLogs(100)).find((item)=>item.action==='COMMUNITY_DELIVERY_EMERGENCY_CONFIRMED');expect(emergencyAudit).toMatchObject({actorId:'demo-super-admin',afterData:expect.objectContaining({emergencyProxy:true,emergencyReason:'点位负责人突发疾病，平台负责人现场代办',confirmation:expect.objectContaining({confirmedAt:expect.any(String)})})});
@@ -197,6 +206,54 @@ describe('API regression', () => {
     const paid=await app.inject({method:'POST',url:`/api/v1/admin/platform/payables/${payables[0]!.id}/mark-paid`,headers:finance,payload:{paymentReference:'BANK-20260813-001'}});expect(paid.statusCode,paid.body).toBe(200);expect(paid.json().data.status).toBe('PAID');expect(await store.listLedgerTransactions(payables[0]!.id)).toHaveLength(2);
     expect((await app.inject({method:'POST',url:`/api/v1/admin/platform/campaigns/${campaignId}/sorting`,headers:warehouse})).statusCode).toBe(200);const sortingTasks=await app.inject({method:'GET',url:'/api/v1/admin/platform/sorting-tasks',headers:warehouse});expect(sortingTasks.statusCode,sortingTasks.body).toBe(200);expect(sortingTasks.json().data).toEqual([expect.objectContaining({campaignId,status:'PENDING'})]);expect((await app.inject({method:'GET',url:'/api/v1/admin/platform/sorting-tasks',headers:fulfillment})).statusCode).toBe(200);expect((await app.inject({method:'POST',url:`/api/v1/admin/platform/campaigns/${campaignId}/sorting/complete`,headers:warehouse})).statusCode).toBe(200);
     const delivery=await store.getDeliveryPlanByCampaign(campaignId);expect(delivery).toBeTruthy();const booked=await app.inject({method:'POST',url:`/api/v1/admin/delivery-plans/${delivery!.id}/book-vehicle`,headers:fulfillment,payload:{vehicleOrderNo:'PLATFORM-01',driverName:'配送员',driverPhone:'13900000000',vehiclePlate:'冀F12345'}});expect(booked.statusCode,booked.body).toBe(200);const outbound=await app.inject({method:'POST',url:`/api/v1/admin/platform/campaigns/${campaignId}/outbound`,headers:warehouse,payload:{carrierReference:'配送单-1'}});expect(outbound.statusCode,outbound.body).toBe(200);const outboundData=outbound.json().data as {id:string;items:Array<{platformSkuId:string;quantity:number}>};expect((await app.inject({method:'GET',url:`/api/v1/pickup-code?orderId=${orderId}`,headers:customer})).statusCode).toBe(409);const handoverPayload={receivedBy:'fulfillment-1',exceptionNote:null,items:outboundData.items.map((item)=>({platformSkuId:item.platformSkuId,receivedQuantity:item.quantity}))};const handovers=await Promise.all([app.inject({method:'POST',url:`/api/v1/admin/platform/outbound/${outboundData.id}/handover`,headers:fulfillment,payload:handoverPayload}),app.inject({method:'POST',url:`/api/v1/admin/platform/outbound/${outboundData.id}/handover`,headers:fulfillment,payload:handoverPayload})]);for(const handover of handovers)expect(handover.statusCode,handover.body).toBe(200);expect((await store.listAuditLogs(20)).filter((item)=>item.action==='PICKUP_HANDOVER_COMPLETED')).toHaveLength(1);expect((await app.inject({method:'GET',url:`/api/v1/pickup-code?orderId=${orderId}`,headers:customer})).statusCode).toBe(200);
+  });
+
+  it('records a picked-up community quality case without changing pickup facts or accepting external evidence URLs', async () => {
+    const isolated = new MemoryStore(false);
+    const now = new Date().toISOString();
+    const campaign: Campaign = { id:'community-quality-campaign',title:'社区品质售后团',serviceAreaId:'service-bd-lianchi',warehouseId:null,cutoffAt:now,dispatchAt:now,minTotalQuantity:1,failureAction:'CANCEL_AND_REFUND',businessModelVersion:'PLATFORM_COMMUNITY',skuIds:[],items:[],platformItems:[],communityItems:[],status:'FULFILLING',version:1,createdAt:now };
+    const order: Order = { id:'community-quality-order',orderNo:'CM-QUALITY-1',userId:'user-1',campaignId:campaign.id,serviceAreaId:campaign.serviceAreaId,pickupPointId:pointId,deliveryPlanId:'community-quality-plan',businessModelVersion:'PLATFORM_COMMUNITY',paymentRoute:'PLATFORM_DIRECT',status:'PICKED_UP',totalCents:moneyCents(3600),commissionCents:moneyCents(0),items:[],merchantOrders:[],createdAt:now,expiresAt:now,paidAt:now,pickedUpAt:now };
+    await isolated.saveUser({ id:'user-1',wechatOpenId:'openid-user-1',status:'ACTIVE',createdAt:now });
+    await isolated.saveUser({ id:'user-2',wechatOpenId:'openid-user-2',status:'ACTIVE',createdAt:now });
+    await isolated.saveCampaign(campaign); await isolated.saveOrder(order);
+    await isolated.saveSalesOrderItems(order.id,[{id:'community-quality-line',platformSkuId:'community-quality-sku',productId:'community-quality-product',title:'社区品质商品',skuName:'300g',quantity:2,unitPriceCents:1800,purchaseUnitCents:0,amountCents:3600}]);
+    await isolated.updatePlatformSalesLine({id:'community-quality-line',orderId:order.id,platformSkuId:'community-quality-sku',quantity:2,unitPriceCents:moneyCents(1800),purchaseUnitCents:moneyCents(0),amountCents:moneyCents(3600),fulfilledQuantity:2,pickedUpQuantity:2,exceptionQuantity:0,refundedQuantity:0,refundedAmountCents:moneyCents(0),paidAt:now});
+    await app.close(); app=await buildApp({config:loadConfig({NODE_ENV:'test',COMMUNITY_FULFILLMENT_ENABLED:'true'}),store:isolated});
+    const payload={clientRequestId:'community-quality-case-001',items:[{platformSkuId:'community-quality-sku',quantity:1,reason:'QUALITY_CLAIM',description:'开封后发现商品存在明显质量问题'}]};
+    const first=await app.inject({method:'POST',url:`/api/v1/orders/${order.id}/community-quality-cases`,headers:customer,payload});
+    expect(first.statusCode,first.body).toBe(201); expect(first.json().data).toMatchObject({status:'REGISTERED',orderId:order.id,items:[{platformSkuId:'community-quality-sku',disputedQuantity:1,pickedUpQuantitySnapshot:2}]});
+    const retry=await app.inject({method:'POST',url:`/api/v1/orders/${order.id}/community-quality-cases`,headers:customer,payload});
+    expect(retry.statusCode,retry.body).toBe(201); expect(retry.json().data.id).toBe(first.json().data.id);
+    const conflict=await app.inject({method:'POST',url:`/api/v1/orders/${order.id}/community-quality-cases`,headers:customer,payload:{...payload,items:[{...payload.items[0],description:'相同请求号但内容已经被改写'}]}});
+    expect(conflict.statusCode).toBe(409);
+    const externalEvidence=await app.inject({method:'POST',url:`/api/v1/orders/${order.id}/community-quality-cases`,headers:customer,payload:{clientRequestId:'community-quality-case-url',items:[{...payload.items[0],evidenceUrl:'https://evidence.example/unsafe'}]}});
+    expect(externalEvidence.statusCode).toBe(400); expect(externalEvidence.json()).toMatchObject({code:'EVIDENCE_URL_NOT_ALLOWED'});
+    const blockedLegacyClaim=await app.inject({method:'POST',url:`/api/v1/orders/${order.id}/fulfillment-claims`,headers:customer,payload:{clientRequestId:'community-quality-legacy-url',items:[{...payload.items[0],evidenceUrl:'https://evidence.example/unsafe'}]}});
+    expect(blockedLegacyClaim.statusCode).toBe(400); expect(blockedLegacyClaim.json()).toMatchObject({code:'EVIDENCE_URL_NOT_ALLOWED'});
+    const blockedLegacyAfterSale=await app.inject({method:'POST',url:`/api/v1/orders/${order.id}/after-sales`,headers:customer,payload:{reason:'质量问题',description:'误入历史售后入口时也不能写入外链证据',evidenceUrl:'https://evidence.example/unsafe'}});
+    expect(blockedLegacyAfterSale.statusCode).toBe(400); expect(blockedLegacyAfterSale.json()).toMatchObject({code:'EVIDENCE_URL_NOT_ALLOWED'});
+    const pendingOrder:Order={...order,id:'community-quality-pending-cancel',orderNo:'CM-QUALITY-CANCEL',status:'PENDING_PAYMENT',pickedUpAt:null};
+    await isolated.saveOrder(pendingOrder);
+    const rejectedCancelEvidence=await app.inject({method:'POST',url:`/api/v1/orders/${pendingOrder.id}/cancel`,headers:customer,payload:{metadata:{evidenceUrl:'https://evidence.example/unsafe'}}});
+    expect(rejectedCancelEvidence.statusCode).toBe(400);expect(rejectedCancelEvidence.json()).toMatchObject({code:'EVIDENCE_URL_NOT_ALLOWED'});
+    const rejectedEvidenceAudits=(await isolated.listAuditLogs(20)).filter((entry)=>entry.action==='COMMUNITY_EVIDENCE_URL_REJECTED');
+    expect(rejectedEvidenceAudits).toHaveLength(4);expect(JSON.stringify(rejectedEvidenceAudits)).not.toContain('https://evidence.example/unsafe');
+    const idor=await app.inject({method:'POST',url:`/api/v1/orders/${order.id}/community-quality-cases`,headers:{'x-demo-user-id':'user-2','x-demo-role':'USER'},payload:{...payload,clientRequestId:'community-quality-case-idor'}});
+    expect(idor.statusCode).toBe(404);
+    const detail=await app.inject({method:'GET',url:`/api/v1/orders/${order.id}`,headers:customer});
+    expect(detail.json().data).toMatchObject({items:[{fulfilledQuantity:2,pickedUpQuantity:2,exceptionQuantity:0}],communityQualityCases:[{id:first.json().data.id,status:'REGISTERED',items:[{disputedQuantity:1,pickedUpQuantitySnapshot:2}]}]});
+    const audits=(await isolated.listAuditLogs(10)).filter((entry)=>entry.action==='COMMUNITY_QUALITY_CASE_REGISTERED');
+    expect(audits).toHaveLength(1); expect(audits[0]?.afterData).toMatchObject({qualityCase:{id:first.json().data.id},salesLines:[{before:{fulfilledQuantity:2,pickedUpQuantity:2},after:{fulfilledQuantity:2,pickedUpQuantity:2}}]});
+    const auditFailure=vi.spyOn(isolated,'saveAuditLog').mockRejectedValueOnce(new Error('injected quality-case audit failure'));
+    const rollbackPayload={clientRequestId:'community-quality-case-audit-rollback',items:[{...payload.items[0],description:'第二次申报用于验证审计事务回滚'}]};
+    expect((await app.inject({method:'POST',url:`/api/v1/orders/${order.id}/community-quality-cases`,headers:customer,payload:rollbackPayload})).statusCode).toBe(500);
+    expect((await isolated.listCommunityQualityCasesByOrder(order.id))).toHaveLength(1);
+    expect((await app.inject({method:'GET',url:`/api/v1/orders/${order.id}`,headers:customer})).json().data.items).toMatchObject([{fulfilledQuantity:2,pickedUpQuantity:2,exceptionQuantity:0}]);
+    auditFailure.mockRestore();
+    expect((await app.inject({method:'POST',url:`/api/v1/orders/${order.id}/community-quality-cases`,headers:customer,payload:rollbackPayload})).statusCode).toBe(201);
+    const afterWindow=vi.spyOn(isolated,'databaseNow').mockResolvedValue(new Date(Date.parse(now)+86_400_001).toISOString());
+    try { expect((await app.inject({method:'POST',url:`/api/v1/orders/${order.id}/community-quality-cases`,headers:customer,payload:{...payload,clientRequestId:'community-quality-case-late'}})).statusCode).toBe(409); }
+    finally { afterWindow.mockRestore(); }
   });
 
   it('accepts a replenishment receipt after a supplier short receipt and closes the shortage fact', async () => {

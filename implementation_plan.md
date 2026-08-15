@@ -1,6 +1,6 @@
 # Implementation Plan
 
-## 2026-08-15 — 社区团购风险收口与 Epic B–F 分批实施计划（待项目负责人审批）
+## 2026-08-15 — 社区团购风险收口与 Epic B–F 分批实施计划（批次 0A 开发中）
 
 > **当前唯一业务基准：** `docs/mode-b-community-operations-prd.md` v1.1 及其
 > 2026-08-15 补充规则。本节覆盖下方“后续分批计划（冻结 PRD v1.1，尚未实施）”
@@ -115,9 +115,24 @@
 
 **目标：** 关闭 A–D 已复现风险，不引入取消、缺货分配、提货期限或附件功能。
 
+#### 批次 0A 实际实施状态（本次独立变更）
+
+- **已实现、开发自测完成但待独立 QA：** 仅实施 A 与 E 的最小交集：新增独立的社区品质案件事实、
+  用户品质案件入口与订单详情展示；社区新写入一律仅接受文字说明，外链证据字段在到货、
+  品质案件、取消和误入旧明细售后入口处被明确拒绝，并以脱敏审计记录拒绝事实。
+- **明确未实施：** 0B 的 `pickupRequestId`、0C 的历史采购/仓储写接口冻结、0D 的旧角色
+  收敛和超级管理员紧急领取理由，以及所有批次 1–4 能力均保持原样；本次不得把它们混入
+  0A SHA。
+- **开发自测证据：** lint、全包类型检查、构建、coverage 均已运行；Memory/API 共 57 项
+  通过，miniprogram 7 项通过。新增的真 MySQL/Redis 集成用例与 `0034` 重复迁移已写入，
+  但本机 `3306/6379` 不可达，`pnpm infra:up` 也因 Docker daemon 不可用而未能启动，
+  所以真库门禁未执行。Playwright 已启动到 Chromium launch，但被宿主的
+  `spawn UNKNOWN` 阻断，未执行浏览器断言。恢复基础设施与浏览器 runner 后必须补跑，
+  然后冻结 SHA 交独立 QA；该状态不是 Release Gate 结论。
+
 #### A. 已领取后的社区品质案件：一次提交即进入待受理
 
-- **数据/迁移：** 新增 `0034_community_p1_integrity.sql`，创建
+- **数据/迁移：** 新增 `0034_community_quality_cases.sql`，创建
   `community_quality_cases` 与 `community_quality_case_items`。案件和行保存
   `sales_order_item_id`、`picked_up_quantity_snapshot`、`disputed_quantity`、原因、
   用户文字说明、创建时数据库时间、`REGISTERED` 状态和 `client_request_id`；不得更新

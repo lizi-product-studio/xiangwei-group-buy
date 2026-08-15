@@ -112,6 +112,8 @@ export const api = {
     request<{ id: string; status: string }>({ url: `/api/v1/orders/${encodeURIComponent(orderId)}/after-sales`, method: 'POST', data: payload }),
   createFulfillmentClaim: (orderId: string, payload: { clientRequestId:string; items: Array<{ platformSkuId:string; quantity:number; reason:'PICKUP_SHORTAGE'|'PICKUP_DAMAGE'|'QUALITY_CLAIM'; description:string; evidenceUrl:null }> }) =>
     request<{ id:string; status:string }>({ url: `/api/v1/orders/${encodeURIComponent(orderId)}/fulfillment-claims`, method: 'POST', data: payload }),
+  createCommunityQualityCase: (orderId: string, payload: { clientRequestId:string; items: Array<{ platformSkuId:string; quantity:number; reason:'PICKUP_SHORTAGE'|'PICKUP_DAMAGE'|'QUALITY_CLAIM'; description:string }> }) =>
+    request<{ id:string; status:string }>({ url: `/api/v1/orders/${encodeURIComponent(orderId)}/community-quality-cases`, method: 'POST', data: payload }),
   listAfterSales: () => request<Array<{ id: string; orderId: string; reason: string; description: string; status: string; resolutionType: 'FULL_REFUND'|'REJECTED'|null; refundAmountCents: number|null; resolutionNote: string|null; resolvedAt: string|null; createdAt: string }>>({ url: '/api/v1/after-sales', method: 'GET' }),
   listNotifications: () => request<Array<{ id: string; orderId: string; type: string; title: string; content: string; status: string; readAt: string | null; createdAt: string }>>({ url: '/api/v1/notifications', method: 'GET' }),
   markNotificationRead: (id: string) => request<unknown>({ url: `/api/v1/notifications/${encodeURIComponent(id)}/read`, method: 'POST' }),

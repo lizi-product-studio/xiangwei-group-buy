@@ -142,6 +142,56 @@ describe.skipIf(!databaseUrl||!redisUrl)('real MySQL and Redis integration',()=>
     expect((purchaseOrders.json().data as Array<{campaignId:string}>).filter((value)=>value.campaignId===campaignId)).toEqual([]);
   },15_000);
 
+  it('persists a text-only community quality case without changing picked-up sales facts',async()=>{
+    const operator={'x-demo-user-id':'integration-community-operator','x-demo-role':'SUPER_ADMIN'};
+    const customer={'x-demo-user-id':'integration-community-customer','x-demo-role':'USER'};
+    const suffix=crypto.randomUUID().slice(0,8);
+    const sku=await app.inject({method:'POST',url:'/api/v1/admin/platform/skus',headers:operator,payload:{title:`Integration quality SKU ${suffix}`,category:'Dry goods',origin:'Integration origin',imageUrl:null,skuName:'One pack',retailPriceCents:1600,defaultSellableQuantity:2,status:'ACTIVE'}});
+    expect(sku.statusCode,sku.body).toBe(201);
+    const skuId=sku.json().data.id as string;
+    const campaign=await app.inject({method:'POST',url:'/api/v1/admin/community/campaigns',headers:operator,payload:{title:`Integration quality campaign ${suffix}`,serviceAreaId:'service-hz',pickupPointId:'pickup-hz-001',cutoffAt:new Date(Date.now()+1_500).toISOString(),dispatchAt:new Date(Date.now()+86_400_000).toISOString(),minTotalQuantity:1,failureAction:'CANCEL_AND_REFUND',items:[{platformSkuId:skuId,retailPriceCents:1600,sellableQuantity:2}]}});
+    expect(campaign.statusCode,campaign.body).toBe(201);
+    const campaignId=campaign.json().data.id as string;
+    expect((await app.inject({method:'POST',url:`/api/v1/admin/campaigns/${campaignId}/open`,headers:operator})).statusCode).toBe(200);
+    const order=await app.inject({method:'POST',url:'/api/v1/orders',headers:{...customer,'idempotency-key':`community-quality-${suffix}`},payload:{campaignId,serviceAreaId:'service-hz',pickupPointId:'pickup-hz-001',items:[{skuId,quantity:2}]}});
+    expect(order.statusCode,order.body).toBe(201);
+    const orderId=order.json().data.id as string;
+    expect((await app.inject({method:'POST',url:`/api/v1/orders/${orderId}/mock-pay`,headers:customer})).statusCode).toBe(200);
+    await new Promise((resolve)=>setTimeout(resolve,1_700));
+    expect((await app.inject({method:'POST',url:`/api/v1/admin/campaigns/${campaignId}/close`,headers:operator})).statusCode).toBe(200);
+    const plan=(await app.inject({method:'GET',url:'/api/v1/admin/delivery-plans',headers:operator})).json().data.find((value:{campaignId:string})=>value.campaignId===campaignId) as {id:string};
+    expect(plan).toBeTruthy();
+    expect((await app.inject({method:'POST',url:`/api/v1/admin/delivery-plans/${plan.id}/book-vehicle`,headers:operator,payload:{logisticsPlatform:'货拉拉',vehicleOrderNo:`QUALITY-${suffix}`,driverName:'Integration driver',driverPhone:'13900000000',vehiclePlate:'冀F12345',estimatedArrivalAt:new Date(Date.now()+86_400_000).toISOString()}})).statusCode).toBe(200);
+    const batch=await app.inject({method:'POST',url:'/api/v1/admin/dispatch-batches',headers:operator,payload:{campaignId}});
+    expect(batch.statusCode,batch.body).toBe(201);
+    const batchId=batch.json().data.id as string;
+    expect((await app.inject({method:'POST',url:`/api/v1/admin/dispatch-batches/${batchId}/dispatch`,headers:operator})).statusCode).toBe(200);
+    const arrival=await app.inject({method:'POST',url:`/api/v1/admin/community/dispatch-batches/${batchId}/arrival`,headers:operator,payload:{receivedBy:'Integration emergency proxy',confirmationNote:'逐商品现场清点正常',emergencyReason:'真库集成测试代办',items:[{platformSkuId:skuId,receivedQuantity:2,rejectedQuantity:0,shortQuantity:0,damagedQuantity:0,reason:null,evidenceNote:null}]}});
+    expect(arrival.statusCode,arrival.body).toBe(200);
+    const code=await app.inject({method:'GET',url:`/api/v1/pickup-code?orderId=${orderId}`,headers:customer});
+    expect(code.statusCode,code.body).toBe(200);
+    expect((await app.inject({method:'POST',url:'/api/v1/pickup/verify',headers:operator,payload:{orderId,deliveryPlanId:plan.id,code:code.json().data.code}})).statusCode).toBe(200);
+    const payload={clientRequestId:`quality-case-${suffix}`,items:[{platformSkuId:skuId,quantity:1,reason:'QUALITY_CLAIM',description:'真库验证：领取后发现明显质量问题'}]};
+    const first=await app.inject({method:'POST',url:`/api/v1/orders/${orderId}/community-quality-cases`,headers:customer,payload});
+    expect(first.statusCode,first.body).toBe(201);
+    const retry=await app.inject({method:'POST',url:`/api/v1/orders/${orderId}/community-quality-cases`,headers:customer,payload});
+    expect(retry.statusCode,retry.body).toBe(201);expect(retry.json().data.id).toBe(first.json().data.id);
+    const externalEvidence=await app.inject({method:'POST',url:`/api/v1/orders/${orderId}/community-quality-cases`,headers:customer,payload:{...payload,clientRequestId:`quality-case-url-${suffix}`,items:[{...payload.items[0],evidenceUrl:'https://evidence.example/unsafe'}]}});
+    expect(externalEvidence.statusCode).toBe(400);expect(externalEvidence.json()).toMatchObject({code:'EVIDENCE_URL_NOT_ALLOWED'});
+    const connection=await mysql.createConnection({uri:databaseUrl!});
+    try{
+      const [lineRows]=await connection.query<Array<{id:string;fulfilled_quantity:number;picked_up_quantity:number;exception_quantity:number}>>('SELECT id,fulfilled_quantity,picked_up_quantity,exception_quantity FROM sales_order_items WHERE order_id=?',[orderId]);
+      const [caseRows]=await connection.query<Array<{case_count:number;item_count:number}>>('SELECT (SELECT COUNT(*) FROM community_quality_cases WHERE order_id=?) AS case_count,(SELECT COUNT(*) FROM community_quality_case_items WHERE community_quality_case_id=?) AS item_count',[orderId,first.json().data.id as string]);
+      expect(lineRows).toMatchObject([{fulfilled_quantity:2,picked_up_quantity:2,exception_quantity:0}]);
+      expect(caseRows).toEqual([{case_count:1,item_count:1}]);
+      const invalidCaseId=crypto.randomUUID();
+      await connection.execute('INSERT INTO community_quality_cases (id,order_id,user_id,client_request_id,payload_hash,status,registered_at) VALUES (?,?,?,?,?,?,UTC_TIMESTAMP(3))',[invalidCaseId,orderId,'integration-community-customer',`invalid-check-${suffix}`,'0'.repeat(64),'REGISTERED']);
+      try{
+        await expect(connection.execute('INSERT INTO community_quality_case_items (id,community_quality_case_id,sales_order_item_id,platform_sku_id,picked_up_quantity_snapshot,disputed_quantity,reason,description) VALUES (?,?,?,?,?,?,?,?)',[crypto.randomUUID(),invalidCaseId,lineRows[0]!.id,skuId,2,3,'QUALITY_CLAIM','must violate the picked-up snapshot quantity'])).rejects.toThrow();
+      }finally{await connection.execute('DELETE FROM community_quality_cases WHERE id=?',[invalidCaseId]);}
+    }finally{await connection.end();}
+  },20_000);
+
   it.skipIf(!migrationTestDatabaseUrl)('recovers the 0033 partial-DDL failure without deleting migration artifacts or editing metadata manually',async()=>{
     const databaseName=`hometown_migration_recovery_${crypto.randomUUID().replaceAll('-','')}`;
     if(!databaseName.startsWith('hometown_migration_recovery_'))throw new Error('refusing to create an unexpected migration test database');

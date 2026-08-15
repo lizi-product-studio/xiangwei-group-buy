@@ -4,6 +4,12 @@ type ApiEnvelope<T> = { data: T };
 const demoSuper = { 'x-demo-user-id': 'demo-super-admin', 'x-demo-role': 'SUPER_ADMIN' };
 const apiBaseUrl = process.env.E2E_API_BASE_URL ?? 'http://127.0.0.1:3101';
 
+function containsEvidenceUrl(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(containsEvidenceUrl);
+  if (value && typeof value === 'object') return Object.entries(value).some(([key, child]) => key.toLowerCase() === 'evidenceurl' || containsEvidenceUrl(child));
+  return false;
+}
+
 async function call<T>(request: APIRequestContext, path: string, method: 'GET' | 'POST', data?: unknown, headers: Record<string, string> = demoSuper): Promise<T> {
   const response = await request.fetch(`${apiBaseUrl}${path}`, { method, headers: { ...headers, ...(data === undefined ? {} : { 'content-type': 'application/json' }) }, data });
   expect(response.status(), `${method} ${path}: ${await response.text()}`).toBeLessThan(300);
@@ -56,11 +62,15 @@ test('创建点位负责人后，只能在本点工作台完成到货、部分�
   const normalDelivery = deliveries.find((item) => item.campaignId === normalCampaign.id) ?? (() => { throw new Error('expected normal community delivery'); })();
   const exceptionDelivery = deliveries.find((item) => item.campaignId === exceptionCampaign.id) ?? (() => { throw new Error('expected exception community delivery'); })();
   const emergencyDelivery = deliveries.find((item) => item.campaignId === emergencyCampaign.id) ?? (() => { throw new Error('expected emergency community delivery'); })();
+  const dispatchedBatchIds = new Map<string, string>();
   for (const [campaignId, delivery, suffixPart] of [[normalCampaign.id, normalDelivery, 'normal'], [exceptionCampaign.id, exceptionDelivery, 'exception'], [emergencyCampaign.id, emergencyDelivery, 'emergency']] as const) {
     await call(request, `/api/v1/admin/delivery-plans/${delivery.id}/book-vehicle`, 'POST', { logisticsPlatform: '货拉拉', vehicleOrderNo: `HL-${suffix}-${suffixPart}`, driverName: 'E2E 司机', driverPhone: '13900000000', vehiclePlate: '冀F12345', estimatedArrivalAt: new Date(Date.now() + 3_600_000).toISOString(), remark: null });
     const batch = await call<{ id: string }>(request, '/api/v1/admin/dispatch-batches', 'POST', { campaignId });
     await call(request, `/api/v1/admin/dispatch-batches/${batch.id}/dispatch`, 'POST');
+    dispatchedBatchIds.set(campaignId, batch.id);
   }
+  const normalBatchId = dispatchedBatchIds.get(normalCampaign.id) ?? (() => { throw new Error('expected normal dispatch batch'); })();
+  const emergencyBatchId = dispatchedBatchIds.get(emergencyCampaign.id) ?? (() => { throw new Error('expected emergency dispatch batch'); })();
 
   await page.goto('/');
   await signIn(page, `e2e.admin.${suffix}`, 'e2e platform administrator password');
@@ -83,7 +93,9 @@ test('创建点位负责人后，只能在本点工作台完成到货、部分�
   await expect(page.getByText('紧急代办：点位逐商品确认到货', { exact: true })).toBeVisible();
   await page.getByLabel('接货人').fill('E2E 平台负责人');
   await page.getByLabel('紧急代办原因').fill('点位负责人突发疾病，平台负责人现场代办');
+  const emergencyArrivalRequest = page.waitForRequest((request) => request.method() === 'POST' && request.url().includes(`/api/v1/admin/community/dispatch-batches/${emergencyBatchId}/arrival`));
   await page.getByRole('button', { name: '确认到货与差异' }).click();
+  expect(containsEvidenceUrl((await emergencyArrivalRequest).postDataJSON())).toBe(false);
   await expect(emergencyRow.getByText('已到货', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: '系统设置' }).click();
   await page.getByRole('button', { name: '新增内部员工' }).click();
@@ -111,7 +123,9 @@ test('创建点位负责人后，只能在本点工作台完成到货、部分�
   const normalRow = page.getByRole('row', { name: new RegExp(`E2E 正常到货团 ${suffix}`) });
   await normalRow.getByRole('button', { name: '逐商品确认到货' }).click();
   await page.getByLabel('接货人').fill('E2E 点位负责人');
+  const normalArrivalRequest = page.waitForRequest((request) => request.method() === 'POST' && request.url().includes(`/api/v1/admin/community/dispatch-batches/${normalBatchId}/arrival`));
   await page.getByRole('button', { name: '确认到货与差异' }).click();
+  expect(containsEvidenceUrl((await normalArrivalRequest).postDataJSON())).toBe(false);
   await expect(normalRow.getByText('已到货', { exact: true })).toBeVisible();
   await expect(normalRow.getByRole('button', { name: '查询订单并确认领取' })).toBeVisible();
 

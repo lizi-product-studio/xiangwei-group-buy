@@ -226,6 +226,11 @@ export interface CommunityDeliveryItem { id:string; communityDeliveryId:string; 
 export interface CommunityDeliveryConfirmation { id:string; dispatchBatchId:string; campaignId:string; deliveryPlanId:string; status:'COMPLETED'|'EXCEPTION'; confirmedBy:string; receivedBy:string; confirmationNote:string|null; confirmedAt:string; items:CommunityDeliveryItem[] }
 export interface CommunityPickupReceiptItem { id:string; communityPickupReceiptId:string; platformSkuId:string; quantity:number }
 export interface CommunityPickupReceipt { id:string; orderId:string; deliveryPlanId:string; verifierId:string; requestKey:string; createdAt:string; items:CommunityPickupReceiptItem[] }
+/** A community user report is a standalone post-pickup fact. It never moves fulfilment quantities. */
+export type CommunityQualityCaseStatus='REGISTERED'|'ACCEPTED'|'REJECTED'|'REFUNDING'|'RESOLVED';
+export type CommunityQualityReason='PICKUP_SHORTAGE'|'PICKUP_DAMAGE'|'QUALITY_CLAIM';
+export interface CommunityQualityCaseItem { id:string; communityQualityCaseId:string; salesOrderItemId:string; platformSkuId:string; pickedUpQuantitySnapshot:number; disputedQuantity:number; reason:CommunityQualityReason; description:string }
+export interface CommunityQualityCase { id:string; orderId:string; userId:string; clientRequestId:string; payloadHash:string; status:CommunityQualityCaseStatus; registeredAt:string; items:CommunityQualityCaseItem[] }
 export interface LedgerLine {accountCode:string;ownerId:string|null;direction:'DEBIT'|'CREDIT';amountCents:MoneyCents}
 /**
  * Immutable accounting evidence. Marketplace events remain isolated from the

@@ -1,0 +1,21 @@
+export const COMMUNITY_QUALITY_TEXT_ONLY_HINT = '社区订单首发仅支持文字说明，暂不支持外链或附件。';
+
+const COMMUNITY_QUALITY_STATUS: Record<NonNullable<OrderDto['communityQualityCases']>[number]['status'], string> = {
+  REGISTERED: '待客服受理',
+  ACCEPTED: '处理中',
+  REJECTED: '未受理',
+  REFUNDING: '退款处理中',
+  RESOLVED: '已处理完成',
+};
+
+/** The API remains authoritative; this only prevents a clearly expired UI entry. */
+export function canSubmitCommunityQualityCase(order: Pick<OrderDto, 'businessModelVersion' | 'status' | 'pickedUpAt'>, now = Date.now()): boolean {
+  return order.businessModelVersion === 'PLATFORM_COMMUNITY'
+    && ['PICKED_UP', 'COMPLETED'].includes(order.status)
+    && !!order.pickedUpAt
+    && Date.parse(order.pickedUpAt) + 24 * 60 * 60 * 1000 > now;
+}
+
+export function communityQualityCaseStatusText(status: NonNullable<OrderDto['communityQualityCases']>[number]['status']): string {
+  return COMMUNITY_QUALITY_STATUS[status];
+}

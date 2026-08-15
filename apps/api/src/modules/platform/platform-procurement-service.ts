@@ -244,7 +244,8 @@ export class PlatformProcurementService {
   /** A user may report only a factual picked-up quality/quantity issue. Operations still decides the outcome. */
   public async registerCustomerClaim(orderId:string,userId:string,input:CustomerClaimInput,auditContext?:CustomerClaimAuditContext):Promise<FulfillmentException>{return this.store.transaction(async(store)=>{
     const order=await store.getOrderForUpdate(orderId);if(!order||order.userId!==userId)throw new BusinessError('RESOURCE_NOT_FOUND','订单不存在',404);
-    if(order.businessModelVersion==='LEGACY_MARKETPLACE'||order.paymentRoute!=='PLATFORM_DIRECT'||!['PICKED_UP','COMPLETED'].includes(order.status))throw new BusinessError('INVALID_STATE_TRANSITION','只有模式 B 已领取订单可以登记商品异常',409);
+    if(order.businessModelVersion==='PLATFORM_COMMUNITY')throw new BusinessError('INVALID_STATE_TRANSITION','社区订单请通过社区品质售后入口登记，不能变更履约数量',409);
+    if(order.businessModelVersion!=='PLATFORM_PROCUREMENT'||order.paymentRoute!=='PLATFORM_DIRECT'||!['PICKED_UP','COMPLETED'].includes(order.status))throw new BusinessError('INVALID_STATE_TRANSITION','只有平台采购模式已领取订单可以登记商品异常',409);
     const duplicate=await store.getFulfillmentExceptionByOrderRequestForUpdate(order.id,input.clientRequestId);if(duplicate)return duplicate;
     const ids=new Set(input.items.map((item)=>item.platformSkuId));if(ids.size!==input.items.length)throw new BusinessError('VALIDATION_ERROR','同一商品请合并为一条异常申报',400);
     const now=this.now();const exception:FulfillmentException={id:randomUUID(),campaignId:order.campaignId,orderId:order.id,clientRequestId:input.clientRequestId,outboundOrderId:null,deliveryPlanId:order.deliveryPlanId,sourceStage:'CUSTOMER_CLAIM',status:'REGISTERED',responsibility:'PENDING',registeredBy:userId,confirmedBy:null,resolutionNote:null,registeredAt:now,confirmedAt:null,items:[]};const allocations:FulfillmentAllocation[]=[];const salesLines:Array<{before:unknown;after:unknown}>=[];

@@ -48,6 +48,7 @@ interface OrderDto {
   items: Array<{ skuId: string; name: string; quantity: number; unitPriceCents: number; amountCents: number; fulfilledQuantity:number; pickedUpQuantity?:number; remainingPickupQuantity?:number; exceptionQuantity:number; refundedQuantity:number; refundedAmountCents:number; refundStatus?:'PENDING'|'CREATED'|'PROCESSING'|'FAILED'|'SUCCEEDED'|null; refundAmountCents?:number }>;
   fulfillmentExceptions?:Array<{id:string;status:string;sourceStage:string;responsibility:string;resolutionNote:string|null;items:Array<{platformSkuId:string;fulfilledQuantity:number;exceptionQuantity:number;refundedQuantity:number;reason:string|null}>}>;
   partialRefunds?:Array<{id:string;exceptionId:string;status:string;amountCents:number}>;
+  communityQualityCases?:Array<{id:string;status:'REGISTERED'|'ACCEPTED'|'REJECTED'|'REFUNDING'|'RESOLVED';registeredAt:string;items:Array<{id:string;platformSkuId:string;pickedUpQuantitySnapshot:number;disputedQuantity:number;reason:'PICKUP_SHORTAGE'|'PICKUP_DAMAGE'|'QUALITY_CLAIM';description:string}>}>;
 }
 
 interface DeliveryPlanDto {

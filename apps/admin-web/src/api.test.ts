@@ -50,10 +50,27 @@ describe('admin API boundary', () => {
     expect(fetchMock.mock.calls[7]?.[1]).toMatchObject({ method: 'POST' });
   });
 
+  it('posts a text-only community arrival confirmation even when a stale caller carries evidenceUrl', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ data: { id: 'community-arrival-1' } }) });
+    const stalePayload = {
+      receivedBy: '点位负责人',
+      confirmationNote: '现场逐商品清点完成',
+      emergencyReason: null,
+      items: [{ platformSkuId: 'sku-1', receivedQuantity: 2, rejectedQuantity: 0, shortQuantity: 0, damagedQuantity: 0, reason: null, evidenceNote: null, evidenceUrl: null }],
+    } as unknown as Parameters<typeof api.confirmCommunityArrival>[1];
+
+    await expect(api.confirmCommunityArrival('dispatch-batch-1', stalePayload)).resolves.toMatchObject({ id: 'community-arrival-1' });
+
+    const request = fetchMock.mock.calls[8]?.[1] as RequestInit;
+    const body = JSON.parse(String(request.body));
+    expect(body).toMatchObject({ receivedBy: '点位负责人', items: [{ platformSkuId: 'sku-1', evidenceNote: null }] });
+    expect(JSON.stringify(body)).not.toContain('evidenceUrl');
+  });
+
   it('posts each supplier receipt batch to the protected replenishment endpoint', async () => {
     fetchMock.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ data: { id: 'receipt-2' } }) });
     await expect(api.receivePurchaseOrder('purchase-order-1', { items: [{ purchaseOrderItemId: 'line-1', acceptedQuantity: 2, rejectedQuantity: 0, batchNo: 'LOT-2', productionDate: null, expiresAt: null, inspectionNote: 'replenishment accepted', evidenceUrl: null }] })).resolves.toMatchObject({ id: 'receipt-2' });
-    expect(fetchMock.mock.calls[8]?.[0]).toBe('/api/v1/admin/platform/purchase-orders/purchase-order-1/receive');
-    expect(fetchMock.mock.calls[8]?.[1]).toMatchObject({ method: 'POST' });
+    expect(fetchMock.mock.calls[9]?.[0]).toBe('/api/v1/admin/platform/purchase-orders/purchase-order-1/receive');
+    expect(fetchMock.mock.calls[9]?.[1]).toMatchObject({ method: 'POST' });
   });
 });

@@ -1,4 +1,5 @@
 import { api } from '../../utils/api';
+import { COMMUNITY_QUALITY_TEXT_ONLY_HINT } from '../../utils/community-quality';
 import { isModeBOrder } from '../../utils/mode-b-order';
 
 const REASONS = ['商品质量问题', '商品缺少或错发', '领取安排异常', '其他问题'];
@@ -7,7 +8,7 @@ const CLAIM_REASON: Record<string, 'PICKUP_SHORTAGE' | 'PICKUP_DAMAGE' | 'QUALIT
 };
 
 Page({
-  data: { orderId: '', reasons: REASONS, reasonIndex: 0, description: '', submitting: false, claimRequestId: '', order: null as OrderDto | null, claimableItems: [] as Array<OrderDto['items'][number] & { label: string }>, selectedSkuId: '', selectedItemIndex: 0, claimQuantity: 0 },
+  data: { orderId: '', reasons: REASONS, reasonIndex: 0, description: '', submitting: false, claimRequestId: '', order: null as OrderDto | null, claimableItems: [] as Array<OrderDto['items'][number] & { label: string; claimableQuantity:number }>, selectedSkuId: '', selectedItemIndex: 0, claimQuantity: 0, qualityHint: COMMUNITY_QUALITY_TEXT_ONLY_HINT },
   onLoad(options: Record<string, string | undefined>) {
     if (!options.orderId) { void wx.showToast({ title: '订单参数缺失', icon: 'none' }); return; }
     this.setData({ orderId: options.orderId, claimRequestId: `claim-${options.orderId}-${Date.now()}` }); void this.loadOrder();
@@ -19,13 +20,14 @@ Page({
         void wx.showModal({ title: '平台正在处理履约异常', content: '截单后不支持无理由售后。异常商品会按明细展示退款进度，正常商品可继续领取。', showCancel: false, success: () => wx.navigateBack() });
         return;
       }
-      const claimableItems = order.items.filter((item) => item.fulfilledQuantity > 0).map((item) => ({ ...item, label: `${item.name}（可申报 ${item.fulfilledQuantity} 件）` }));
+      const isCommunity=order.businessModelVersion==='PLATFORM_COMMUNITY';
+      const claimableItems = order.items.map((item) => ({ ...item, claimableQuantity:isCommunity?(item.pickedUpQuantity??0):item.fulfilledQuantity })).filter((item) => item.claimableQuantity > 0).map((item) => ({ ...item, label: `${item.name}（可申报 ${item.claimableQuantity} 件）` }));
       const first = claimableItems[0];
-      this.setData({ order, claimableItems, selectedSkuId: first?.skuId ?? '', selectedItemIndex: 0, claimQuantity: first?.fulfilledQuantity ?? 0 });
+      this.setData({ order, claimableItems, selectedSkuId: first?.skuId ?? '', selectedItemIndex: 0, claimQuantity: first?.claimableQuantity ?? 0 });
     } catch { void wx.showToast({ title: '订单信息加载失败', icon: 'none' }); }
   },
   chooseReason(event: WechatMiniprogram.PickerChange) { this.setData({ reasonIndex: Number(event.detail.value) }); },
-  chooseItem(event: WechatMiniprogram.PickerChange) { const selectedItemIndex = Number(event.detail.value); const item = this.data.claimableItems[selectedItemIndex]; this.setData({ selectedSkuId: item?.skuId ?? '', selectedItemIndex, claimQuantity: item?.fulfilledQuantity ?? 0 }); },
+  chooseItem(event: WechatMiniprogram.PickerChange) { const selectedItemIndex = Number(event.detail.value); const item = this.data.claimableItems[selectedItemIndex]; this.setData({ selectedSkuId: item?.skuId ?? '', selectedItemIndex, claimQuantity: item?.claimableQuantity ?? 0 }); },
   inputClaimQuantity(event: WechatMiniprogram.Input) { this.setData({ claimQuantity: Number(event.detail.value) }); },
   inputDescription(event: WechatMiniprogram.Input) { this.setData({ description: event.detail.value }); },
   async submit() {
@@ -38,10 +40,11 @@ Page({
       const reason = REASONS[this.data.reasonIndex]!; const claimed = this.data.claimableItems.find((item) => item.skuId === this.data.selectedSkuId); const claimReason = CLAIM_REASON[reason];
       if (claimReason && claimed && order && ['PICKED_UP', 'COMPLETED'].includes(order.status)) {
         const quantity = this.data.claimQuantity;
-        if (!Number.isInteger(quantity) || quantity < 1 || quantity > claimed.fulfilledQuantity) { void wx.showToast({ title: `请填写 1 到 ${claimed.fulfilledQuantity} 的数量`, icon: 'none' }); return; }
-        await api.createFulfillmentClaim(this.data.orderId, { clientRequestId: this.data.claimRequestId, items: [{ platformSkuId: claimed.skuId, quantity, reason: claimReason, description: this.data.description.trim(), evidenceUrl: null }] });
+        if (!Number.isInteger(quantity) || quantity < 1 || quantity > claimed.claimableQuantity) { void wx.showToast({ title: `请填写 1 到 ${claimed.claimableQuantity} 的数量`, icon: 'none' }); return; }
+        if (order.businessModelVersion==='PLATFORM_COMMUNITY') await api.createCommunityQualityCase(this.data.orderId, { clientRequestId: this.data.claimRequestId, items: [{ platformSkuId: claimed.skuId, quantity, reason: claimReason, description: this.data.description.trim() }] });
+        else await api.createFulfillmentClaim(this.data.orderId, { clientRequestId: this.data.claimRequestId, items: [{ platformSkuId: claimed.skuId, quantity, reason: claimReason, description: this.data.description.trim(), evidenceUrl: null }] });
       } else await api.createAfterSale(this.data.orderId, { reason, description: this.data.description.trim() });
-      void wx.showModal({ title: '已提交售后申请', content: '平台会结合订单、核销与履约记录处理。', showCancel: false, success: () => wx.navigateBack() });
+      void wx.showModal({ title: '已提交售后申请', content: order?.businessModelVersion==='PLATFORM_COMMUNITY'?`品质售后已进入待受理，平台会按订单明细处理。${COMMUNITY_QUALITY_TEXT_ONLY_HINT}`:'平台会结合订单、核销与履约记录处理。', showCancel: false, success: () => wx.navigateBack() });
     } catch (error) { void wx.showModal({ title: '提交失败', content: error instanceof Error ? error.message : '请稍后再试', showCancel: false }); }
     finally { this.setData({ submitting: false }); }
   },

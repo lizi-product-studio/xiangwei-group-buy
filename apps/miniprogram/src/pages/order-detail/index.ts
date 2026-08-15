@@ -1,4 +1,5 @@
 import { api } from '../../utils/api';
+import { canSubmitCommunityQualityCase, communityQualityCaseStatusText } from '../../utils/community-quality';
 import { formatDateTime, formatMoney } from '../../utils/format';
 import { isModeBOrder, refundProgressText } from '../../utils/mode-b-order';
 import { payOrder } from '../../utils/payment';
@@ -20,7 +21,7 @@ interface OrderDetailView extends OrderDto {
   canCancel: boolean;
   canPickup: boolean;
   canAfterSale: boolean;
-  afterSaleViews: Array<NonNullable<OrderDto['afterSales']>[number] & { statusText: string; createdText: string }>;
+  afterSaleViews: Array<{ id:string; reason:string; statusText:string; createdText:string }>;
   itemViews: ItemView[];
   deliveryName: string;
   deliveryAddress: string;
@@ -89,12 +90,20 @@ Page({
         };
       });
       const partialRefunds = order.partialRefunds ?? [];
+      const skuNameById = new Map(order.items.map((item) => [item.skuId, item.name]));
+      const communityQualityViews = (order.communityQualityCases ?? []).map((qualityCase) => ({
+        id: qualityCase.id,
+        reason: `品质售后：${qualityCase.items.map((item) => `${skuNameById.get(item.platformSkuId) ?? '商品'} × ${item.disputedQuantity}`).join('、')}`,
+        statusText: communityQualityCaseStatusText(qualityCase.status),
+        createdText: formatDateTime(qualityCase.registeredAt),
+      }));
+      const communityQualityOpen = canSubmitCommunityQualityCase(order);
       this.setData({ order: {
         ...order,
         totalText: formatMoney(order.totalCents), createdText: formatDateTime(order.createdAt), statusText: status.text, statusHint: status.hint,
         canPay: order.status === 'PENDING_PAYMENT', canCancel: order.status === 'PENDING_PAYMENT', canPickup: order.status === 'READY_FOR_PICKUP',
-        canAfterSale: !modeB && protectionOpen && !['PENDING_PAYMENT', 'CANCELLED', 'REFUNDED'].includes(order.status) && !afterSales.some((item) => ['SUBMITTED', 'PROCESSING'].includes(item.status)),
-        afterSaleViews: afterSales.map((item) => ({ ...item, statusText: afterSaleLabels[item.status] ?? item.status, createdText: formatDateTime(item.createdAt) })),
+        canAfterSale: communityQualityOpen || (!modeB && protectionOpen && !['PENDING_PAYMENT', 'CANCELLED', 'REFUNDED'].includes(order.status) && !afterSales.some((item) => ['SUBMITTED', 'PROCESSING'].includes(item.status))),
+        afterSaleViews: [...afterSales.map((item) => ({ id:item.id, reason:item.reason, statusText: afterSaleLabels[item.status] ?? item.status, createdText: formatDateTime(item.createdAt) })), ...communityQualityViews],
         deliveryName: location.name, deliveryAddress: location.address, deliveryTime: location.time,
         modeBExceptionHint: modeB && !['PICKED_UP', 'COMPLETED'].includes(order.status) ? '商品异常由平台按明细核实和退款；正常商品不受影响，可继续领取。' : null,
         partialRefundText: partialRefunds.length ? `部分商品异常，退款${partialRefunds.some((item) => item.status === 'PROCESSING' || item.status === 'CREATED') ? '处理中' : '已处理'}：${formatMoney(partialRefunds.reduce((sum, item) => sum + item.amountCents, 0))}` : null,
@@ -122,7 +131,7 @@ Page({
   openPickupCode() { if (this.data.order) void wx.navigateTo({ url: `/pages/pickup-code/index?orderId=${encodeURIComponent(this.data.order.id)}` }); },
   openAfterSale() {
     if (!this.data.order) return;
-    if (isModeBOrder(this.data.order)) { void wx.showToast({ title: '该订单请在领取后按商品明细申报异常', icon: 'none' }); return; }
+    if (this.data.order.businessModelVersion === 'PLATFORM_PROCUREMENT') { void wx.showToast({ title: '该订单请按既有售后规则处理', icon: 'none' }); return; }
     void wx.navigateTo({ url: `/pages/after-sale/index?orderId=${encodeURIComponent(this.data.order.id)}` });
   },
 });

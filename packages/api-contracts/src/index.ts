@@ -82,6 +82,10 @@ export const exceptionDecisionSchema=z.object({status:z.enum(['WAITING_REPLENISH
 export const transferReinspectionSchema=z.object({evidenceNote:z.string().trim().min(5).max(500),items:z.array(z.object({platformSkuId:identifierSchema,acceptedQuantity:z.int().min(1).max(999_999)})).min(1).max(500)});
 export const partialRefundExecutionSchema=z.object({confirmationNote:z.string().trim().min(2).max(500)});
 export const fulfillmentClaimSchema=z.object({clientRequestId:z.string().trim().min(8).max(64),items:z.array(z.object({platformSkuId:identifierSchema,quantity:z.int().min(1).max(999),reason:z.enum(['PICKUP_SHORTAGE','PICKUP_DAMAGE','QUALITY_CLAIM']),description:z.string().trim().min(5).max(500),evidenceUrl:z.string().url().max(2048).nullable().default(null)})).min(1).max(20)});
+/** Community quality cases are text-only until the separately reviewed attachment capability ships. */
+export const communityQualityCaseSchema=z.object({clientRequestId:z.string().trim().min(8).max(64),items:z.array(z.object({platformSkuId:identifierSchema,quantity:z.int().min(1).max(999),reason:z.enum(['PICKUP_SHORTAGE','PICKUP_DAMAGE','QUALITY_CLAIM']),description:z.string().trim().min(5).max(500)}).strict()).min(1).max(20)}).strict().superRefine((value,context)=>{const seen=new Set<string>();for(const [index,item] of value.items.entries()){if(seen.has(item.platformSkuId))context.addIssue({code:'custom',path:['items',index,'platformSkuId'],message:'同一商品请合并为一条品质申报'});seen.add(item.platformSkuId);}});
+/** The first community release has no attachment capability. Cancellation never accepts a body. */
+export const cancelOrderSchema=z.object({}).strict();
 export const postponeCampaignSchema = z.object({
   cutoffAt: z.iso.datetime({ offset: true }),
   dispatchAt: z.iso.datetime({ offset: true }),
@@ -158,7 +162,7 @@ export const bookVehicleSchema = z.object({
   estimatedArrivalAt:z.iso.datetime({offset:true}).nullable().default(null),
 });
 export const receiveBatchSchema = z.object({ deliveryPlanId: identifierSchema });
-export const communityArrivalSchema=z.object({receivedBy:z.string().trim().min(2).max(120),confirmationNote:z.string().trim().max(500).nullable().default(null),emergencyReason:z.string().trim().min(2).max(500).nullable().default(null),items:z.array(z.object({platformSkuId:identifierSchema,receivedQuantity:z.int().min(0),rejectedQuantity:z.int().min(0).default(0),shortQuantity:z.int().min(0).default(0),damagedQuantity:z.int().min(0).default(0),reason:fulfillmentExceptionTypeSchema.nullable().default(null),evidenceNote:z.string().trim().max(500).nullable().default(null),evidenceUrl:z.string().url().max(2048).nullable().default(null)})).min(1).max(500)});
+export const communityArrivalSchema=z.object({receivedBy:z.string().trim().min(2).max(120),confirmationNote:z.string().trim().max(500).nullable().default(null),emergencyReason:z.string().trim().min(2).max(500).nullable().default(null),items:z.array(z.object({platformSkuId:identifierSchema,receivedQuantity:z.int().min(0),rejectedQuantity:z.int().min(0).default(0),shortQuantity:z.int().min(0).default(0),damagedQuantity:z.int().min(0).default(0),reason:fulfillmentExceptionTypeSchema.nullable().default(null),evidenceNote:z.string().trim().max(500).nullable().default(null)}).strict()).min(1).max(500)}).strict();
 export const verifyPickupSchema = z.object({ orderId: identifierSchema, deliveryPlanId: identifierSchema, code: z.string().regex(/^\d{6}$/), items:z.array(z.object({platformSkuId:identifierSchema,quantity:z.int().min(1).max(999)})).max(100).optional() });
 /** Exact, point-scoped lookup used by the on-site pickup verifier. */
 export const pickupOrderLookupQuerySchema = z.object({ deliveryPlanId: identifierSchema, orderNo: z.string().trim().min(1).max(64) });
