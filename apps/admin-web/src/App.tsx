@@ -56,6 +56,7 @@ import {
   type PickupPoint,
   type ServiceAreaInterest,
   type AfterSale,
+  type CommunityQualityCase,
   type InternalStaff,
   type InternalStaffRole,
   type OrderNotification,
@@ -114,6 +115,7 @@ const statusMeta: Record<string, { label: string; color: string }> = {
   FAILED: { label: "处理失败", color: "error" },
   INACTIVE: { label: "已停用", color: "default" },
   PARTIALLY_PICKED_UP: { label: "部分提货", color: "processing" },
+  REGISTERED: { label: "待受理", color: "warning" },
 };
 const StatusTag = ({ value }: { value: string }) => {
   const meta = statusMeta[value] ?? { label: "待处理", color: "default" };
@@ -123,6 +125,11 @@ const hasCommunityArrivalDifference = (delivery: CommunityDelivery) => delivery.
 const CommunityDeliveryStatusTag = ({ delivery }: { delivery: CommunityDelivery }) => {
   if (hasCommunityArrivalDifference(delivery)) return <Tag color="warning">已到货（有差异）</Tag>;
   return <StatusTag value={delivery.status}/>;
+};
+const communityQualityReasonLabel: Record<CommunityQualityCase["items"][number]["reason"], string> = {
+  PICKUP_SHORTAGE: "提货短少",
+  PICKUP_DAMAGE: "提货破损",
+  QUALITY_CLAIM: "品质问题",
 };
 function PanelTitle({
   eyebrow,
@@ -1537,6 +1544,11 @@ export function App() {
     queryFn: api.listAfterSales,
     enabled: enabled && can("OPERATOR", "CUSTOMER_SERVICE", "FINANCE"),
   });
+  const communityQualityCasesQ = useQuery({
+    queryKey: ["community-quality-cases"],
+    queryFn: api.listCommunityQualityCases,
+    enabled: enabled && can("OPERATOR", "CUSTOMER_SERVICE"),
+  });
   const platformSuppliersQ=useQuery({queryKey:['platform-suppliers'],queryFn:api.listPlatformSuppliers,enabled:enabled&&can('PROCUREMENT','FINANCE')});
   const platformSkusQ=useQuery({queryKey:['platform-skus'],queryFn:api.listPlatformSkus,enabled:enabled&&can('PROCUREMENT','OPERATOR')});
   const communityCampaignsQ=useQuery({queryKey:['community-campaigns'],queryFn:api.listCommunityCampaigns,enabled:enabled&&can('OPERATOR','FULFILLMENT')});
@@ -1601,7 +1613,7 @@ export function App() {
     orders: [ordersQ],
     logistics: [communityDeliveriesQ, batchesQ],
     "pickup-points": [areasQ, directoryQ, pickupPointsQ, staffQ],
-    service: [afterSalesQ, fulfillmentExceptionsQ, manualNotificationsQ],
+    service: [afterSalesQ, communityQualityCasesQ, fulfillmentExceptionsQ, manualNotificationsQ],
     finance: [refundsQ, settlementsQ],
     settings: [staffQ, auditQ, manualNotificationsQ],
     "point-workbench": [communityDeliveriesQ, plansQ],
@@ -2923,6 +2935,25 @@ export function App() {
           ]}
         />
       </section>
+      {can("OPERATOR", "CUSTOMER_SERVICE") && <section className="panel panel--spaced">
+        <PanelTitle eyebrow="社区团购 · 只读追踪" title="品质售后案件" />
+        <Alert type="info" showIcon message="用户提交后自动进入此列表" description="这里展示用户已领取商品的品质问题事实和待受理状态；案件处理决定及退款会在后续流程中开放，本页不会改变案件状态。" style={{ marginBottom: 16 }} />
+        <Table<CommunityQualityCase>
+          rowKey="id"
+          loading={communityQualityCasesQ.isLoading}
+          dataSource={communityQualityCasesQ.data ?? []}
+          pagination={{ pageSize: 8 }}
+          scroll={{ x: 880 }}
+          columns={[
+            { title: "申请时间", dataIndex: "registeredAt", render: (value: string) => dateTime.format(new Date(value)) },
+            { title: "订单 / 点位", render: (_, record) => <div><b className="mono">{record.order.orderNo}</b><small className="cell-note">{record.order.pickupPointName}</small></div> },
+            { title: "商品与数量", render: (_, record) => <div>{record.items.map((item) => <div key={item.salesOrderItemId}><b>{item.skuName}</b><small className="cell-note">申报 {item.disputedQuantity} 件 / 已领取 {item.pickedUpQuantitySnapshot} 件</small></div>)}</div> },
+            { title: "问题说明", render: (_, record) => <div>{record.items.map((item) => <div key={`${item.salesOrderItemId}-reason`}><b>{communityQualityReasonLabel[item.reason]}</b><small className="cell-note">{item.description}</small></div>)}</div> },
+            { title: "状态", dataIndex: "status", render: (value: string) => <StatusTag value={value} /> },
+            { title: "操作", render: () => <span className="muted">只读追踪</span> },
+          ]}
+        />
+      </section>}
       <section className="panel panel--spaced">
         <PanelTitle eyebrow="订单保障" title="售后申请" />
         <Table<AfterSale>

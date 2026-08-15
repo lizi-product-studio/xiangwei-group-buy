@@ -148,10 +148,20 @@ test('创建点位负责人后，只能在本点工作台完成到货、部分�
   await expect(page.getByText(/待领 2 \/ 已领 0 \/ 异常 1/)).toBeVisible();
   await page.getByLabel('六码取货码').fill(code.code);
   await page.getByRole('button', { name: '核验并确认本次领取' }).click();
+  await call(request, `/api/v1/orders/${exceptionOrder.id}/community-quality-cases`, 'POST', {
+    clientRequestId: `quality-case-${suffix}`,
+    items: [{ platformSkuId: sku.id, quantity: 1, reason: 'QUALITY_CLAIM', description: 'E2E 用户领取后发现商品品质问题' }],
+  });
 
   const managerToken = await page.evaluate(() => localStorage.getItem('hometown-admin-token'));
   await signOut(page);
   await signIn(page, `e2e.admin.${suffix}`, 'e2e platform administrator password');
+  await page.getByRole('button', { name: '售后与异常' }).click();
+  await expect(page.getByRole('heading', { name: '客服与售后' })).toBeVisible();
+  await expect(page.getByText('品质售后案件', { exact: true })).toBeVisible();
+  await expect(page.getByText(exceptionOrder.orderNo, { exact: true })).toBeVisible();
+  await expect(page.getByText('E2E 用户领取后发现商品品质问题', { exact: true })).toBeVisible();
+  await expect(page.getByText('待受理', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: '物流管理' }).click();
   const operationsNormalRow = page.getByRole('row', { name: new RegExp(`E2E 正常到货团 ${suffix}`) });
   const operationsExceptionRow = page.getByRole('row', { name: new RegExp(`E2E 差异到货团 ${suffix}`) });

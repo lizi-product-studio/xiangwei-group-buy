@@ -222,6 +222,14 @@ describe('API regression', () => {
     const payload={clientRequestId:'community-quality-case-001',items:[{platformSkuId:'community-quality-sku',quantity:1,reason:'QUALITY_CLAIM',description:'开封后发现商品存在明显质量问题'}]};
     const first=await app.inject({method:'POST',url:`/api/v1/orders/${order.id}/community-quality-cases`,headers:customer,payload});
     expect(first.statusCode,first.body).toBe(201); expect(first.json().data).toMatchObject({status:'REGISTERED',orderId:order.id,items:[{platformSkuId:'community-quality-sku',disputedQuantity:1,pickedUpQuantitySnapshot:2}]});
+    expect((await app.inject({method:'GET',url:'/api/v1/admin/community-quality-cases',headers:customer})).statusCode).toBe(403);
+    expect((await app.inject({method:'GET',url:'/api/v1/admin/community-quality-cases',headers:finance})).statusCode).toBe(403);
+    const serviceCases=await app.inject({method:'GET',url:'/api/v1/admin/community-quality-cases',headers:service});
+    expect(serviceCases.statusCode,serviceCases.body).toBe(200);
+    expect(serviceCases.json().data).toEqual([expect.objectContaining({id:first.json().data.id,status:'REGISTERED',registeredAt:expect.any(String),order:{id:order.id,orderNo:order.orderNo,campaignId:campaign.id,pickupPointId:pointId,pickupPointName:pointId},items:[expect.objectContaining({salesOrderItemId:'community-quality-line',platformSkuId:'community-quality-sku',skuName:'300g',pickedUpQuantitySnapshot:2,disputedQuantity:1,reason:'QUALITY_CLAIM',description:'开封后发现商品存在明显质量问题'})]})]);
+    expect(serviceCases.body).not.toContain('clientRequestId');expect(serviceCases.body).not.toContain('payloadHash');expect(serviceCases.body).not.toContain('userId');
+    expect((await app.inject({method:'GET',url:'/api/v1/admin/community-quality-cases',headers:operator})).statusCode).toBe(200);
+    expect((await app.inject({method:'GET',url:'/api/v1/admin/community-quality-cases',headers:superAdmin})).statusCode).toBe(200);
     const retry=await app.inject({method:'POST',url:`/api/v1/orders/${order.id}/community-quality-cases`,headers:customer,payload});
     expect(retry.statusCode,retry.body).toBe(201); expect(retry.json().data.id).toBe(first.json().data.id);
     const conflict=await app.inject({method:'POST',url:`/api/v1/orders/${order.id}/community-quality-cases`,headers:customer,payload:{...payload,items:[{...payload.items[0],description:'相同请求号但内容已经被改写'}]}});

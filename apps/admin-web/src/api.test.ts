@@ -73,4 +73,12 @@ describe('admin API boundary', () => {
     expect(fetchMock.mock.calls[9]?.[0]).toBe('/api/v1/admin/platform/purchase-orders/purchase-order-1/receive');
     expect(fetchMock.mock.calls[9]?.[1]).toMatchObject({ method: 'POST' });
   });
+
+  it('loads the read-only community quality queue for customer service', async () => {
+    const before = fetchMock.mock.calls.length;
+    fetchMock.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ data: [{ id: 'quality-1', status: 'REGISTERED', registeredAt: '2026-08-16T00:00:00.000Z', order: { id: 'order-1', orderNo: 'HT001', campaignId: 'campaign-1', pickupPointId: 'point-1', pickupPointName: '东门自提点' }, items: [{ salesOrderItemId: 'line-1', platformSkuId: 'sku-1', skuName: '300g', pickedUpQuantitySnapshot: 2, disputedQuantity: 1, reason: 'QUALITY_CLAIM', description: '品质问题' }] }] }) });
+
+    await expect(api.listCommunityQualityCases()).resolves.toMatchObject([{ id: 'quality-1', status: 'REGISTERED', order: { orderNo: 'HT001' } }]);
+    expect(fetchMock.mock.calls[before]?.[0]).toBe('/api/v1/admin/community-quality-cases');
+  });
 });

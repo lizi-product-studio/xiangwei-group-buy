@@ -35,6 +35,7 @@ export interface LedgerTransaction{id:string;referenceId:string;eventType:string
 export interface AuditLog{id:string;actorId:string;action:string;resourceType:string;resourceId:string;afterData?:unknown;createdAt:string}
 export interface ServiceAreaInterest{id:string;userId:string;regionText:string;contactName:string;contactPhone:string;privacyVersion:string|null;privacyConsentedAt:string|null;status:'NEW'|'CONTACTED'|'CLOSED';createdAt:string}
 export interface AfterSale{id:string;userId:string;orderId:string;reason:string;description:string;status:'SUBMITTED'|'PROCESSING'|'RESOLVED'|'REJECTED';resolutionType:'FULL_REFUND'|'REJECTED'|null;refundAmountCents:number|null;refundIds:string[];resolvedBy:string|null;resolutionNote:string|null;resolvedAt:string|null;createdAt:string;updatedAt:string}
+export interface CommunityQualityCase{id:string;status:'REGISTERED'|'ACCEPTED'|'REJECTED'|'REFUNDING'|'RESOLVED';registeredAt:string;order:{id:string;orderNo:string;campaignId:string;pickupPointId:string;pickupPointName:string};items:Array<{salesOrderItemId:string;platformSkuId:string;skuName:string;pickedUpQuantitySnapshot:number;disputedQuantity:number;reason:'PICKUP_SHORTAGE'|'PICKUP_DAMAGE'|'QUALITY_CLAIM';description:string}>}
 export interface OrderNotification{id:string;eventKey:string;userId:string;orderId:string;type:'SITE_CONFIRMED'|'VEHICLE_DISPATCHED'|'ARRIVED';title:string;content:string;status:'PENDING_DELIVERY'|'WECHAT_SENT'|'IN_APP_AVAILABLE'|'MANUAL_REQUIRED'|'MANUAL_COMPLETED';readAt:string|null;manualCompletedAt:string|null;createdAt:string}
 
 export interface CreateCampaignPayload{title:string;serviceAreaId:string;cutoffAt:string;dispatchAt:string;minTotalQuantity:number;failureAction:'CANCEL_AND_REFUND'|'POSTPONE';skuIds:string[]}
@@ -149,6 +150,7 @@ export const api={
   listServiceAreaInterests:()=>request<ServiceAreaInterest[]>('/api/v1/admin/service-area-interests'),
   updateServiceAreaInterestStatus:(id:string,status:'CONTACTED'|'CLOSED')=>request<ServiceAreaInterest>(`/api/v1/admin/service-area-interests/${id}/status`,{method:'POST',body:JSON.stringify({status})}),
   listAfterSales:()=>request<AfterSale[]>('/api/v1/admin/after-sales'),
+  listCommunityQualityCases:()=>request<CommunityQualityCase[]>('/api/v1/admin/community-quality-cases'),
   updateAfterSaleStatus:(id:string,status:'PROCESSING'|'REJECTED',resolutionNote?:string)=>request<AfterSale>(`/api/v1/admin/after-sales/${id}/status`,{method:'POST',body:JSON.stringify({status,resolutionNote})}),
   refundAfterSale:(id:string,resolutionNote:string)=>request<AfterSale>(`/api/v1/admin/after-sales/${id}/refund`,{method:'POST',body:JSON.stringify({resolutionNote})}),
   listManualNotifications:()=>request<OrderNotification[]>('/api/v1/admin/notifications/manual'),
