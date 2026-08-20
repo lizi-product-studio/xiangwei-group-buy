@@ -64,6 +64,7 @@ import {
   type Settlement,
 } from "./api.ts";
 import { getAdminNavigation, isPointWorkbenchUser, type AdminPage } from "./navigation.ts";
+import { beginPickupRequest, clearPickupRequest, getPendingPickupRequest, isTerminalPickupError, mapPickupRequestItemsToOrder, markPickupRequestConfirmed } from "./pickup-request.ts";
 
 type Page = AdminPage;
 const money = (cents: number) =>
@@ -1181,7 +1182,14 @@ function VerifyPickupModal({
       const value=await form.validateFields(['orderNo']);
       const found=await api.lookupPickupOrder(plan.id,value.orderNo.trim());
       setOrder(found);
-      form.setFieldsValue({items:found.items.filter((item)=>item.remainingPickupQuantity>0).map((item)=>({platformSkuId:item.skuId,quantity:item.remainingPickupQuantity}))});
+      const pending=getPendingPickupRequest(localStorage,{orderId:found.id,deliveryPlanId:plan.id});
+      if (pending?.state==='PENDING') {
+        form.setFieldsValue({items:mapPickupRequestItemsToOrder(found.items,pending.items)});
+        setError('上次领取结果未确认，请重新输入取货码并按原数量重试；请勿修改本次商品数量。');
+      } else {
+        if (pending?.state==='CONFIRMED') clearPickupRequest(localStorage,pending);
+        form.setFieldsValue({items:found.items.map((item)=>({platformSkuId:item.skuId,quantity:item.remainingPickupQuantity}))});
+      }
     } catch (reason) { setError(reason instanceof Error?reason.message:'订单查询失败'); } finally { setBusy(false); }
   };
   const save = async (value: { orderNo: string; code: string; items?:Array<{platformSkuId:string;quantity:number}> }) => {
@@ -1189,24 +1197,43 @@ function VerifyPickupModal({
     if (!order) { setError('请先查询并核对订单商品'); return; }
     setBusy(true);
     setError("");
+    let requestInput: { orderId:string; deliveryPlanId:string; items:Array<{platformSkuId:string;quantity:number}> } | null = null;
+    let pendingRequest: ReturnType<typeof beginPickupRequest> | null = null;
     try {
-      const selectedItems=value.items?.filter((item)=>item.quantity>0);
-      await api.verifyPickup({
-        orderId: order.id,
-        deliveryPlanId: plan.id,
-        code: value.code,
-        ...(selectedItems?{items:selectedItems}:{}),
-      });
+      try {
+        const selectedItems=(value.items??[]).filter((item):item is {platformSkuId:string;quantity:number}=>!!item&&typeof item.platformSkuId==='string'&&Number.isSafeInteger(item.quantity)&&item.quantity>0);
+        if (!selectedItems.length) { setError('请至少填写一项本次领取数量'); return; }
+        requestInput={orderId:order.id,deliveryPlanId:plan.id,items:selectedItems};
+        pendingRequest=beginPickupRequest(localStorage,requestInput);
+        await api.verifyPickup({
+          orderId: order.id,
+          deliveryPlanId: plan.id,
+          code: value.code,
+          pickupRequestId: pendingRequest.pickupRequestId,
+          items:selectedItems,
+        });
+        markPickupRequestConfirmed(localStorage,pendingRequest);
+      } catch (reason) {
+        const apiError = reason as Error & { code?: string; statusCode?: number };
+        const selectedItems=(value.items??[]).filter((item):item is {platformSkuId:string;quantity:number}=>!!item&&typeof item.platformSkuId==='string'&&Number.isSafeInteger(item.quantity)&&item.quantity>0);
+        if (selectedItems.length && isTerminalPickupError(apiError)) {
+          clearPickupRequest(localStorage,{orderId:order.id,deliveryPlanId:plan.id});
+          form.setFieldValue('code','');
+          try { await saved(); } catch { /* terminal API result remains authoritative even if a list refresh fails */ }
+        }
+        const detail = apiError instanceof Error ? apiError.message : "核销失败，请稍后重试";
+        setError(
+          apiError.code === "FORBIDDEN"
+            ? `${detail}。请联系平台负责人在“自提点管理”的负责人账号中核对当前员工与点位范围。`
+            : detail,
+        );
+        return;
+      }
       await saved();
+      if (requestInput) clearPickupRequest(localStorage,requestInput);
       close();
-    } catch (reason) {
-      const apiError = reason as Error & { code?: string };
-      const detail = apiError instanceof Error ? apiError.message : "核销失败，请稍后重试";
-      setError(
-        apiError.code === "FORBIDDEN"
-          ? `${detail}。请联系平台负责人在“自提点管理”的负责人账号中核对当前员工与点位范围。`
-          : detail,
-      );
+    } catch {
+      setError('领取已确认，页面刷新失败，请重新查询订单后再继续操作。');
     } finally {
       setBusy(false);
     }
@@ -1226,7 +1253,7 @@ function VerifyPickupModal({
           <Input />
         </Form.Item>
         <Button onClick={()=>void lookup()} loading={busy} block style={{marginBottom:16}}>查询订单商品</Button>
-        {order&&<section className="panel" style={{padding:12,marginBottom:16}}><b>{order.orderNo} · <StatusTag value={order.status}/></b>{order.items.map((item,index)=><div key={item.skuId} className="pickup-line"><span>{item.name}</span><span>待领 {item.remainingPickupQuantity} / 已领 {item.alreadyPickedQuantity} / 异常 {item.exceptionQuantity}</span>{item.remainingPickupQuantity>0&&<><Form.Item hidden name={['items',index,'platformSkuId']}><Input/></Form.Item><Form.Item label="本次领取数量" name={['items',index,'quantity']} rules={[{required:true}]}><InputNumber min={0} max={item.remainingPickupQuantity} precision={0} style={{width:'100%'}}/></Form.Item></>}</div>)}</section>}
+        {order&&<section className="panel" style={{padding:12,marginBottom:16}}><b>{order.orderNo} · <StatusTag value={order.status}/></b>{order.items.map((item,index)=><div key={item.skuId} className="pickup-line"><Form.Item hidden name={['items',index,'platformSkuId']}><Input/></Form.Item><span>{item.name}</span><span>待领 {item.remainingPickupQuantity} / 已领 {item.alreadyPickedQuantity} / 异常 {item.exceptionQuantity}</span>{item.remainingPickupQuantity>0&&<Form.Item label="本次领取数量" name={['items',index,'quantity']} rules={[{required:true}]}><InputNumber min={0} max={item.remainingPickupQuantity} precision={0} style={{width:'100%'}}/></Form.Item>}</div>)}</section>}
         <Form.Item
           label="六码取货码"
           name="code"

@@ -225,7 +225,7 @@ export interface PlatformSalesLine { id:string; orderId:string; platformSkuId:st
 export interface CommunityDeliveryItem { id:string; communityDeliveryId:string; platformSkuId:string; expectedQuantity:number; receivedQuantity:number; rejectedQuantity:number; shortQuantity:number; damagedQuantity:number; reason:FulfillmentExceptionType|null; evidenceNote:string|null; evidenceUrl:string|null }
 export interface CommunityDeliveryConfirmation { id:string; dispatchBatchId:string; campaignId:string; deliveryPlanId:string; status:'COMPLETED'|'EXCEPTION'; confirmedBy:string; receivedBy:string; confirmationNote:string|null; confirmedAt:string; items:CommunityDeliveryItem[] }
 export interface CommunityPickupReceiptItem { id:string; communityPickupReceiptId:string; platformSkuId:string; quantity:number }
-export interface CommunityPickupReceipt { id:string; orderId:string; deliveryPlanId:string; verifierId:string; requestKey:string; createdAt:string; items:CommunityPickupReceiptItem[] }
+export interface CommunityPickupReceipt { id:string; orderId:string; deliveryPlanId:string; verifierId:string; requestKey:string; pickupRequestId:string|null; payloadHash:string|null; createdAt:string; items:CommunityPickupReceiptItem[] }
 /** A community user report is a standalone post-pickup fact. It never moves fulfilment quantities. */
 export type CommunityQualityCaseStatus='REGISTERED'|'ACCEPTED'|'REJECTED'|'REFUNDING'|'RESOLVED';
 export type CommunityQualityReason='PICKUP_SHORTAGE'|'PICKUP_DAMAGE'|'QUALITY_CLAIM';

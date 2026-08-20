@@ -1,9 +1,19 @@
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
-import { BusinessError, moneyCents, transitionCampaign, transitionOrder } from '@hometown/domain';
+import { BusinessError, transitionCampaign, transitionOrder } from '@hometown/domain';
 import type { CommerceStore } from '../core/store.js';
 import type { DispatchBatch, Order } from '../core/types.js';
 import type { LedgerService } from '../finance/ledger-service.js';
 import type { NotificationService } from '../notifications/notification-service.js';
+
+export type VerifyPickupCommand = {
+  orderId: string;
+  deliveryPlanId: string;
+  code: string;
+  verifierId: string;
+  bypassPointAuthorization?: boolean;
+  requestedItems?: Array<{platformSkuId:string;quantity:number}>;
+  pickupRequestId?: string;
+};
 
 export class FulfillmentService {
   public constructor(
@@ -147,7 +157,7 @@ export class FulfillmentService {
     return { code: this.code(orderId), expiresAt: credential.expiresAt };
   }
 
-  public async verify(orderId: string, deliveryPlanId: string, code: string, verifierId: string, bypassPointAuthorization = false, requestedItems?:Array<{platformSkuId:string;quantity:number}>): Promise<Order> {
+  public async verify({orderId,deliveryPlanId,code,verifierId,bypassPointAuthorization=false,requestedItems,pickupRequestId}: VerifyPickupCommand): Promise<Order> {
     const result = await this.store.transaction(async (store) => {
       const order = await store.getOrderForUpdate(orderId);
       if (!order) throw new BusinessError('RESOURCE_NOT_FOUND', '订单不存在', 404);
@@ -160,22 +170,32 @@ export class FulfillmentService {
       if(!pickupPoint||pickupPoint.status!=='ACTIVE')throw new BusinessError('FORBIDDEN','当前自提点未启用，不能核销',403);
       if(!bypassPointAuthorization&&!(await store.hasActivePickupPointAssignment(verifierId,plan.pickupPointId)))throw new BusinessError('FORBIDDEN','当前核销人员未获该自提点授权',403);
       if (order.businessModelVersion === 'PLATFORM_COMMUNITY') {
-        const selected=requestedItems??order.items.filter((item)=>item.fulfilledQuantity-item.pickedUpQuantity>0).map((item)=>({platformSkuId:item.skuId,quantity:item.fulfilledQuantity-item.pickedUpQuantity}));
-        const merged=new Map<string,number>();for(const item of selected)merged.set(item.platformSkuId,(merged.get(item.platformSkuId)??0)+item.quantity);
+        if (!pickupRequestId) throw new BusinessError('UPGRADE_REQUIRED', '点位工作台版本过旧，请刷新页面后重新登录再核销', 426);
+        if(!requestedItems?.length)throw new BusinessError('VALIDATION_ERROR','社区核销必须明确填写至少一项本次领取数量',400);
+        const selected=requestedItems;
+        const merged=new Map<string,number>();for(const item of selected){if(!Number.isSafeInteger(item.quantity)||item.quantity<1)throw new BusinessError('VALIDATION_ERROR','提货数量必须是正整数',400);merged.set(item.platformSkuId,(merged.get(item.platformSkuId)??0)+item.quantity);}
         if(!merged.size)throw new BusinessError('INVALID_STATE_TRANSITION','订单没有可领取的商品',409);
-        const requestKey=createHmac('sha256',this.secret).update(JSON.stringify([...merged.entries()].sort(([left],[right])=>left.localeCompare(right)))).digest('hex');
-        if(await store.getCommunityPickupReceipt(order.id,requestKey))return order;
+        const normalizedItems=[...merged.entries()].sort(([left],[right])=>left.localeCompare(right)).map(([platformSkuId,quantity])=>({platformSkuId,quantity}));
+        const normalizedRequestId=pickupRequestId.toLowerCase();
+        const payloadHash=createHmac('sha256',this.secret).update(JSON.stringify({protocolVersion:'COMMUNITY_PICKUP_V2',orderId:order.id,deliveryPlanId,verifierId,items:normalizedItems})).digest('hex');
+        const existing=await store.getCommunityPickupReceiptByRequestIdForUpdate(order.id,normalizedRequestId);
+        if(existing){if(existing.payloadHash!==payloadHash)throw new BusinessError('IDEMPOTENCY_CONFLICT','同一领取请求 ID 的内容不一致',409);return order;}
+        const salesLines=await store.listPlatformSalesLinesByOrderForUpdate(order.id);
+        const lineBySku=new Map(salesLines.map((line)=>[line.platformSkuId,line]));
+        for(const {platformSkuId,quantity} of normalizedItems){const line=lineBySku.get(platformSkuId);if(!line||quantity>line.fulfilledQuantity-line.pickedUpQuantity)throw new BusinessError('VALIDATION_ERROR','提货数量不能超过当前待领取数量',400,{platformSkuId});}
         const credential = await store.getPickupCredential(orderId);
         if (!credential || credential.status !== 'ACTIVE') throw new BusinessError('PICKUP_CODE_UNAVAILABLE', '取货码无效', 409);
         const expected = Buffer.from(credential.codeHash, 'hex'); const actual = Buffer.from(this.hash(code), 'hex');
         if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) throw new BusinessError('PICKUP_CODE_INVALID', '取货码不正确', 409);
         if (Date.parse(credential.expiresAt) < Date.now()) throw new BusinessError('PICKUP_CODE_EXPIRED', '取货码已过期', 409);
         if (order.status !== 'READY_FOR_PICKUP') throw new BusinessError('INVALID_STATE_TRANSITION', '订单当前不可核销', 409);
-        const receipt={id:randomUUID(),orderId:order.id,deliveryPlanId,verifierId,requestKey,createdAt:new Date().toISOString(),items:[...merged.entries()].map(([platformSkuId,quantity])=>({id:randomUUID(),communityPickupReceiptId:'',platformSkuId,quantity}))};receipt.items.forEach((item)=>item.communityPickupReceiptId=receipt.id);
-        if(!await store.saveCommunityPickupReceipt(receipt)){const duplicate=await store.getCommunityPickupReceipt(order.id,requestKey);if(duplicate)return order;throw new BusinessError('CONCURRENT_MODIFICATION','领取操作正在处理中，请刷新后重试',409);}
-        for(const [skuId,quantity] of merged){const item=order.items.find((value)=>value.skuId===skuId);if(!item||quantity>item.fulfilledQuantity-item.pickedUpQuantity)throw new BusinessError('VALIDATION_ERROR','提货数量不能超过当前待领取数量',400,{platformSkuId:skuId});item.pickedUpQuantity+=quantity;const persisted={id:item.salesOrderItemId!,orderId:order.id,platformSkuId:item.skuId,quantity:item.quantity,unitPriceCents:item.unitPriceCents,purchaseUnitCents:item.purchaseUnitCents??moneyCents(0),amountCents:item.amountCents,fulfilledQuantity:item.fulfilledQuantity,pickedUpQuantity:item.pickedUpQuantity,exceptionQuantity:item.exceptionQuantity,refundedQuantity:item.refundedQuantity,refundedAmountCents:item.refundedAmountCents,paidAt:order.paidAt};if(!await store.updatePlatformSalesLine(persisted))throw new BusinessError('CONCURRENT_MODIFICATION','订单商品已被并发领取，请刷新后重试',409);}
-        const allCollected=order.items.filter((item)=>item.fulfilledQuantity>0).every((item)=>item.pickedUpQuantity===item.fulfilledQuantity);
-        await store.saveAuditLog({id:randomUUID(),actorId:verifierId,action:allCollected?'COMMUNITY_PICKUP_COMPLETED':'COMMUNITY_PICKUP_PARTIAL','resourceType':'COMMUNITY_PICKUP_RECEIPT',resourceId:receipt.id,requestId:requestKey,beforeData:null,afterData:{orderId:order.id,items:receipt.items},createdAt:receipt.createdAt});
+        const requestKey=createHmac('sha256',this.secret).update(`community-pickup-v2:request-id:${normalizedRequestId}`).digest('hex');
+        const receipt={id:randomUUID(),orderId:order.id,deliveryPlanId,verifierId,requestKey,pickupRequestId:normalizedRequestId,payloadHash,createdAt:new Date().toISOString(),items:normalizedItems.map(({platformSkuId,quantity})=>({id:randomUUID(),communityPickupReceiptId:'',platformSkuId,quantity}))};receipt.items.forEach((item)=>item.communityPickupReceiptId=receipt.id);
+        if(!await store.saveCommunityPickupReceipt(receipt)){const duplicate=await store.getCommunityPickupReceiptByRequestIdForUpdate(order.id,normalizedRequestId);if(duplicate){if(duplicate.payloadHash!==payloadHash)throw new BusinessError('IDEMPOTENCY_CONFLICT','同一领取请求 ID 的内容不一致',409);return order;}throw new BusinessError('CONCURRENT_MODIFICATION','领取操作正在处理中，请刷新后重试',409);}
+        const auditItems:Array<{platformSkuId:string;quantity:number;pickedUpBefore:number;pickedUpAfter:number;fulfilledQuantity:number}>=[];
+        for(const {platformSkuId,quantity} of normalizedItems){const line=lineBySku.get(platformSkuId)!;const pickedUpBefore=line.pickedUpQuantity;line.pickedUpQuantity+=quantity;const item=order.items.find((value)=>value.salesOrderItemId===line.id);if(!item)throw new BusinessError('INVENTORY_INCONSISTENT','销售订单明细缺失',500);item.pickedUpQuantity=line.pickedUpQuantity;if(!await store.updatePlatformSalesLine(line))throw new BusinessError('CONCURRENT_MODIFICATION','订单商品已被并发领取，请刷新后重试',409);auditItems.push({platformSkuId,quantity,pickedUpBefore,pickedUpAfter:line.pickedUpQuantity,fulfilledQuantity:line.fulfilledQuantity});}
+        const allCollected=salesLines.filter((line)=>line.fulfilledQuantity>0).every((line)=>line.pickedUpQuantity===line.fulfilledQuantity);
+        await store.saveAuditLog({id:randomUUID(),actorId:verifierId,action:allCollected?'COMMUNITY_PICKUP_COMPLETED':'COMMUNITY_PICKUP_PARTIAL','resourceType':'COMMUNITY_PICKUP_RECEIPT',resourceId:receipt.id,requestId:normalizedRequestId,beforeData:null,afterData:{protocolVersion:'COMMUNITY_PICKUP_V2',orderId:order.id,deliveryPlanId,pickupPointId:plan.pickupPointId,pickupRequestId:normalizedRequestId,receiptId:receipt.id,items:auditItems},createdAt:receipt.createdAt});
         if(allCollected){order.status=transitionOrder(order.status,'PICKED_UP');order.pickedUpAt=receipt.createdAt;credential.status='USED';await store.savePickupCredential(credential);await store.savePickupRecord(order.id,deliveryPlanId,verifierId);await store.saveOrderStatus(order);await this.ledger.recordPickup(store,order);}
         return order;
       }

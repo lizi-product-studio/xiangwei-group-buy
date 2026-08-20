@@ -163,7 +163,7 @@ export const bookVehicleSchema = z.object({
 });
 export const receiveBatchSchema = z.object({ deliveryPlanId: identifierSchema });
 export const communityArrivalSchema=z.object({receivedBy:z.string().trim().min(2).max(120),confirmationNote:z.string().trim().max(500).nullable().default(null),emergencyReason:z.string().trim().min(2).max(500).nullable().default(null),items:z.array(z.object({platformSkuId:identifierSchema,receivedQuantity:z.int().min(0),rejectedQuantity:z.int().min(0).default(0),shortQuantity:z.int().min(0).default(0),damagedQuantity:z.int().min(0).default(0),reason:fulfillmentExceptionTypeSchema.nullable().default(null),evidenceNote:z.string().trim().max(500).nullable().default(null)}).strict()).min(1).max(500)}).strict();
-export const verifyPickupSchema = z.object({ orderId: identifierSchema, deliveryPlanId: identifierSchema, code: z.string().regex(/^\d{6}$/), items:z.array(z.object({platformSkuId:identifierSchema,quantity:z.int().min(1).max(999)})).max(100).optional() });
+export const verifyPickupSchema = z.object({ orderId: identifierSchema, deliveryPlanId: identifierSchema, code: z.string().regex(/^\d{6}$/), pickupRequestId:z.string().uuid().transform((value)=>value.toLowerCase()).optional(), items:z.array(z.object({platformSkuId:identifierSchema,quantity:z.int().min(1).max(999)})).max(100).optional() });
 /** Exact, point-scoped lookup used by the on-site pickup verifier. */
 export const pickupOrderLookupQuerySchema = z.object({ deliveryPlanId: identifierSchema, orderNo: z.string().trim().min(1).max(64) });
 export const pickupVerifierAssignmentSchema = z.object({ userId: identifierSchema, pickupPointId: identifierSchema });

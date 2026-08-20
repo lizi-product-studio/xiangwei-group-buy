@@ -59,7 +59,7 @@ async function request<T>(path:string,init:RequestInit={}):Promise<T>{
   if(!response.ok){
     const body=await response.json().catch(()=>({})) as ApiErrorEnvelope;
     if(response.status===401&&requiresLogin){auth.clear();window.dispatchEvent(new Event('admin-auth-expired'));}
-    const error=new Error(body.message??`请求失败（${response.status}）`);Object.assign(error,{code:body.code,requestId:body.requestId});throw error;
+    const error=new Error(body.message??`请求失败（${response.status}）`);Object.assign(error,{code:body.code,requestId:body.requestId,statusCode:response.status});throw error;
   }
   if(response.status===204)return undefined as T;
   return (await response.json() as ApiEnvelope<T>).data;
@@ -142,7 +142,7 @@ export const api={
   createBatch:(campaignId:string)=>request<DispatchBatch>('/api/v1/admin/dispatch-batches',{method:'POST',body:JSON.stringify({campaignId})}),
   dispatchBatch:(id:string)=>request<DispatchBatch>(`/api/v1/admin/dispatch-batches/${id}/dispatch`,{method:'POST'}),
   receiveBatch:(id:string,deliveryPlanId:string)=>request<{batch:DispatchBatch;readyOrders:number}>(`/api/v1/pickup/batches/${id}/receive`,{method:'POST',body:JSON.stringify({deliveryPlanId})}),
-  verifyPickup:(payload:{orderId:string;deliveryPlanId:string;code:string;items?:Array<{platformSkuId:string;quantity:number}>})=>request<{orderId:string;status:string}>('/api/v1/pickup/verify',{method:'POST',body:JSON.stringify(payload)}),
+  verifyPickup:(payload:{orderId:string;deliveryPlanId:string;code:string;pickupRequestId:string;items:Array<{platformSkuId:string;quantity:number}>})=>request<{orderId:string;status:string}>('/api/v1/pickup/verify',{method:'POST',body:JSON.stringify(payload)}),
   listSettlements:()=>request<Settlement[]>('/api/v1/admin/finance/settlements'),
   listRefunds:()=>request<Refund[]>('/api/v1/admin/finance/refunds'),
   listLedger:()=>request<LedgerTransaction[]>('/api/v1/admin/finance/ledger'),

@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Page, type Route } from '@playwright/test';
 
 type ApiEnvelope<T> = { data: T };
 const demoSuper = { 'x-demo-user-id': 'demo-super-admin', 'x-demo-role': 'SUPER_ADMIN' };
@@ -43,13 +43,13 @@ test('创建点位负责人后，只能在本点工作台完成到货、部分�
   const sku = await call<{ id: string }>(request, '/api/v1/admin/platform/skus', 'POST', { title: `E2E 干货 ${suffix}`, category: '干货', origin: '河北', imageUrl: null, skuName: '500g', retailPriceCents: 1200, defaultSellableQuantity: 10, referencePurchaseCostCents: null, supplierNote: null, status: 'ACTIVE' });
   const cutoffAt = new Date(Date.now() + 3_000).toISOString();
   const normalCampaign = await call<{ id: string }>(request, '/api/v1/admin/community/campaigns', 'POST', { title: `E2E 正常到货团 ${suffix}`, serviceAreaId: area.id, pickupPointId: point.id, cutoffAt, dispatchAt: new Date(Date.now() + 86_400_000).toISOString(), minTotalQuantity: 1, failureAction: 'CANCEL_AND_REFUND', items: [{ platformSkuId: sku.id, retailPriceCents: 1200, sellableQuantity: 1 }] });
-  const exceptionCampaign = await call<{ id: string }>(request, '/api/v1/admin/community/campaigns', 'POST', { title: `E2E 差异到货团 ${suffix}`, serviceAreaId: area.id, pickupPointId: point.id, cutoffAt, dispatchAt: new Date(Date.now() + 86_400_000).toISOString(), minTotalQuantity: 1, failureAction: 'CANCEL_AND_REFUND', items: [{ platformSkuId: sku.id, retailPriceCents: 1200, sellableQuantity: 3 }] });
+  const exceptionCampaign = await call<{ id: string }>(request, '/api/v1/admin/community/campaigns', 'POST', { title: `E2E 差异到货团 ${suffix}`, serviceAreaId: area.id, pickupPointId: point.id, cutoffAt, dispatchAt: new Date(Date.now() + 86_400_000).toISOString(), minTotalQuantity: 1, failureAction: 'CANCEL_AND_REFUND', items: [{ platformSkuId: sku.id, retailPriceCents: 1200, sellableQuantity: 5 }] });
   const emergencyCampaign = await call<{ id: string }>(request, '/api/v1/admin/community/campaigns', 'POST', { title: `E2E 紧急代办团 ${suffix}`, serviceAreaId: area.id, pickupPointId: point.id, cutoffAt, dispatchAt: new Date(Date.now() + 86_400_000).toISOString(), minTotalQuantity: 1, failureAction: 'CANCEL_AND_REFUND', items: [{ platformSkuId: sku.id, retailPriceCents: 1200, sellableQuantity: 1 }] });
   await call(request, `/api/v1/admin/campaigns/${normalCampaign.id}/open`, 'POST');
   await call(request, `/api/v1/admin/campaigns/${exceptionCampaign.id}/open`, 'POST');
   await call(request, `/api/v1/admin/campaigns/${emergencyCampaign.id}/open`, 'POST');
   const normalOrder = await call<{ id: string; orderNo: string }>(request, '/api/v1/orders', 'POST', { campaignId: normalCampaign.id, serviceAreaId: area.id, pickupPointId: point.id, items: [{ skuId: sku.id, quantity: 1 }] }, { ...demoSuper, 'idempotency-key': `staff-ui-normal-order-${suffix}` });
-  const exceptionOrder = await call<{ id: string; orderNo: string }>(request, '/api/v1/orders', 'POST', { campaignId: exceptionCampaign.id, serviceAreaId: area.id, pickupPointId: point.id, items: [{ skuId: sku.id, quantity: 3 }] }, { ...demoSuper, 'idempotency-key': `staff-ui-exception-order-${suffix}` });
+  const exceptionOrder = await call<{ id: string; orderNo: string }>(request, '/api/v1/orders', 'POST', { campaignId: exceptionCampaign.id, serviceAreaId: area.id, pickupPointId: point.id, items: [{ skuId: sku.id, quantity: 5 }] }, { ...demoSuper, 'idempotency-key': `staff-ui-exception-order-${suffix}` });
   const emergencyOrder = await call<{ id: string; orderNo: string }>(request, '/api/v1/orders', 'POST', { campaignId: emergencyCampaign.id, serviceAreaId: area.id, pickupPointId: point.id, items: [{ skuId: sku.id, quantity: 1 }] }, { ...demoSuper, 'idempotency-key': `staff-ui-emergency-order-${suffix}` });
   await call(request, `/api/v1/orders/${normalOrder.id}/mock-pay`, 'POST');
   await call(request, `/api/v1/orders/${exceptionOrder.id}/mock-pay`, 'POST');
@@ -132,7 +132,7 @@ test('创建点位负责人后，只能在本点工作台完成到货、部分�
   const exceptionRow = page.getByRole('row', { name: new RegExp(`E2E 差异到货团 ${suffix}`) });
   await exceptionRow.getByRole('button', { name: '逐商品确认到货' }).click();
   await page.getByLabel('接货人').fill('E2E 点位负责人');
-  await page.getByLabel('实到').fill('2');
+  await page.getByLabel('实到').fill('4');
   await page.getByLabel('短少').fill('1');
   await page.getByLabel('差异原因（有差异时必填）').click();
   await page.getByText('运输短少', { exact: true }).last().click();
@@ -145,9 +145,60 @@ test('创建点位负责人后，只能在本点工作台完成到货、部分�
   await exceptionRow.getByRole('button', { name: '查询订单并确认领取' }).click();
   await page.getByLabel('订单号').fill(exceptionOrder.orderNo);
   await page.getByRole('button', { name: '查询订单商品' }).click();
-  await expect(page.getByText(/待领 2 \/ 已领 0 \/ 异常 1/)).toBeVisible();
+  await expect(page.getByText(/待领 4 \/ 已领 0 \/ 异常 1/)).toBeVisible();
+  await page.getByLabel('本次领取数量').fill('2');
   await page.getByLabel('六码取货码').fill(code.code);
+  type PickupPayload = {
+    orderId?: string;
+    deliveryPlanId?: string;
+    code?: string;
+    pickupRequestId?: string;
+    items?: Array<{ platformSkuId: string; quantity: number }>;
+  };
+  const pickupPayloads: PickupPayload[] = [];
+  let pickupAttempts = 0;
+  const pickupRoute = async (route: Route) => {
+    pickupPayloads.push(route.request().postDataJSON() as PickupPayload);
+    if (pickupAttempts++ === 0) {
+      await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ code: 'EXTERNAL_SERVICE_ERROR', message: '模拟网络中断，请重试' }) });
+      return;
+    }
+    await route.continue();
+  };
+  await page.route('**/api/v1/pickup/verify', pickupRoute);
   await page.getByRole('button', { name: '核验并确认本次领取' }).click();
+  await expect(page.getByText('模拟网络中断，请重试', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '核验并确认本次领取' })).toBeEnabled();
+  expect(await page.evaluate((pickupCode) => Object.values(localStorage).every((value) => !value.includes(pickupCode)), code.code)).toBe(true);
+  await page.getByRole('button', { name: '核验并确认本次领取' }).click();
+  await page.unroute('**/api/v1/pickup/verify', pickupRoute);
+  expect(pickupPayloads).toHaveLength(2);
+  expect(pickupPayloads[0]).toEqual(expect.objectContaining({
+    orderId: exceptionOrder.id,
+    deliveryPlanId: exceptionPlan.id,
+    code: code.code,
+    items: [{ platformSkuId: sku.id, quantity: 2 }],
+  }));
+  expect(pickupPayloads[0]?.pickupRequestId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  expect(pickupPayloads[1]).toEqual(pickupPayloads[0]);
+  await expect(page.getByText('仅核验当前到货点订单。先查询商品明细，再按实际领取数量确认全提或部分提货。', { exact: true })).toBeHidden();
+  await exceptionRow.getByRole('button', { name: '查询订单并确认领取' }).click();
+  await page.getByLabel('订单号').fill(exceptionOrder.orderNo);
+  await page.getByRole('button', { name: '查询订单商品' }).click();
+  await expect(page.getByText(/待领 2 \/ 已领 2 \/ 异常 1/)).toBeVisible();
+  await page.getByLabel('本次领取数量').fill('2');
+  await page.getByLabel('六码取货码').fill(code.code);
+  const secondPickupRequest = page.waitForRequest((request) => request.method() === 'POST' && request.url().includes('/api/v1/pickup/verify'));
+  await page.getByRole('button', { name: '核验并确认本次领取' }).click();
+  const secondPickupPayload = (await secondPickupRequest).postDataJSON() as PickupPayload;
+  expect(secondPickupPayload.pickupRequestId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  expect(secondPickupPayload.pickupRequestId).not.toBe(pickupPayloads[0]?.pickupRequestId);
+  expect(secondPickupPayload.items).toEqual(pickupPayloads[1]?.items);
+  await expect(page.getByText('仅核验当前到货点订单。先查询商品明细，再按实际领取数量确认全提或部分提货。', { exact: true })).toBeHidden();
+  await exceptionRow.getByRole('button', { name: '查询订单并确认领取' }).click();
+  await page.getByLabel('订单号').fill(exceptionOrder.orderNo);
+  await page.getByRole('button', { name: '查询订单商品' }).click();
+  await expect(page.getByText(/待领 0 \/ 已领 4 \/ 异常 1/)).toBeVisible();
   await call(request, `/api/v1/orders/${exceptionOrder.id}/community-quality-cases`, 'POST', {
     clientRequestId: `quality-case-${suffix}`,
     items: [{ platformSkuId: sku.id, quantity: 1, reason: 'QUALITY_CLAIM', description: 'E2E 用户领取后发现商品品质问题' }],

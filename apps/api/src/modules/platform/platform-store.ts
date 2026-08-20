@@ -76,6 +76,7 @@ export interface PlatformStore {
   listPlatformOrderItemsByCampaign(campaignId: string): Promise<Array<{ orderId: string; platformSkuId: string; quantity: number; purchaseUnitCents: number }>>;
   listPlatformSalesLinesByCampaign(campaignId:string):Promise<PlatformSalesLine[]>;
   listPlatformSalesLinesByCampaignForUpdate(campaignId:string):Promise<PlatformSalesLine[]>;
+  listPlatformSalesLinesByOrderForUpdate(orderId:string):Promise<PlatformSalesLine[]>;
   updatePlatformSalesLine(value:PlatformSalesLine):Promise<boolean>;
   listPurchaseOrders(campaignId?: string): Promise<PurchaseOrder[]>;
   getPurchaseOrder(id: string): Promise<PurchaseOrder | null>;
@@ -113,6 +114,7 @@ export interface PlatformStore {
   getCommunityDeliveryConfirmationByBatch(batchId:string):Promise<CommunityDeliveryConfirmation|null>;
   saveCommunityDeliveryConfirmation(value:CommunityDeliveryConfirmation):Promise<boolean>;
   getCommunityPickupReceipt(orderId:string,requestKey:string):Promise<CommunityPickupReceipt|null>;
+  getCommunityPickupReceiptByRequestIdForUpdate(orderId:string,pickupRequestId:string):Promise<CommunityPickupReceipt|null>;
   saveCommunityPickupReceipt(value:CommunityPickupReceipt):Promise<boolean>;
 }
 
