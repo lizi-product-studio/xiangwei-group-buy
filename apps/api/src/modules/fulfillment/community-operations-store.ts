@@ -1,0 +1,69 @@
+import type { CommerceStore } from "../core/store.js";
+
+type CommunityOperationsMethod =
+  | "createOrderNotificationIfAbsent"
+  | "getCampaign"
+  | "getCommunityCancellationRequestByOrderForUpdate"
+  | "getCommunityPickupWindowForUpdate"
+  | "getDeliveryPlan"
+  | "getNotificationPreference"
+  | "getOrder"
+  | "getOrderForUpdate"
+  | "getPaymentByOrderForUpdate"
+  | "getPickupCredential"
+  | "getOrderRefundByOrder"
+  | "listCommunityPickupWindowsByStatus"
+  | "listCommunityPickupWindowsDueBy"
+  | "listCommunityPickupWindowsPastDeadline"
+  | "listDispatchBatches"
+  | "listPendingCommunityCancellationRequests"
+  | "listPartialRefundsByException"
+  | "listPartialRefundsByOrder"
+  | "listOrderLinesByOrderForUpdate"
+  | "releaseCampaignInventory"
+  | "saveAuditLog"
+  | "saveCommunityCancellationRequest"
+  | "saveCommunityPickupWindow"
+  | "saveFulfillmentAllocations"
+  | "saveFulfillmentException"
+  | "saveOrderStatus"
+  | "savePickupCredential";
+
+type CommunityOperationsCapabilities = Pick<
+  CommerceStore,
+  CommunityOperationsMethod
+>;
+
+/**
+ * Storage capabilities required by paid cancellation and pickup expiry flows.
+ * Unrelated operational and staff-administration facts are intentionally
+ * unavailable to this service boundary.
+ */
+export interface CommunityOperationsStore
+  extends CommunityOperationsCapabilities {
+  transaction<T>(
+    work: (store: CommunityOperationsStore) => Promise<T>,
+  ): Promise<T>;
+}
+
+type CommunityQualityMethod =
+  | "databaseNow"
+  | "getCommunityQualityCaseByOrderRequestForUpdate"
+  | "getCommunityQualityCaseForUpdate"
+  | "getOrderForUpdate"
+  | "listCommunityQualityCasesByOrderForUpdate"
+  | "listCommunityPickupReceiptsByOrder"
+  | "listPartialRefundsByException"
+  | "saveAuditLog"
+  | "saveCommunityQualityCase"
+  | "saveFulfillmentAllocations"
+  | "saveFulfillmentException";
+
+type CommunityQualityCapabilities = Pick<CommerceStore, CommunityQualityMethod>;
+
+/** Storage boundary for the post-pickup quality case lifecycle. */
+export interface CommunityQualityStore extends CommunityQualityCapabilities {
+  transaction<T>(
+    work: (store: CommunityQualityStore) => Promise<T>,
+  ): Promise<T>;
+}

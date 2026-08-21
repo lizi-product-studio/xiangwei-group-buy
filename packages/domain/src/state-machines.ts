@@ -43,7 +43,9 @@ const ORDER_TRANSITIONS: Readonly<Record<OrderStatus, readonly OrderStatus[]>> =
   LOCKED: ['ALLOCATING', 'REFUNDING'],
   ALLOCATING: ['IN_TRANSIT', 'REFUNDING'],
   IN_TRANSIT: ['READY_FOR_PICKUP', 'REFUNDING'],
-  READY_FOR_PICKUP: ['PICKED_UP', 'REFUNDING'],
+  // A community window can close after a documented residual loss/refund.
+  // This is fulfilment completion, never a customer order cancellation.
+  READY_FOR_PICKUP: ['PICKED_UP', 'REFUNDING', 'COMPLETED'],
   PICKED_UP: ['COMPLETED', 'REFUNDING'],
   COMPLETED: [],
   CANCELLING: ['CANCELLED', 'REFUNDING'],
