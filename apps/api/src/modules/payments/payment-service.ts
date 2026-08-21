@@ -234,12 +234,12 @@ export class PaymentService {
       const existing=await store.listSettlements(orderId);if(existing.length)return existing;
       const subOrders=this.subOrders(payment);const now=new Date().toISOString();const created:Settlement[]=[];
       for(const merchantOrder of order.merchantOrders){const subOrder=subOrders.find((item)=>item.merchantOrderId===merchantOrder.id);if(!subOrder)throw new BusinessError('VALIDATION_ERROR','结算缺少微信支付子单信息',409);
-        const settlement:Settlement={id:randomUUID(),orderId,paymentId:payment.id,merchantOrderId:merchantOrder.id,outOrderNo:`PS${order.orderNo}${merchantOrder.id.replaceAll('-','').slice(0,6)}`.slice(0,64),providerOrderId:null,status:'CREATED',commissionCents:merchantOrder.commissionCents,merchantReceivableCents:merchantOrder.merchantReceivableCents,createdAt:now};await store.saveSettlement(settlement);created.push(settlement);}
+        const settlement:Settlement={id:randomUUID(),orderId,paymentId:payment.id,merchantOrderId:merchantOrder.id,outOrderNo:`PS${order.orderNo}${merchantOrder.id.replaceAll('-','').slice(0,6)}`.slice(0,64),providerOrderId:null,status:'CREATED',commissionCents:merchantOrder.commissionCents,merchantReceivableCents:merchantOrder.merchantReceivableCents,createdAt:now,submissionLeaseUntil:null,submissionClaimToken:null};await store.saveSettlement(settlement);created.push(settlement);}
       return created;
     });
     for(const settlement of settlements)if(settlement.status!=='SUCCEEDED')await this.submitSettlement(settlement);
   }
-  public async reconcileSettlements(limit=100):Promise<void>{for(const settlement of await this.store.listPendingSettlements(limit)){try{if(settlement.status==='CREATED'||settlement.status==='FAILED')await this.submitSettlement(settlement);else{const result=await this.provider.querySettlement(await this.settlementRequest(settlement));settlement.providerOrderId=result.providerOrderId;settlement.status=result.status;await this.store.saveSettlement(settlement);}}catch{continue;}}}
+  public async reconcileSettlements(limit=100):Promise<void>{for(const settlement of await this.store.listPendingSettlements(limit)){try{if(settlement.status==='CREATED'||settlement.status==='FAILED')await this.submitSettlement(settlement);else{const now=new Date().toISOString();const result=await this.provider.querySettlement(await this.settlementRequest(settlement));await this.store.saveSettlementIfUnclaimed({...settlement,providerOrderId:result.providerOrderId,status:result.status,submissionLeaseUntil:null,submissionClaimToken:null},now);}}catch{continue;}}}
 
   public async settleEligiblePickedUpOrders(limit=100,now=Date.now()):Promise<number>{
     const candidates=await this.store.listSettlementEligibleOrders(new Date(now).toISOString(),limit);
@@ -365,7 +365,7 @@ export class PaymentService {
       else throw error;
     }
   }
-  private async submitSettlement(settlement:Settlement):Promise<void>{const result=await this.provider.settle(await this.settlementRequest(settlement));settlement.providerOrderId=result.providerOrderId;settlement.status=result.status;await this.store.saveSettlement(settlement);}
+  private async submitSettlement(settlement:Settlement):Promise<void>{const token=randomUUID();const now=Date.now();if(!(await this.store.transaction((store)=>store.claimSettlementSubmission(settlement.id,new Date(now+60_000).toISOString(),new Date(now).toISOString(),token))))return;const result=await this.provider.settle(await this.settlementRequest(settlement));await this.store.transaction((store)=>store.saveSettlementIfClaimed({...settlement,providerOrderId:result.providerOrderId,status:result.status,submissionLeaseUntil:null,submissionClaimToken:null},token));}
   private async settlementRequest(settlement:Settlement){const payment=await this.store.getPaymentByOrder(settlement.orderId);if(!payment)throw new BusinessError('RESOURCE_NOT_FOUND','支付单不存在',404);const subOrder=this.subOrders(payment).find((item)=>item.merchantOrderId===settlement.merchantOrderId);if(!subOrder)throw new BusinessError('VALIDATION_ERROR','结算缺少支付子单信息',409);return{subMchid:subOrder.subMchid,transactionId:subOrder.transactionId??null,outOrderNo:settlement.outOrderNo,commissionCents:Number(settlement.commissionCents)};}
   private paymentInitiationResult(payment:Payment|null):{provider:Payment['provider'];clientPayload:Record<string,string>;status:Payment['status']}|null{
     if(!payment)return null;

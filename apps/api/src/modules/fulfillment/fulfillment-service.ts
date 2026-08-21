@@ -181,6 +181,10 @@ export class FulfillmentService {
         const existing=await store.getCommunityPickupReceiptByRequestIdForUpdate(order.id,normalizedRequestId);
         if(existing){if(existing.payloadHash!==payloadHash)throw new BusinessError('IDEMPOTENCY_CONFLICT','同一领取请求 ID 的内容不一致',409);return order;}
         const salesLines=await store.listPlatformSalesLinesByOrderForUpdate(order.id);
+        const pickupWindow=await store.getCommunityPickupWindowForUpdate(order.id);
+        if(!pickupWindow)throw new BusinessError('PICKUP_CODE_UNAVAILABLE','领取期限尚未开放',409);
+        if(['ACTIVE','EXTENDED'].includes(pickupWindow.status)&&Date.parse(pickupWindow.deadlineAt)<Date.now()){pickupWindow.status='EXPIRED_PENDING';await store.saveCommunityPickupWindow(pickupWindow);throw new BusinessError('PICKUP_CODE_EXPIRED','领取期限已过，请由运营处理延期、退款或报损',409);}
+        if(!['ACTIVE','EXTENDED'].includes(pickupWindow.status))throw new BusinessError('PICKUP_CODE_EXPIRED','该订单领取期限已进入后续处理，不能普通核销',409);
         const lineBySku=new Map(salesLines.map((line)=>[line.platformSkuId,line]));
         for(const {platformSkuId,quantity} of normalizedItems){const line=lineBySku.get(platformSkuId);if(!line||quantity>line.fulfilledQuantity-line.pickedUpQuantity)throw new BusinessError('VALIDATION_ERROR','提货数量不能超过当前待领取数量',400,{platformSkuId});}
         const credential = await store.getPickupCredential(orderId);

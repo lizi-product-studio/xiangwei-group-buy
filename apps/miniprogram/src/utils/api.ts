@@ -117,7 +117,7 @@ export const api = {
   listAfterSales: () => request<Array<{ id: string; orderId: string; reason: string; description: string; status: string; resolutionType: 'FULL_REFUND'|'REJECTED'|null; refundAmountCents: number|null; resolutionNote: string|null; resolvedAt: string|null; createdAt: string }>>({ url: '/api/v1/after-sales', method: 'GET' }),
   listNotifications: () => request<Array<{ id: string; orderId: string; type: string; title: string; content: string; status: string; readAt: string | null; createdAt: string }>>({ url: '/api/v1/notifications', method: 'GET' }),
   markNotificationRead: (id: string) => request<unknown>({ url: `/api/v1/notifications/${encodeURIComponent(id)}/read`, method: 'POST' }),
-  saveNotificationPreferences: (types: Array<'SITE_CONFIRMED' | 'VEHICLE_DISPATCHED' | 'ARRIVED' | 'PARTIAL_REFUND'>) => request<unknown>({ url: '/api/v1/notification-preferences', method: 'POST', data: { types } }),
+  saveNotificationPreferences: (types: Array<'SITE_CONFIRMED' | 'VEHICLE_DISPATCHED' | 'ARRIVED' | 'PARTIAL_REFUND' | 'PICKUP_DEADLINE' | 'PICKUP_EXPIRED'>) => request<unknown>({ url: '/api/v1/notification-preferences', method: 'POST', data: { types } }),
 };
 
 export const customerAuth = {

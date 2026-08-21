@@ -1,6 +1,6 @@
 import { createHmac, randomUUID } from 'node:crypto';
 import { BusinessError, moneyCents, transitionCampaign, transitionOrder } from '@hometown/domain';
-import type { CommerceStore } from '../core/store.js';
+import type { PlatformProcurementStore } from './platform-procurement-store.js';
 import type { Campaign, FulfillmentAllocation, FulfillmentException, FulfillmentExceptionItem, FulfillmentExceptionType, GoodsReceipt, OutboundOrder, PickupHandover, PlatformCampaignItem, PurchaseOrder, SortingTask } from '../core/types.js';
 import type { LedgerService } from '../finance/ledger-service.js';
 
@@ -20,16 +20,16 @@ type CustomerClaimAuditContext={requestId:string};
  * and consumer sales remain separate facts.
  */
 export class PlatformProcurementService {
-  public constructor(private readonly store:CommerceStore,private readonly pickupCodeSecret:string,private readonly ledger:LedgerService){}
+  public constructor(private readonly store:PlatformProcurementStore,private readonly pickupCodeSecret:string,private readonly ledger:LedgerService){}
   private now(){return new Date().toISOString();}
-  private async campaign(id:string,store:CommerceStore=this.store):Promise<Campaign>{
+  private async campaign(id:string,store:PlatformProcurementStore=this.store):Promise<Campaign>{
     const value=await store.getCampaign(id);
     if(!value||value.businessModelVersion!=='PLATFORM_PROCUREMENT')throw new BusinessError('RESOURCE_NOT_FOUND','平台采购团期不存在',404);
     return value;
   }
   /** Keep mode-B credentials wire-compatible with the established six-digit verifier. */
   private pickupHash(orderId:string):string{const hex=createHmac('sha256',this.pickupCodeSecret).update(`pickup:${orderId}`).digest('hex');const code=String(Number.parseInt(hex.slice(0,12),16)%1_000_000).padStart(6,'0');return createHmac('sha256',this.pickupCodeSecret).update(code).digest('hex');}
-  private async audit(store:CommerceStore,context:AuditContext|undefined,actorId:string,action:string,resourceType:string,resourceId:string,beforeData:unknown,afterData:unknown):Promise<void>{if(!context)return;await store.saveAuditLog({id:randomUUID(),actorId,action,resourceType,resourceId,requestId:context.requestId,beforeData,afterData,createdAt:this.now()});}
+  private async audit(store:PlatformProcurementStore,context:AuditContext|undefined,actorId:string,action:string,resourceType:string,resourceId:string,beforeData:unknown,afterData:unknown):Promise<void>{if(!context)return;await store.saveAuditLog({id:randomUUID(),actorId,action,resourceType,resourceId,requestId:context.requestId,beforeData,afterData,createdAt:this.now()});}
 
   public async reconcileLockedCampaigns():Promise<void>{
     for(const campaign of await this.store.listCampaigns()){
@@ -128,7 +128,7 @@ export class PlatformProcurementService {
   });}
 
   */
-  private async desiredBySku(store:CommerceStore,campaign:Campaign):Promise<Map<string,number>>{const lines=await store.listPlatformSalesLinesByCampaign(campaign.id);return new Map(campaign.platformItems.map((item)=>{const skuLines=lines.filter((line)=>line.platformSkuId===item.platformSkuId);const hasAllocation=skuLines.some((line)=>line.fulfilledQuantity>0||line.exceptionQuantity>0);return[item.platformSkuId,hasAllocation?skuLines.reduce((sum,line)=>sum+line.fulfilledQuantity,0):item.reservedQuantity];}));}
+  private async desiredBySku(store:PlatformProcurementStore,campaign:Campaign):Promise<Map<string,number>>{const lines=await store.listPlatformSalesLinesByCampaign(campaign.id);return new Map(campaign.platformItems.map((item)=>{const skuLines=lines.filter((line)=>line.platformSkuId===item.platformSkuId);const hasAllocation=skuLines.some((line)=>line.fulfilledQuantity>0||line.exceptionQuantity>0);return[item.platformSkuId,hasAllocation?skuLines.reduce((sum,line)=>sum+line.fulfilledQuantity,0):item.reservedQuantity];}));}
   public async createSorting(campaignId:string,actorId:string):Promise<SortingTask>{return this.store.transaction(async(store)=>{
     const campaign=await this.campaign(campaignId,store);if(campaign.status!=='LOCKED')throw new BusinessError('INVALID_STATE_TRANSITION','未锁单团期不能分拣',409);
     const existing=await store.getSortingTaskByCampaign(campaign.id);if(existing)return existing;
@@ -145,14 +145,14 @@ export class PlatformProcurementService {
     for(const item of outbound.items)await store.appendInventoryMovement({id:randomUUID(),inventoryLotId:item.inventoryLotId,movementType:'OUTBOUND',fromBucket:'SORTED',toBucket:'OUTBOUND',quantity:item.quantity,referenceType:'OUTBOUND_ORDER',referenceId:outbound.id,actorId,note:carrierReference,createdAt:now});await store.saveOutboundOrder(outbound);plan.status='IN_TRANSIT';plan.dispatchedAt=now;plan.updatedAt=now;await store.saveDeliveryPlan(plan);for(const order of await store.listOrdersByCampaign(campaign.id))if(order.status==='LOCKED'){order.status=transitionOrder(order.status,'ALLOCATING');await store.saveOrderStatus(order);order.status=transitionOrder(order.status,'IN_TRANSIT');await store.saveOrderStatus(order);}campaign.status=transitionCampaign(campaign.status,'FULFILLING');campaign.version+=1;await store.updateCampaign(campaign,campaign.version-1);return outbound;
   });}
 
-  private async allocateException(store:CommerceStore,exception:FulfillmentException):Promise<FulfillmentAllocation[]>{
+  private async allocateException(store:PlatformProcurementStore,exception:FulfillmentException):Promise<FulfillmentAllocation[]>{
     const existing=await store.listFulfillmentAllocations(exception.id);if(existing.length)return existing;
     const lines=await store.listPlatformSalesLinesByCampaignForUpdate(exception.campaignId);const allocations:FulfillmentAllocation[]=[];
     for(const item of exception.items){let accepted=item.acceptedQuantity;let affected=item.rejectedQuantity+item.shortQuantity+item.damagedQuantity;for(const line of lines.filter((value)=>value.platformSkuId===item.platformSkuId)){const remaining=line.quantity-line.fulfilledQuantity-line.exceptionQuantity;if(remaining<=0)continue;const fulfilled=Math.min(remaining,accepted);accepted-=fulfilled;const exceptional=Math.min(remaining-fulfilled,affected);affected-=exceptional;if(!fulfilled&&!exceptional)continue;line.fulfilledQuantity+=fulfilled;line.exceptionQuantity+=exceptional;if(!await store.updatePlatformSalesLine(line))throw new BusinessError('CONCURRENT_MODIFICATION','销售明细已被并发更新，请重试',409);allocations.push({id:randomUUID(),exceptionId:exception.id,exceptionItemId:item.id,salesOrderItemId:line.id,orderId:line.orderId,platformSkuId:line.platformSkuId,fulfilledQuantity:fulfilled,exceptionQuantity:exceptional,refundedQuantity:0,createdAt:this.now(),refundedAt:null});}}
     if(allocations.length)await store.saveFulfillmentAllocations(allocations);return allocations;
   }
-  private async markReadyOrders(store:CommerceStore,campaignId:string):Promise<void>{for(const summary of await store.listOrdersByCampaign(campaignId)){if(summary.status!=='IN_TRANSIT')continue;const order=await store.getOrderForUpdate(summary.id);if(!order||!order.items.some((item)=>item.fulfilledQuantity>0))continue;order.status=transitionOrder(order.status,'READY_FOR_PICKUP');await store.saveOrderStatus(order);await store.savePickupCredential({orderId:order.id,codeHash:this.pickupHash(order.id),status:'ACTIVE',expiresAt:new Date(Date.now()+14*86_400_000).toISOString()});}}
-  private async markNormalFulfillment(store:CommerceStore,campaignId:string):Promise<void>{for(const line of await store.listPlatformSalesLinesByCampaign(campaignId)){if(line.fulfilledQuantity||line.exceptionQuantity)continue;line.fulfilledQuantity=line.quantity;if(!await store.updatePlatformSalesLine(line))throw new BusinessError('CONCURRENT_MODIFICATION','销售明细已被并发更新，请重试',409);}}
+  private async markReadyOrders(store:PlatformProcurementStore,campaignId:string):Promise<void>{for(const summary of await store.listOrdersByCampaign(campaignId)){if(summary.status!=='IN_TRANSIT')continue;const order=await store.getOrderForUpdate(summary.id);if(!order||!order.items.some((item)=>item.fulfilledQuantity>0))continue;order.status=transitionOrder(order.status,'READY_FOR_PICKUP');await store.saveOrderStatus(order);await store.savePickupCredential({orderId:order.id,codeHash:this.pickupHash(order.id),status:'ACTIVE',expiresAt:new Date(Date.now()+14*86_400_000).toISOString()});}}
+  private async markNormalFulfillment(store:PlatformProcurementStore,campaignId:string):Promise<void>{for(const line of await store.listPlatformSalesLinesByCampaign(campaignId)){if(line.fulfilledQuantity||line.exceptionQuantity)continue;line.fulfilledQuantity=line.quantity;if(!await store.updatePlatformSalesLine(line))throw new BusinessError('CONCURRENT_MODIFICATION','销售明细已被并发更新，请重试',409);}}
 
   public async handover(outboundId:string,actorId:string,input:HandoverInput,auditContext?:AuditContext):Promise<PickupHandover>{return this.store.transaction(async(store)=>{
     const outbound=await store.getOutboundOrderForUpdate(outboundId);const beforeOutbound=outbound?structuredClone(outbound):null;

@@ -3,7 +3,7 @@ interface IAppOption {
     apiBaseUrl: string;
     authMode: 'demo' | 'wechat';
     accessToken: string | null;
-    subscriptionTemplates: Array<{ type: 'SITE_CONFIRMED' | 'VEHICLE_DISPATCHED' | 'ARRIVED' | 'PARTIAL_REFUND'; templateId: string }>;
+    subscriptionTemplates: Array<{ type: 'SITE_CONFIRMED' | 'VEHICLE_DISPATCHED' | 'ARRIVED' | 'PARTIAL_REFUND' | 'PICKUP_DEADLINE' | 'PICKUP_EXPIRED'; templateId: string }>;
   };
 }
 
@@ -49,6 +49,8 @@ interface OrderDto {
   fulfillmentExceptions?:Array<{id:string;status:string;sourceStage:string;responsibility:string;resolutionNote:string|null;items:Array<{platformSkuId:string;fulfilledQuantity:number;exceptionQuantity:number;refundedQuantity:number;reason:string|null}>}>;
   partialRefunds?:Array<{id:string;exceptionId:string;status:string;amountCents:number}>;
   communityQualityCases?:Array<{id:string;status:'REGISTERED'|'ACCEPTED'|'REJECTED'|'REFUNDING'|'RESOLVED';registeredAt:string;items:Array<{id:string;platformSkuId:string;pickedUpQuantitySnapshot:number;disputedQuantity:number;reason:'PICKUP_SHORTAGE'|'PICKUP_DAMAGE'|'QUALITY_CLAIM';description:string}>}>;
+  pickupWindow?:{arrivedAt:string;deadlineAt:string;status:'ACTIVE'|'EXPIRED_PENDING'|'EXTENDED'|'REFUND_PENDING'|'LOSS_RECORDED'|'CLOSED';extensionCount:number;dispositionNote:string|null}|null;
+  cancellation?:{status:'DIRECT_REFUNDING'|'PENDING_REVIEW'|'REJECTED'|'APPROVED_WAITING_FINANCE'|'REFUNDING'|'REFUNDED';reason:string;reviewNote:string|null;requestedAt:string;refundId:string|null}|null;
 }
 
 interface DeliveryPlanDto {

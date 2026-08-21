@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { CommerceStore } from '../core/store.js';
 import type { DeliveryPlan, OrderNotification, OrderNotificationType } from '../core/types.js';
 import type { SubscriptionMessageProvider } from './wechat-subscription-provider.js';
+import type { NotificationCampaignEnqueueStore, NotificationOrderEnqueueStore } from './notification-store.js';
 
 const paidOrderStatuses = new Set(['PAID_WAITING_CLOSE', 'LOCKED', 'ALLOCATING', 'IN_TRANSIT', 'READY_FOR_PICKUP', 'PICKED_UP', 'COMPLETED']);
 const deliveryBatchLimit = 5;
@@ -17,6 +18,8 @@ function copy(type: OrderNotificationType, plan: DeliveryPlan): { title: string;
   if (type === 'SITE_CONFIRMED') return { title: '本团领取地点已确认', content: `${plan.siteName ?? '集中领取点'}：${plan.address ?? '请在订单中查看详细安排'}。` };
   if (type === 'VEHICLE_DISPATCHED') return { title: '本团货物已发车', content: `货物正运往${plan.siteName ?? '本团集中领取点'}，到货后会生成取货码。` };
   if (type === 'PARTIAL_REFUND') return { title: '部分商品异常退款已处理', content: '部分商品因缺货或履约异常已按订单快照价原路退款；其余可领取商品不受影响，请在订单详情查看数量和进度。' };
+  if (type === 'PICKUP_DEADLINE') return { title: '领取期限即将截止', content: '您的社区团订单即将超过领取期限；如确有困难，请联系领取点运营人员申请一次延期。' };
+  if (type === 'PICKUP_EXPIRED') return { title: '订单领取期限已到', content: '该订单已进入逾期待处理，取货码已失效；运营人员将联系您确认延期、退款或报损处理结果。' };
   return { title: '货物已到，请领取', content: `${plan.siteName ?? '本团集中领取点'}已到货，请打开订单查看六码取货码和领取安排。` };
 }
 
@@ -32,13 +35,13 @@ export class NotificationService {
    * Enqueue using the caller's transaction.  This is the path used by fulfilment
    * state transitions so an arrival/dispatch cannot commit without its outbox rows.
    */
-  public async enqueueCampaign(store: CommerceStore, type: OrderNotificationType, campaignId: string, plan: DeliveryPlan, eventKey: string): Promise<void> {
+  public async enqueueCampaign(store: NotificationCampaignEnqueueStore, type: OrderNotificationType, campaignId: string, plan: DeliveryPlan, eventKey: string): Promise<void> {
     const orders = await store.listOrdersByCampaign(campaignId);
     for (const order of orders) if (paidOrderStatuses.has(order.status)) await this.enqueueOrder(store, type, order.id, plan, `${eventKey}:${order.id}`);
   }
 
   /** Enqueues an order-specific event without exposing it to other group members. */
-  public async enqueueOrder(store: CommerceStore, type: OrderNotificationType, orderId: string, plan: DeliveryPlan, eventKey: string): Promise<void> {
+  public async enqueueOrder(store: NotificationOrderEnqueueStore, type: OrderNotificationType, orderId: string, plan: DeliveryPlan, eventKey: string): Promise<void> {
     const order = await store.getOrder(orderId);
     if (!order || !paidOrderStatuses.has(order.status)) return;
     const preference = await store.getNotificationPreference(order.userId);

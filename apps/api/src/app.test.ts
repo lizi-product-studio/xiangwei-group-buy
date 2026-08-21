@@ -8,7 +8,7 @@ import { PlatformProcurementService } from './modules/platform/platform-procurem
 import { FulfillmentService } from './modules/fulfillment/fulfillment-service.js';
 import { LedgerService } from './modules/finance/ledger-service.js';
 import { moneyCents } from '@hometown/domain';
-import type { Campaign, DeliveryPlan, Order, OutboundOrder, PickupPoint, PurchaseOrder } from './modules/core/types.js';
+import type { Campaign, DeliveryPlan, Order, OutboundOrder, Payment, PickupPoint, PurchaseOrder } from './modules/core/types.js';
 
 const operator = { 'x-demo-user-id': 'operator-1', 'x-demo-role': 'OPERATOR' };
 const customer = { 'x-demo-user-id': 'user-1', 'x-demo-role': 'USER' };
@@ -152,6 +152,7 @@ describe('API regression', () => {
     expect(arrivedDelivery).toMatchObject({status:'ARRIVED',arrivalConfirmed:true,arrivalResult:'EXCEPTION'});
     const exceptions=(await store.listFulfillmentExceptions()).filter((item)=>item.campaignId===campaignId);expect(exceptions).toHaveLength(1);
     const exceptionId=exceptions[0]!.id;
+    const allocationDraft=await app.inject({method:'POST',url:`/api/v1/admin/community/deliveries/${confirmations[0]!.json().data.id}/allocation-draft/confirm`,headers:operator});expect(allocationDraft.statusCode,allocationDraft.body).toBe(200);expect(allocationDraft.json().data).toMatchObject({status:'CONFIRMED',sortRule:'paidAt_ASC_orderNo_ASC'});
     expect((await app.inject({method:'POST',url:`/api/v1/admin/platform/fulfillment-exceptions/${exceptionId}/decision`,headers:operator,payload:{status:'REFUND_CONFIRMED',responsibility:'CARRIER',resolutionNote:'无法在承诺时间内补送，按订单快照价退一件'}})).statusCode).toBe(200);
     const partialRefund=await app.inject({method:'POST',url:`/api/v1/admin/platform/fulfillment-exceptions/${exceptionId}/partial-refund`,headers:finance,payload:{confirmationNote:'财务已核对短少证据与订单快照价'}});expect(partialRefund.statusCode,partialRefund.body).toBe(200);
     expect((await app.inject({method:'POST',url:`/api/v1/admin/platform/fulfillment-exceptions/${exceptionId}/partial-refund`,headers:finance,payload:{confirmationNote:'重复请求不得重复退款'}})).statusCode).toBe(200);
@@ -226,12 +227,13 @@ describe('API regression', () => {
     await isolated.saveCampaign(campaign); await isolated.saveOrder(order);
     await isolated.saveSalesOrderItems(order.id,[{id:'community-quality-line',platformSkuId:'community-quality-sku',productId:'community-quality-product',title:'社区品质商品',skuName:'300g',quantity:2,unitPriceCents:1800,purchaseUnitCents:0,amountCents:3600}]);
     await isolated.updatePlatformSalesLine({id:'community-quality-line',orderId:order.id,platformSkuId:'community-quality-sku',quantity:2,unitPriceCents:moneyCents(1800),purchaseUnitCents:moneyCents(0),amountCents:moneyCents(3600),fulfilledQuantity:2,pickedUpQuantity:2,exceptionQuantity:0,refundedQuantity:0,refundedAmountCents:moneyCents(0),paidAt:now});
+    const payment:Payment={id:'community-quality-payment',orderId:order.id,provider:'mock',paymentRoute:'PLATFORM_DIRECT',providerPaymentId:'community-quality-provider-payment',status:'SUCCEEDED',amountCents:moneyCents(3600),clientPayload:null,providerContext:null,initiationLeaseUntil:null,initiationClaimToken:null,createdAt:now,succeededAt:now};await isolated.savePayment(payment);
     await app.close(); app=await buildApp({config:loadConfig({NODE_ENV:'test',COMMUNITY_FULFILLMENT_ENABLED:'true'}),store:isolated});
     const payload={clientRequestId:'community-quality-case-001',items:[{platformSkuId:'community-quality-sku',quantity:1,reason:'QUALITY_CLAIM',description:'开封后发现商品存在明显质量问题'}]};
     const first=await app.inject({method:'POST',url:`/api/v1/orders/${order.id}/community-quality-cases`,headers:customer,payload});
     expect(first.statusCode,first.body).toBe(201); expect(first.json().data).toMatchObject({status:'REGISTERED',orderId:order.id,items:[{platformSkuId:'community-quality-sku',disputedQuantity:1,pickedUpQuantitySnapshot:2}]});
     expect((await app.inject({method:'GET',url:'/api/v1/admin/community-quality-cases',headers:customer})).statusCode).toBe(403);
-    expect((await app.inject({method:'GET',url:'/api/v1/admin/community-quality-cases',headers:finance})).statusCode).toBe(403);
+    expect((await app.inject({method:'GET',url:'/api/v1/admin/community-quality-cases',headers:finance})).statusCode).toBe(200);
     const serviceCases=await app.inject({method:'GET',url:'/api/v1/admin/community-quality-cases',headers:service});
     expect(serviceCases.statusCode,serviceCases.body).toBe(200);
     expect(serviceCases.json().data).toEqual([expect.objectContaining({id:first.json().data.id,status:'REGISTERED',registeredAt:expect.any(String),order:{id:order.id,orderNo:order.orderNo,campaignId:campaign.id,pickupPointId:pointId,pickupPointName:pointId},items:[expect.objectContaining({salesOrderItemId:'community-quality-line',platformSkuId:'community-quality-sku',skuName:'300g',pickedUpQuantitySnapshot:2,disputedQuantity:1,reason:'QUALITY_CLAIM',description:'开封后发现商品存在明显质量问题'})]})]);
@@ -270,6 +272,22 @@ describe('API regression', () => {
     const afterWindow=vi.spyOn(isolated,'databaseNow').mockResolvedValue(new Date(Date.parse(now)+86_400_001).toISOString());
     try { expect((await app.inject({method:'POST',url:`/api/v1/orders/${order.id}/community-quality-cases`,headers:customer,payload:{...payload,clientRequestId:'community-quality-case-late'}})).statusCode).toBe(409); }
     finally { afterWindow.mockRestore(); }
+    // Role boundaries, financial recovery and repeated actions are tested via
+    // the HTTP boundary rather than calling the service directly.
+    expect((await app.inject({method:'POST',url:`/api/v1/admin/community-quality-cases/${first.json().data.id}/accept`,headers:operator,payload:{note:'运营不能代替客服受理'}})).statusCode).toBe(403);
+    expect((await app.inject({method:'POST',url:`/api/v1/admin/community-quality-cases/${first.json().data.id}/accept`,headers:finance,payload:{note:'财务不能代替客服受理'}})).statusCode).toBe(403);
+    expect((await app.inject({method:'POST',url:`/api/v1/admin/community-quality-cases/${first.json().data.id}/accept`,headers:service,payload:{note:'客服已核对登记信息'}})).json().data.status).toBe('ACCEPTED');
+    expect((await app.inject({method:'POST',url:`/api/v1/admin/community-quality-cases/${first.json().data.id}/accept`,headers:service,payload:{note:'重复受理保持幂等'}})).json().data.status).toBe('ACCEPTED');
+    expect((await app.inject({method:'POST',url:`/api/v1/admin/community-quality-cases/${first.json().data.id}/decision`,headers:finance,payload:{approved:true,note:'财务不能决定品质责任'}})).statusCode).toBe(403);
+    const approved=await app.inject({method:'POST',url:`/api/v1/admin/community-quality-cases/${first.json().data.id}/decision`,headers:operator,payload:{approved:true,note:'运营同意按一件退款'}});expect(approved.statusCode,approved.body).toBe(200);expect(approved.json().data).toMatchObject({status:'REFUNDING',refundExceptionId:expect.any(String)});
+    expect((await app.inject({method:'POST',url:`/api/v1/admin/community-quality-cases/${first.json().data.id}/refund`,headers:operator})).statusCode).toBe(403);
+    const settled=await app.inject({method:'POST',url:`/api/v1/admin/community-quality-cases/${first.json().data.id}/refund`,headers:finance});expect(settled.statusCode,settled.body).toBe(200);expect(settled.json().data.status).toBe('RESOLVED');
+    expect((await app.inject({method:'POST',url:`/api/v1/admin/community-quality-cases/${first.json().data.id}/refund`,headers:finance})).json().data.status).toBe('RESOLVED');
+    const second=(await isolated.listCommunityQualityCasesByOrder(order.id)).find((value)=>value.clientRequestId==='community-quality-case-audit-rollback');if(!second)throw new Error('expected second quality case');
+    expect((await app.inject({method:'POST',url:`/api/v1/orders/${order.id}/community-quality-cases`,headers:customer,payload:{...payload,clientRequestId:'community-quality-case-over-limit'}})).statusCode).toBe(400);
+    expect((await app.inject({method:'POST',url:`/api/v1/admin/community-quality-cases/${second.id}/accept`,headers:service,payload:{note:'客服受理第二件'}})).json().data.status).toBe('ACCEPTED');
+    expect((await app.inject({method:'POST',url:`/api/v1/admin/community-quality-cases/${second.id}/decision`,headers:operator,payload:{approved:false,note:'证据不足，驳回'}})).json().data.status).toBe('REJECTED');
+    expect((await app.inject({method:'POST',url:`/api/v1/admin/community-quality-cases/${second.id}/decision`,headers:operator,payload:{approved:false,note:'重复驳回保持终态'}})).json().data.status).toBe('REJECTED');
   });
 
   it('accepts a replenishment receipt after a supplier short receipt and closes the shortage fact', async () => {

@@ -85,7 +85,12 @@ export const fulfillmentClaimSchema=z.object({clientRequestId:z.string().trim().
 /** Community quality cases are text-only until the separately reviewed attachment capability ships. */
 export const communityQualityCaseSchema=z.object({clientRequestId:z.string().trim().min(8).max(64),items:z.array(z.object({platformSkuId:identifierSchema,quantity:z.int().min(1).max(999),reason:z.enum(['PICKUP_SHORTAGE','PICKUP_DAMAGE','QUALITY_CLAIM']),description:z.string().trim().min(5).max(500)}).strict()).min(1).max(20)}).strict().superRefine((value,context)=>{const seen=new Set<string>();for(const [index,item] of value.items.entries()){if(seen.has(item.platformSkuId))context.addIssue({code:'custom',path:['items',index,'platformSkuId'],message:'同一商品请合并为一条品质申报'});seen.add(item.platformSkuId);}});
 /** The first community release has no attachment capability. Cancellation never accepts a body. */
-export const cancelOrderSchema=z.object({}).strict();
+export const cancelOrderSchema=z.object({reason:z.string().trim().min(2).max(500).optional()}).strict();
+export const communityCancellationReviewSchema=z.object({approved:z.boolean(),note:z.string().trim().min(2).max(500)});
+export const communityPickupExtensionSchema=z.object({deadlineAt:z.iso.datetime({offset:true}),note:z.string().trim().min(2).max(500)});
+export const communityPickupDispositionSchema=z.object({action:z.enum(['REFUND','LOSS']),note:z.string().trim().min(2).max(500)});
+export const communityQualityAcceptanceSchema=z.object({note:z.string().trim().min(2).max(500)});
+export const communityQualityDecisionSchema=z.object({approved:z.boolean(),note:z.string().trim().min(2).max(500)});
 export const postponeCampaignSchema = z.object({
   cutoffAt: z.iso.datetime({ offset: true }),
   dispatchAt: z.iso.datetime({ offset: true }),
@@ -180,7 +185,7 @@ export const createAfterSaleSchema = z.object({ reason:z.string().trim().min(2).
 export const updateAfterSaleStatusSchema = z.object({ status:z.enum(['PROCESSING','REJECTED']), resolutionNote:z.string().trim().min(2).max(500).optional() });
 export const resolveAfterSaleRefundSchema = z.object({ resolutionNote:z.string().trim().min(2).max(500) });
 // An empty list is meaningful: the user declined all current subscription prompts and must enter manual follow-up.
-export const notificationPreferenceSchema = z.object({ types:z.array(z.enum(['SITE_CONFIRMED','VEHICLE_DISPATCHED','ARRIVED','PARTIAL_REFUND'])).max(4) });
+export const notificationPreferenceSchema = z.object({ types:z.array(z.enum(['SITE_CONFIRMED','VEHICLE_DISPATCHED','ARRIVED','PARTIAL_REFUND','PICKUP_DEADLINE','PICKUP_EXPIRED'])).max(6) });
 
 export type CreateCampaignInput = z.infer<typeof createCampaignSchema>;
 export type PlatformCampaignInput=z.infer<typeof platformCampaignSchema>;

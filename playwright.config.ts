@@ -14,7 +14,9 @@ export default defineConfig({
   use: { baseURL: adminUrl, trace: process.env.CI ? 'on' : 'retain-on-failure' },
   webServer: [
     {
-      command: 'pnpm --filter @hometown/api exec tsx src/server.ts',
+      // Invoke Node's loader directly. The tsx CLI creates an IPC control pipe,
+      // which is unnecessary for a one-shot test server and is blocked in some CI sandboxes.
+      command: 'pnpm --filter @hometown/api exec node --import tsx src/server.ts',
       url: `${apiUrl}/health/ready`,
       timeout: 30_000,
       reuseExistingServer: false,

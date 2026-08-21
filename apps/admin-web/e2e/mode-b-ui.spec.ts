@@ -141,6 +141,17 @@ test('创建点位负责人后，只能在本点工作台完成到货、部分�
   await expect(exceptionRow.getByText('已到货（有差异）', { exact: true })).toBeVisible();
   await expect(exceptionRow.getByText('存在配送差异，仅可核销正常实到商品')).toBeVisible();
 
+  // Point staff record the counted fact; an operator must visibly confirm the
+  // deterministic shortage allocation before any pickup entitlement exists.
+  await signOut(page);
+  await signIn(page, `e2e.admin.${suffix}`, 'e2e platform administrator password');
+  await page.getByRole('button', { name: '物流管理' }).click();
+  const operatorExceptionRow = page.getByRole('row', { name: new RegExp(`E2E 差异到货团 ${suffix}`) });
+  await operatorExceptionRow.getByRole('button', { name: '确认差异分配草案' }).click();
+  await expect(operatorExceptionRow.getByText('正常商品已可领取')).toBeVisible();
+  await signOut(page);
+  await signIn(page, `e2e.manager.${suffix}`, 'e2e point manager new password');
+
   const code = await call<{ code: string }>(request, `/api/v1/pickup-code?orderId=${exceptionOrder.id}`, 'GET');
   await exceptionRow.getByRole('button', { name: '查询订单并确认领取' }).click();
   await page.getByLabel('订单号').fill(exceptionOrder.orderNo);
@@ -175,7 +186,7 @@ test('创建点位负责人后，只能在本点工作台完成到货、部分�
   expect(pickupPayloads).toHaveLength(2);
   expect(pickupPayloads[0]).toEqual(expect.objectContaining({
     orderId: exceptionOrder.id,
-    deliveryPlanId: exceptionPlan.id,
+    deliveryPlanId: exceptionDelivery.id,
     code: code.code,
     items: [{ platformSkuId: sku.id, quantity: 2 }],
   }));
@@ -199,6 +210,8 @@ test('创建点位负责人后，只能在本点工作台完成到货、部分�
   await page.getByLabel('订单号').fill(exceptionOrder.orderNo);
   await page.getByRole('button', { name: '查询订单商品' }).click();
   await expect(page.getByText(/待领 0 \/ 已领 4 \/ 异常 1/)).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByText('仅核验当前到货点订单。先查询商品明细，再按实际领取数量确认全提或部分提货。', { exact: true })).toBeHidden();
   await call(request, `/api/v1/orders/${exceptionOrder.id}/community-quality-cases`, 'POST', {
     clientRequestId: `quality-case-${suffix}`,
     items: [{ platformSkuId: sku.id, quantity: 1, reason: 'QUALITY_CLAIM', description: 'E2E 用户领取后发现商品品质问题' }],
@@ -212,7 +225,8 @@ test('创建点位负责人后，只能在本点工作台完成到货、部分�
   await expect(page.getByText('品质售后案件', { exact: true })).toBeVisible();
   await expect(page.getByText(exceptionOrder.orderNo, { exact: true })).toBeVisible();
   await expect(page.getByText('E2E 用户领取后发现商品品质问题', { exact: true })).toBeVisible();
-  await expect(page.getByText('待受理', { exact: true })).toBeVisible();
+  const qualityCaseRow = page.getByRole('row', { name: new RegExp(`品质售后案件.*${exceptionOrder.orderNo}|${exceptionOrder.orderNo}.*E2E 用户领取后发现商品品质问题`) });
+  await expect(qualityCaseRow.getByText('待受理', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: '物流管理' }).click();
   const operationsNormalRow = page.getByRole('row', { name: new RegExp(`E2E 正常到货团 ${suffix}`) });
   const operationsExceptionRow = page.getByRole('row', { name: new RegExp(`E2E 差异到货团 ${suffix}`) });
@@ -223,6 +237,15 @@ test('创建点位负责人后，只能在本点工作台完成到货、部分�
   await expect(operationsExceptionRow.getByText('正常商品已可领取')).toBeVisible();
   await page.getByRole('button', { name: '系统设置' }).click();
   const emergencyAuditRow = page.getByRole('row', { name: /紧急代办点位到货确认/ });
+  // New audited actions may legitimately move the immutable emergency record
+  // beyond the first page.  Traverse the real paginated UI; do not weaken the
+  // accountability assertion to a backend-only check.
+  for(let pageIndex=0;pageIndex<80&&await emergencyAuditRow.count()===0;pageIndex++){
+    const next=page.locator('.ant-pagination-next:not(.ant-pagination-disabled)');
+    if(await next.count()===0)break;
+    await next.click();
+  }
+  await expect(emergencyAuditRow).toHaveCount(1);
   await expect(emergencyAuditRow.getByText('点位负责人突发疾病，平台负责人现场代办')).toBeVisible();
   await page.getByRole('row', { name: new RegExp('E2E 点位负责人') }).getByRole('button', { name: '变更/停用' }).click();
   await page.getByLabel('状态').click();

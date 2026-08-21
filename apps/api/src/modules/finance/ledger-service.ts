@@ -1,10 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { BusinessError, moneyCents } from '@hometown/domain';
-import type { CommerceStore } from '../core/store.js';
 import type { FulfillmentException, LedgerLine, LedgerTransaction, Order, PlatformPartialRefund, SupplierPayable } from '../core/types.js';
 
+/** The ledger is independent of ordering, warehouse and community storage. */
+export interface LedgerPostingStore {
+  appendLedgerTransaction(value: LedgerTransaction): Promise<boolean>;
+  listLedgerTransactions(referenceId?: string): Promise<LedgerTransaction[]>;
+}
+
 export class LedgerService {
-  public async recordPayment(store:CommerceStore,order:Order):Promise<void>{
+  public async recordPayment(store:LedgerPostingStore,order:Order):Promise<void>{
     if(order.businessModelVersion!=='LEGACY_MARKETPLACE'){
       await this.append(store,order.id,'PAYMENT_SUCCEEDED',[{accountCode:'PLATFORM_PAYMENT_CLEARING',ownerId:null,direction:'DEBIT',amountCents:order.totalCents},{accountCode:'PLATFORM_CONTRACT_LIABILITY',ownerId:null,direction:'CREDIT',amountCents:order.totalCents}]);
       return;
@@ -17,7 +22,7 @@ export class LedgerService {
     }
     await this.append(store,order.id,'PAYMENT_SUCCEEDED',lines);
   }
-  public async recordRefund(store:CommerceStore,order:Order):Promise<void>{
+  public async recordRefund(store:LedgerPostingStore,order:Order):Promise<void>{
     if(order.businessModelVersion!=='LEGACY_MARKETPLACE'){
       // Before handover the customer payment is still a contract liability.
       // Once the order has been picked up, revenue has already been recognised;
@@ -40,7 +45,7 @@ export class LedgerService {
     }
     await this.append(store,order.id,'REFUND_SUCCEEDED',lines);
   }
-  public async recordPickup(store:CommerceStore,order:Order):Promise<void>{
+  public async recordPickup(store:LedgerPostingStore,order:Order):Promise<void>{
     if(order.businessModelVersion!=='LEGACY_MARKETPLACE'){
       const amount=moneyCents(order.items.reduce((sum,item)=>sum+Number(item.unitPriceCents)*item.fulfilledQuantity,0));
       const cost=order.items.reduce((sum,item)=>sum+Number(item.purchaseUnitCents??0)*item.fulfilledQuantity,0);
@@ -59,7 +64,7 @@ export class LedgerService {
     await this.append(store,order.id,'PICKUP_CONFIRMED',lines);
   }
   /** A mode-B exception refund reverses only its approved line allocation. */
-  public async recordPartialRefund(store:CommerceStore,exception:FulfillmentException,refund:PlatformPartialRefund):Promise<void>{
+  public async recordPartialRefund(store:LedgerPostingStore,exception:FulfillmentException,refund:PlatformPartialRefund):Promise<void>{
     const recognised=exception.sourceStage==='CUSTOMER_CLAIM';
     await this.append(store,refund.id,'PARTIAL_REFUND_SUCCEEDED',[
       {accountCode:recognised?'PLATFORM_SALES_REVENUE':'PLATFORM_CONTRACT_LIABILITY',ownerId:null,direction:'DEBIT',amountCents:refund.amountCents},
@@ -67,21 +72,21 @@ export class LedgerService {
     ],'FULFILLMENT_EXCEPTION');
   }
   /** Records the cost and payable only after a qualified warehouse receipt. */
-  public async recordSupplierPayable(store:CommerceStore,payable:SupplierPayable):Promise<void>{
+  public async recordSupplierPayable(store:LedgerPostingStore,payable:SupplierPayable):Promise<void>{
     await this.append(store,payable.id,'SUPPLIER_PAYABLE_RECOGNIZED',[
       {accountCode:'PLATFORM_INVENTORY_GOODS',ownerId:null,direction:'DEBIT',amountCents:payable.amountCents},
       {accountCode:'PLATFORM_SUPPLIER_PAYABLE',ownerId:payable.supplierId,direction:'CREDIT',amountCents:payable.amountCents},
     ],'SUPPLIER_PAYABLE');
   }
   /** Offline payments are evidenced, but no customer-money account is touched. */
-  public async recordSupplierPayablePayment(store:CommerceStore,payable:SupplierPayable):Promise<void>{
+  public async recordSupplierPayablePayment(store:LedgerPostingStore,payable:SupplierPayable):Promise<void>{
     await this.append(store,payable.id,'SUPPLIER_PAYABLE_PAID',[
       {accountCode:'PLATFORM_SUPPLIER_PAYABLE',ownerId:payable.supplierId,direction:'DEBIT',amountCents:payable.amountCents},
       {accountCode:'PLATFORM_BANK_OR_CASH',ownerId:null,direction:'CREDIT',amountCents:payable.amountCents},
     ],'SUPPLIER_PAYABLE');
   }
   private line(lines:LedgerLine[],accountCode:string,ownerId:string|null,direction:LedgerLine['direction'],amount:number):void{if(amount>0)lines.push({accountCode,ownerId,direction,amountCents:moneyCents(amount)});}
-  private async append(store:CommerceStore,referenceId:string,eventType:LedgerTransaction['eventType'],lines:LedgerLine[],referenceType:LedgerTransaction['referenceType']='ORDER'):Promise<void>{
+  private async append(store:LedgerPostingStore,referenceId:string,eventType:LedgerTransaction['eventType'],lines:LedgerLine[],referenceType:LedgerTransaction['referenceType']='ORDER'):Promise<void>{
     const debit=lines.filter((line)=>line.direction==='DEBIT').reduce((sum,line)=>sum+Number(line.amountCents),0);
     const credit=lines.filter((line)=>line.direction==='CREDIT').reduce((sum,line)=>sum+Number(line.amountCents),0);
     if(!lines.length||debit!==credit)throw new BusinessError('FINANCIAL_INCONSISTENT','财务流水借贷不平衡，已中止业务提交',500,{debit,credit,eventType});

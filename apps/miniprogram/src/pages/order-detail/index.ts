@@ -28,6 +28,8 @@ interface OrderDetailView extends OrderDto {
   deliveryTime: string;
   partialRefundText: string | null;
   modeBExceptionHint: string | null;
+  pickupWindowText: string | null;
+  cancellationText: string | null;
 }
 
 const STATUS: Record<string, { text: string; hint: string }> = {
@@ -98,14 +100,17 @@ Page({
         createdText: formatDateTime(qualityCase.registeredAt),
       }));
       const communityQualityOpen = canSubmitCommunityQualityCase(order);
+      const pickupWindowText = order.pickupWindow ? ({ ACTIVE:'请在截止前领取', EXTENDED:'已获一次延期，请在新截止前领取', EXPIRED_PENDING:'领取已逾期，运营正在确认后续处理', REFUND_PENDING:'逾期退款正在由财务处理', LOSS_RECORDED:'未领取商品已完成报损关闭', CLOSED:'领取窗口已关闭' }[order.pickupWindow.status] ?? order.pickupWindow.status) : null;
+      const cancellationText = order.cancellation ? ({ DIRECT_REFUNDING:'取消退款处理中', PENDING_REVIEW:'取消申请待运营审核', REJECTED:`取消申请未通过：${order.cancellation.reviewNote ?? '未提供原因'}`, APPROVED_WAITING_FINANCE:'取消申请已通过，待财务退款', REFUNDING:'退款处理中', REFUNDED:'取消退款已完成' }[order.cancellation.status] ?? order.cancellation.status) : null;
       this.setData({ order: {
         ...order,
         totalText: formatMoney(order.totalCents), createdText: formatDateTime(order.createdAt), statusText: status.text, statusHint: status.hint,
-        canPay: order.status === 'PENDING_PAYMENT', canCancel: order.status === 'PENDING_PAYMENT', canPickup: order.status === 'READY_FOR_PICKUP',
+        canPay: order.status === 'PENDING_PAYMENT', canCancel: order.status === 'PENDING_PAYMENT'||(order.businessModelVersion==='PLATFORM_COMMUNITY'&&['PAID_WAITING_CLOSE','LOCKED','ALLOCATING'].includes(order.status)), canPickup: order.status === 'READY_FOR_PICKUP',
         canAfterSale: communityQualityOpen || (!modeB && protectionOpen && !['PENDING_PAYMENT', 'CANCELLED', 'REFUNDED'].includes(order.status) && !afterSales.some((item) => ['SUBMITTED', 'PROCESSING'].includes(item.status))),
         afterSaleViews: [...afterSales.map((item) => ({ id:item.id, reason:item.reason, statusText: afterSaleLabels[item.status] ?? item.status, createdText: formatDateTime(item.createdAt) })), ...communityQualityViews],
         deliveryName: location.name, deliveryAddress: location.address, deliveryTime: location.time,
         modeBExceptionHint: modeB && !['PICKED_UP', 'COMPLETED'].includes(order.status) ? '商品异常由平台按明细核实和退款；正常商品不受影响，可继续领取。' : null,
+        pickupWindowText, cancellationText,
         partialRefundText: partialRefunds.length ? `部分商品异常，退款${partialRefunds.some((item) => item.status === 'PROCESSING' || item.status === 'CREATED') ? '处理中' : '已处理'}：${formatMoney(partialRefunds.reduce((sum, item) => sum + item.amountCents, 0))}` : null,
         itemViews,
       } });
@@ -121,10 +126,11 @@ Page({
   },
   async cancel() {
     const order = this.data.order; if (!order || !order.canCancel || this.data.cancelling) return;
-    const result = await wx.showModal({ title: '取消未支付订单？', content: '取消后商品会回到本团可售库存，需重新下单才能支付。', confirmText: '确认取消', confirmColor: '#cf492f' });
+    const paidCommunity=order.businessModelVersion==='PLATFORM_COMMUNITY'&&order.status!=='PENDING_PAYMENT';
+    const result = await wx.showModal({ title: paidCommunity?'申请取消社区订单？':'取消未支付订单？', content: paidCommunity?'截单前将原路全额退款；截单后会进入运营审核与财务退款流程。':'取消后商品会回到本团可售库存，需重新下单才能支付。', confirmText: paidCommunity?'提交申请':'确认取消', confirmColor: '#cf492f' });
     if (!result.confirm) return;
     this.setData({ cancelling: true });
-    try { await api.cancelOrder(order.id); await this.loadOrder(); void wx.showToast({ title: '订单已取消', icon: 'success' }); }
+    try { await api.cancelOrder(order.id); await this.loadOrder(); void wx.showToast({ title: paidCommunity?'取消申请已提交':'订单已取消', icon: 'success' }); }
     catch (error) { void wx.showModal({ title: '取消失败', content: error instanceof Error ? error.message : '请稍后重试', showCancel: false }); }
     finally { this.setData({ cancelling: false }); }
   },

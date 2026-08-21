@@ -69,7 +69,13 @@ services:
       WECHAT_SUBSCRIBE_PARTIAL_REFUND_TEMPLATE_ID: ${WECHAT_SUBSCRIBE_PARTIAL_REFUND_TEMPLATE_ID:?required}
       WECHAT_SUBSCRIBE_PARTIAL_REFUND_TEMPLATE_DATA: ${WECHAT_SUBSCRIBE_PARTIAL_REFUND_TEMPLATE_DATA:?required}
       PAYMENT_PROVIDER: wechat-platform
+      PLATFORM_PROCUREMENT_ENABLED: ${PLATFORM_PROCUREMENT_ENABLED:-false}
+      COMMUNITY_FULFILLMENT_ENABLED: ${COMMUNITY_FULFILLMENT_ENABLED:-true}
+      DEFAULT_BUSINESS_MODEL_VERSION: ${DEFAULT_BUSINESS_MODEL_VERSION:-PLATFORM_COMMUNITY}
       WECHAT_PAY_SP_MCHID: ${WECHAT_PAY_SP_MCHID:?required}
+      WECHAT_PAY_PLATFORM_MCHID: ${WECHAT_PAY_PLATFORM_MCHID:?required}
+      WECHAT_PAY_PLATFORM_CERT_SERIAL: ${WECHAT_PAY_PLATFORM_CERT_SERIAL:?required}
+      WECHAT_PAY_PLATFORM_PRIVATE_KEY_PATH: /run/secrets/wechat_platform_private_key
       WECHAT_PAY_CERT_SERIAL: ${WECHAT_PAY_CERT_SERIAL:?required}
       WECHAT_PAY_PRIVATE_KEY_PATH: /run/secrets/wechat_private_key
       WECHAT_PAY_PUBLIC_KEY_ID: ${WECHAT_PAY_PUBLIC_KEY_ID:?required}
@@ -79,7 +85,7 @@ services:
       WECHAT_PAY_REFUND_NOTIFY_URL: ${WECHAT_PAY_REFUND_NOTIFY_URL:?required}
       WECHAT_PAY_PLATFORM_NAME: ${WECHAT_PAY_PLATFORM_NAME:?required}
       PICKUP_CODE_SECRET: ${PICKUP_CODE_SECRET:?required}
-    secrets: [wechat_private_key,wechat_public_key]
+secrets: [wechat_private_key,wechat_platform_private_key,wechat_public_key]
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
@@ -114,6 +120,7 @@ services:
 
 secrets:
   wechat_private_key: { file: "${WECHAT_PRIVATE_KEY_FILE:?required}" }
+  wechat_platform_private_key: { file: "${WECHAT_PLATFORM_PRIVATE_KEY_FILE:?required}" }
   wechat_public_key: { file: "${WECHAT_PUBLIC_KEY_FILE:?required}" }
 volumes: { mysql_data: {}, redis_data: {}, caddy_data: {}, caddy_config: {} }
 networks: { backend: {} }

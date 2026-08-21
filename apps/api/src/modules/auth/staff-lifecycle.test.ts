@@ -73,6 +73,18 @@ describe('internal staff lifecycle',()=>{
     expect((await app.inject({method:'POST',url:'/api/v1/admin/pickup-verifier-assignments/grant',headers:superHeaders(),payload})).statusCode).toBe(200);
   });
 
+  it('clears a pickup-manager point scope when the employee changes to another fixed role',async()=>{
+    const created=await app.inject({method:'POST',url:'/api/v1/admin/staff',headers:superHeaders(),payload:{displayName:'待转岗负责人',username:'role.change',phone:'13800000003',role:'PICKUP_MANAGER',pickupPointIds:['pickup-demo-001']}});
+    expect(created.statusCode,created.body).toBe(201);
+    const userId=created.json().data.staff.userId as string;
+    // A stale hidden form value is deliberately supplied. The server must
+    // remove it instead of retaining a non-manager point authorization.
+    const changed=await app.inject({method:'PATCH',url:`/api/v1/admin/staff/${userId}`,headers:superHeaders(),payload:{role:'OPERATOR',pickupPointIds:['pickup-demo-001']}});
+    expect(changed.statusCode,changed.body).toBe(200);
+    expect(changed.json().data).toMatchObject({role:'OPERATOR',pickupPointIds:[]});
+    expect(await store.listStaffPickupPointAssignments(userId)).toEqual([]);
+  });
+
   it('does not disclose or let an operator overwrite commercial product references',async()=>{
     const created=await app.inject({method:'POST',url:'/api/v1/admin/platform/skus',headers:superHeaders(),payload:{title:'脱敏测试商品',category:'常温',origin:'保定',imageUrl:null,skuName:'500g',retailPriceCents:2500,defaultSellableQuantity:30,referencePurchaseCostCents:900,supplierNote:'仅采购可见',status:'ACTIVE'}});
     expect(created.statusCode,created.body).toBe(201);

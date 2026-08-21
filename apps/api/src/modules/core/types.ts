@@ -149,7 +149,7 @@ export interface DeliveryPlan {
   logisticsPlatform?:string|null; estimatedArrivalAt?:string|null;
   remark:string|null; confirmedAt:string|null; bookedAt:string|null; dispatchedAt:string|null; arrivedAt:string|null; createdAt:string; updatedAt:string;
 }
-export interface PickupCredential { orderId:string; codeHash:string; status:'ACTIVE'|'USED'; expiresAt:string }
+export interface PickupCredential { orderId:string; codeHash:string; status:'ACTIVE'|'USED'|'REVOKED'; expiresAt:string }
 
 export type Role = 'USER' | 'OPERATOR' | 'REVIEWER' | 'FULFILLMENT' | 'PICKUP_MANAGER' | 'PICKUP_VERIFIER' | 'CUSTOMER_SERVICE' | 'FINANCE' | 'PROCUREMENT' | 'WAREHOUSE_RECEIVER' | 'QUALITY_INSPECTOR' | 'WAREHOUSE_OPERATOR' | 'SUPER_ADMIN';
 export interface User { id:string; wechatOpenId:string|null; status:'ACTIVE'|'BLOCKED'; createdAt:string }
@@ -221,16 +221,22 @@ export interface FulfillmentExceptionItem { id:string; exceptionId:string; platf
 export interface FulfillmentException { id:string; campaignId:string; orderId:string|null; clientRequestId:string|null; outboundOrderId:string|null; deliveryPlanId:string|null; sourceStage:'SUPPLIER_RECEIPT'|'WAREHOUSE'|'TRANSIT'|'PICKUP_HANDOVER'|'CUSTOMER_CLAIM'; status:FulfillmentExceptionStatus; responsibility:ExceptionResponsibility; registeredBy:string; confirmedBy:string|null; resolutionNote:string|null; registeredAt:string; confirmedAt:string|null; items:FulfillmentExceptionItem[] }
 /** Deterministic paid-time allocation of a shortage to one platform sales line. */
 export interface FulfillmentAllocation { id:string; exceptionId:string; exceptionItemId:string; salesOrderItemId:string; orderId:string; platformSkuId:string; fulfilledQuantity:number; exceptionQuantity:number; refundedQuantity:number; createdAt:string; refundedAt:string|null }
-export interface PlatformSalesLine { id:string; orderId:string; platformSkuId:string; quantity:number; unitPriceCents:MoneyCents; purchaseUnitCents:MoneyCents; amountCents:MoneyCents; fulfilledQuantity:number; exceptionQuantity:number; refundedQuantity:number; refundedAmountCents:MoneyCents; pickedUpQuantity:number; paidAt:string|null }
+export interface PlatformSalesLine { id:string; orderId:string; /** present on campaign allocation reads */ orderNo?:string|null|undefined; platformSkuId:string; quantity:number; unitPriceCents:MoneyCents; purchaseUnitCents:MoneyCents; amountCents:MoneyCents; fulfilledQuantity:number; exceptionQuantity:number; refundedQuantity:number; refundedAmountCents:MoneyCents; pickedUpQuantity:number; paidAt:string|null }
 export interface CommunityDeliveryItem { id:string; communityDeliveryId:string; platformSkuId:string; expectedQuantity:number; receivedQuantity:number; rejectedQuantity:number; shortQuantity:number; damagedQuantity:number; reason:FulfillmentExceptionType|null; evidenceNote:string|null; evidenceUrl:string|null }
 export interface CommunityDeliveryConfirmation { id:string; dispatchBatchId:string; campaignId:string; deliveryPlanId:string; status:'COMPLETED'|'EXCEPTION'; confirmedBy:string; receivedBy:string; confirmationNote:string|null; confirmedAt:string; items:CommunityDeliveryItem[] }
 export interface CommunityPickupReceiptItem { id:string; communityPickupReceiptId:string; platformSkuId:string; quantity:number }
 export interface CommunityPickupReceipt { id:string; orderId:string; deliveryPlanId:string; verifierId:string; requestKey:string; pickupRequestId:string|null; payloadHash:string|null; createdAt:string; items:CommunityPickupReceiptItem[] }
+/** A point arrival with shortages is a proposal until an operator confirms it. */
+export interface CommunityAllocationDraftItem { id:string; allocationDraftId:string; salesOrderItemId:string; orderId:string; orderNo:string; platformSkuId:string; paidAt:string; fulfilledQuantity:number; exceptionQuantity:number }
+export interface CommunityAllocationDraft { id:string; communityDeliveryId:string; exceptionId:string; campaignId:string; deliveryPlanId:string; version:number; sortRule:'paidAt_ASC_orderNo_ASC'; status:'PENDING_OPERATOR_CONFIRMATION'|'CONFIRMED'; createdBy:string; createdAt:string; confirmedBy:string|null; confirmedAt:string|null; items:CommunityAllocationDraftItem[] }
+/** Kept separate from the global order state machine so expiry cannot regress fulfilment history. */
+export interface CommunityPickupWindow { orderId:string; deliveryPlanId:string; arrivedAt:string; deadlineAt:string; status:'ACTIVE'|'EXPIRED_PENDING'|'EXTENDED'|'REFUND_PENDING'|'LOSS_RECORDED'|'CLOSED'; extensionCount:number; extendedBy:string|null; extendedAt:string|null; dispositionBy:string|null; dispositionAt:string|null; dispositionNote:string|null; refundExceptionId:string|null; lossExceptionId:string|null }
+export interface CommunityCancellationRequest { id:string; orderId:string; userId:string; reason:string; status:'DIRECT_REFUNDING'|'PENDING_REVIEW'|'REJECTED'|'APPROVED_WAITING_FINANCE'|'REFUNDING'|'REFUNDED'; requestedAt:string; reviewedBy:string|null; reviewedAt:string|null; reviewNote:string|null; financeExecutedBy:string|null; financeExecutedAt:string|null; refundId:string|null }
 /** A community user report is a standalone post-pickup fact. It never moves fulfilment quantities. */
 export type CommunityQualityCaseStatus='REGISTERED'|'ACCEPTED'|'REJECTED'|'REFUNDING'|'RESOLVED';
 export type CommunityQualityReason='PICKUP_SHORTAGE'|'PICKUP_DAMAGE'|'QUALITY_CLAIM';
 export interface CommunityQualityCaseItem { id:string; communityQualityCaseId:string; salesOrderItemId:string; platformSkuId:string; pickedUpQuantitySnapshot:number; disputedQuantity:number; reason:CommunityQualityReason; description:string }
-export interface CommunityQualityCase { id:string; orderId:string; userId:string; clientRequestId:string; payloadHash:string; status:CommunityQualityCaseStatus; registeredAt:string; items:CommunityQualityCaseItem[] }
+export interface CommunityQualityCase { id:string; orderId:string; userId:string; clientRequestId:string; payloadHash:string; status:CommunityQualityCaseStatus; registeredAt:string; acceptedBy:string|null; acceptedAt:string|null; decisionBy:string|null; decidedAt:string|null; decisionNote:string|null; refundApprovedBy:string|null; refundApprovedAt:string|null; financeExecutedBy:string|null; financeExecutedAt:string|null; refundExceptionId:string|null; items:CommunityQualityCaseItem[] }
 export interface LedgerLine {accountCode:string;ownerId:string|null;direction:'DEBIT'|'CREDIT';amountCents:MoneyCents}
 /**
  * Immutable accounting evidence. Marketplace events remain isolated from the
@@ -245,7 +251,7 @@ export interface LedgerTransaction {
   lines:LedgerLine[];
   createdAt:string;
 }
-export interface Settlement {id:string;orderId:string;paymentId:string;merchantOrderId:string;outOrderNo:string;providerOrderId:string|null;status:'CREATED'|'PROCESSING'|'SUCCEEDED'|'FAILED';commissionCents:MoneyCents;merchantReceivableCents:MoneyCents;createdAt:string}
+export interface Settlement {id:string;orderId:string;paymentId:string;merchantOrderId:string;outOrderNo:string;providerOrderId:string|null;status:'CREATED'|'PROCESSING'|'SUCCEEDED'|'FAILED';commissionCents:MoneyCents;merchantReceivableCents:MoneyCents;createdAt:string;submissionLeaseUntil:string|null;submissionClaimToken:string|null}
 export interface AuditLog {id:string;actorId:string;action:string;resourceType:string;resourceId:string;requestId:string;beforeData:unknown;afterData:unknown;createdAt:string}
 export interface ServiceAreaInterest {
   id:string; userId:string; regionText:string; contactName:string; contactPhone:string;
@@ -260,7 +266,7 @@ export interface AfterSale {
   resolvedBy:string|null; resolutionNote:string|null; resolvedAt:string|null;
   createdAt:string; updatedAt:string;
 }
-export type OrderNotificationType = 'SITE_CONFIRMED' | 'VEHICLE_DISPATCHED' | 'ARRIVED' | 'PARTIAL_REFUND';
+export type OrderNotificationType = 'SITE_CONFIRMED' | 'VEHICLE_DISPATCHED' | 'ARRIVED' | 'PARTIAL_REFUND' | 'PICKUP_DEADLINE' | 'PICKUP_EXPIRED';
 export type OrderNotificationStatus = 'PENDING_DELIVERY' | 'WECHAT_SENT' | 'IN_APP_AVAILABLE' | 'MANUAL_REQUIRED' | 'MANUAL_COMPLETED';
 export interface OrderNotification {
   id:string; eventKey:string; userId:string; orderId:string; type:OrderNotificationType; title:string; content:string;

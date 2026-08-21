@@ -2,7 +2,7 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
-import { activateAdminStaffSchema, activateNetworkPresetSchema, adminLoginSchema, batchCreatePickupPointsSchema, bookVehicleSchema, cancelOrderSchema, communityArrivalSchema, communityCampaignSchema, communityQualityCaseSchema, createAfterSaleSchema, createCampaignSchema, createDeliveryPlanSchema, createDispatchBatchSchema, createInternalStaffSchema, createMerchantSchema, createPickupPointSchema, createProductSchema, createServiceAreaInterestSchema, exceptionDecisionSchema, fulfillmentClaimSchema, goodsReceiptSchema, identifierSchema, internalStaffDirectoryQuerySchema, networkPresetIdSchema, notificationPreferenceSchema, openServiceAreaSchema, orderRequestSchema, outboundSchema, partialRefundExecutionSchema, pickupHandoverSchema, pickupOrderLookupQuerySchema, pickupVerifierAssignmentQuerySchema, pickupVerifierAssignmentSchema, platformCampaignSchema, platformSkuSchema, postponeCampaignSchema, receiveBatchSchema, regionDirectoryQuerySchema, resetInternalStaffCredentialSchema, resolveAfterSaleRefundSchema, reviewDecisionSchema, supplierOfferSchema, supplierPayablePaymentSchema, supplierQualificationSchema, supplierSchema, transferReinspectionSchema, updateAfterSaleStatusSchema, updateCampaignSchema, updateInternalStaffSchema, updateMerchantSchema, updateMerchantStatusSchema, updateProductSchema, updateServiceAreaInterestStatusSchema, updateServiceAreaOrderStatusSchema, verifyPickupSchema, warehouseExceptionSchema, warehouseSchema, wechatLoginSchema } from '@hometown/api-contracts';
+import { activateNetworkPresetSchema, batchCreatePickupPointsSchema, bookVehicleSchema, communityCampaignSchema, communityQualityAcceptanceSchema, communityQualityCaseSchema, communityQualityDecisionSchema, createAfterSaleSchema, createCampaignSchema, createDeliveryPlanSchema, createInternalStaffSchema, createMerchantSchema, createPickupPointSchema, createProductSchema, createServiceAreaInterestSchema, exceptionDecisionSchema, fulfillmentClaimSchema, goodsReceiptSchema, identifierSchema, internalStaffDirectoryQuerySchema, networkPresetIdSchema, notificationPreferenceSchema, openServiceAreaSchema, outboundSchema, partialRefundExecutionSchema, pickupHandoverSchema, pickupVerifierAssignmentQuerySchema, pickupVerifierAssignmentSchema, platformCampaignSchema, platformSkuSchema, postponeCampaignSchema, regionDirectoryQuerySchema, resetInternalStaffCredentialSchema, resolveAfterSaleRefundSchema, reviewDecisionSchema, supplierOfferSchema, supplierPayablePaymentSchema, supplierQualificationSchema, supplierSchema, transferReinspectionSchema, updateAfterSaleStatusSchema, updateCampaignSchema, updateInternalStaffSchema, updateMerchantSchema, updateMerchantStatusSchema, updateProductSchema, updateServiceAreaInterestStatusSchema, updateServiceAreaOrderStatusSchema, warehouseExceptionSchema, warehouseSchema } from '@hometown/api-contracts';
 import { BusinessError, moneyCents } from '@hometown/domain';
 import type { AppConfig } from './config.js';
 import { readDemoActor, requireActor } from './modules/auth/auth.js';
@@ -26,6 +26,13 @@ import { getRegionDirectoryEntry, listRegionDirectory } from './modules/service-
 import { PlatformProcurementService } from './modules/platform/platform-procurement-service.js';
 import { CommunityFulfillmentService } from './modules/fulfillment/community-fulfillment-service.js';
 import { CommunityQualityService } from './modules/fulfillment/community-quality-service.js';
+import { CommunityOperationsService } from './modules/fulfillment/community-operations-service.js';
+import { registerAuthRoutes } from './routes/auth-routes.js';
+import { registerPublicCatalogRoutes } from './routes/public-catalog-routes.js';
+import { registerCommunityRoutes } from './routes/community-routes.js';
+import { registerFinanceRoutes } from './routes/finance-routes.js';
+import { registerFulfillmentRoutes } from './routes/fulfillment-routes.js';
+import { registerOrderRoutes } from './routes/orders-routes.js';
 
 declare module 'fastify' { interface FastifyRequest { rawBody:string } }
 
@@ -89,6 +96,7 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     ? new WechatPlatformPaymentProvider({appId:dependencies.config.WECHAT_APP_ID!,spMchid:dependencies.config.WECHAT_PAY_SP_MCHID!,...(dependencies.config.WECHAT_PAY_PLATFORM_MCHID&&dependencies.config.WECHAT_PAY_PLATFORM_CERT_SERIAL&&dependencies.config.WECHAT_PAY_PLATFORM_PRIVATE_KEY_PATH?{platformMchid:dependencies.config.WECHAT_PAY_PLATFORM_MCHID,platformCertificateSerial:dependencies.config.WECHAT_PAY_PLATFORM_CERT_SERIAL,platformPrivateKeyPath:dependencies.config.WECHAT_PAY_PLATFORM_PRIVATE_KEY_PATH}:{}),certificateSerial:dependencies.config.WECHAT_PAY_CERT_SERIAL!,privateKeyPath:dependencies.config.WECHAT_PAY_PRIVATE_KEY_PATH!,publicKeyId:dependencies.config.WECHAT_PAY_PUBLIC_KEY_ID!,publicKeyPath:dependencies.config.WECHAT_PAY_PUBLIC_KEY_PATH!,apiV3Key:dependencies.config.WECHAT_PAY_API_V3_KEY!,notifyUrl:dependencies.config.WECHAT_PAY_NOTIFY_URL!,refundNotifyUrl:dependencies.config.WECHAT_PAY_REFUND_NOTIFY_URL!,platformName:dependencies.config.WECHAT_PAY_PLATFORM_NAME!})
     : new MockPaymentProvider();
   const payments=new PaymentService(store,paymentProvider,ledger,notifications);
+  const communityOperations=new CommunityOperationsService(store,payments,notifications);
   campaigns.setRefundHandler((orderId)=>payments.refundOrder(orderId));
   campaigns.setLockedHandler(async(campaignId)=>{await platformProcurement.createPurchaseOrders(campaignId);});
   const authService = dependencies.config.AUTH_PROVIDER === 'wechat'
@@ -165,16 +173,6 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
       :legacyItems.map((item)=>({skuId:item.skuId,title:item.title,category:item.category,skuName:item.skuName,origin:item.origin,imageUrl:item.imageUrl,unitPriceCents:Number(item.unitPriceCents),stock:item.stock,soldQuantity:item.soldQuantity})),
     };
   };
-  const withOrderDelivery=async(order:Awaited<ReturnType<CommerceStore['getOrder']>>)=>{
-    if(!order)return null;
-    const {merchantOrders:_merchantOrders,commissionCents:_commissionCents,items,...consumerOrder}=order;
-    void _merchantOrders;void _commissionCents;
-    const exceptionRows=(await Promise.all((await store.listFulfillmentExceptions()).map(async(exception)=>({exception,allocations:await store.listFulfillmentAllocations(exception.id)})))).filter((value)=>value.allocations.some((allocation)=>allocation.orderId===order.id));
-    const partialRefunds=order.businessModelVersion!=='LEGACY_MARKETPLACE'?await store.listPlatformPartialRefundsByOrder(order.id):[];
-    const communityQualityCases=order.businessModelVersion==='PLATFORM_COMMUNITY'?await store.listCommunityQualityCasesByOrder(order.id):[];
-    const refundByException=new Map(partialRefunds.map((refund)=>[refund.exceptionId,refund]));
-    return {...consumerOrder,items:items.map((item)=>{const allocationRows=exceptionRows.flatMap(({exception,allocations})=>allocations.filter((allocation)=>allocation.orderId===order.id&&allocation.salesOrderItemId===item.salesOrderItemId).map((allocation)=>({exception,allocation})));const active=allocationRows.find(({allocation})=>allocation.exceptionQuantity>0);const pendingRefund=active?refundByException.get(active.exception.id):undefined;const refundableQuantity=Math.max(0,item.exceptionQuantity-item.refundedQuantity);const refundStatus=item.refundedQuantity>0?'SUCCEEDED':pendingRefund?.status??(active?.exception.status==='REFUND_CONFIRMED'?'PENDING':null);const refundAmountCents=refundableQuantity>0?Number(item.unitPriceCents)*refundableQuantity:Number(item.refundedAmountCents);return{skuId:item.skuId,productId:item.productId,name:item.name,quantity:item.quantity,unitPriceCents:item.unitPriceCents,amountCents:item.amountCents,fulfilledQuantity:item.fulfilledQuantity,pickedUpQuantity:item.pickedUpQuantity,remainingPickupQuantity:Math.max(0,item.fulfilledQuantity-item.pickedUpQuantity),exceptionQuantity:item.exceptionQuantity,refundedQuantity:item.refundedQuantity,refundedAmountCents:item.refundedAmountCents,refundStatus,refundAmountCents};}),deliveryPlan:publicDeliveryPlan(await store.getDeliveryPlan(order.deliveryPlanId)),afterSales:(await store.listAfterSalesByUser(order.userId)).filter((item)=>item.orderId===order.id),communityQualityCases,fulfillmentExceptions:exceptionRows.map(({exception,allocations})=>({id:exception.id,status:exception.status,sourceStage:exception.sourceStage,responsibility:exception.responsibility,resolutionNote:exception.resolutionNote,items:allocations.filter((allocation)=>allocation.orderId===order.id).map((allocation)=>({platformSkuId:allocation.platformSkuId,fulfilledQuantity:allocation.fulfilledQuantity,exceptionQuantity:allocation.exceptionQuantity,refundedQuantity:allocation.refundedQuantity,reason:exception.items.find((item)=>item.id===allocation.exceptionItemId)?.reason??null}))})),partialRefunds:partialRefunds.map((refund)=>({id:refund.id,exceptionId:refund.exceptionId,status:refund.status,amountCents:refund.amountCents}))};
-  };
   const withExceptionRefundAmounts=async(exception:Awaited<ReturnType<CommerceStore['getFulfillmentException']>>)=>{
     if(!exception)return null;
     let refundableAmountCents=0;let refundedAmountCents=0;
@@ -192,19 +190,38 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
   await scheduler.reconcile(await store.listCampaigns());
   await platformProcurement.reconcileLockedCampaigns();
   await orders.expirePendingOrders();
+  await communityOperations.reconcilePickupDeadlines();
+  await payments.reconcileRefunds();
+  await communityOperations.reconcileExpiredPickupRefunds();
+  await communityOperations.reconcileCancellationRefunds();
   await notifications.drainPending().catch((error: unknown) => app.log.error({ err: error }, 'notification outbox initial drain failed'));
   const reconciliationTimer = setInterval(() => {
     void store.listCampaigns()
       .then((items) => scheduler.reconcile(items))
       .then(()=>platformProcurement.reconcileLockedCampaigns())
       .then(()=>orders.expirePendingOrders())
+       .then(()=>communityOperations.reconcilePickupDeadlines())
        .then(()=>payments.reconcileRefunds())
+       .then(()=>communityOperations.reconcileExpiredPickupRefunds())
+       .then(()=>communityOperations.reconcileCancellationRefunds())
        .then(()=>payments.reconcileSettlements())
        .then(()=>payments.settleEligiblePickedUpOrders())
        .then(()=>notifications.drainPending())
       .catch((error: unknown) => app.log.error({ err: error }, 'campaign schedule reconciliation failed'));
   }, 30_000);
   reconciliationTimer.unref();
+
+  // Historical marketplace and the former procurement/warehouse route family
+  // are compatibility reads in production.  The narrow exception-resolution
+  // whitelist is retained only to close already-created fulfilment facts.
+  app.addHook('preHandler',async(request)=>{
+    if(dependencies.config.NODE_ENV!=='production'||!['POST','PATCH','DELETE'].includes(request.method))return;
+    const path=request.routeOptions.url??'';
+    const legacyCampaign=path.startsWith('/api/v1/admin/campaigns');
+    const legacyCatalog=path.startsWith('/api/v1/admin/merchants')||path.startsWith('/api/v1/admin/products');
+    const oldPlatform=path.startsWith('/api/v1/admin/platform/')&&!path.startsWith('/api/v1/admin/platform/fulfillment-exceptions/');
+    if(legacyCampaign||legacyCatalog||oldPlatform)throw new BusinessError('INVALID_STATE_TRANSITION','历史商城及旧采购/仓储写入口已冻结；仅保留查询、审计、支付回调和履约异常收尾白名单',409);
+  });
 
   app.decorateRequest('rawBody','');
   app.addContentTypeParser('application/json',{parseAs:'string'},(request,body,done)=>{
@@ -271,43 +288,18 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
   });
   app.addHook('onClose', async () => { clearInterval(reconciliationTimer); await scheduler.close(); await store.close(); });
 
-  app.post('/api/v1/auth/wechat/login',{config:{rateLimit:{max:10,timeWindow:'1 minute'}}}, async (request) => {
-    if (!authService) throw new BusinessError('FORBIDDEN', '当前环境未启用微信登录', 403);
-    const input=wechatLoginSchema.parse(request.body);
-    if(input.privacyVersion!==dependencies.config.PRIVACY_NOTICE_VERSION)throw new BusinessError('VALIDATION_ERROR','隐私说明已更新，请阅读并同意最新版本',400);
-    return { data: await authService.login(input.code, input.privacyVersion) };
-  });
-  app.post('/api/v1/auth/admin/login',{config:{rateLimit:{max:5,timeWindow:'5 minutes'}}},async(request)=>{
-    const input=adminLoginSchema.parse(request.body);
-    return{data:await adminAuthService.login(input.username,input.password)};
-  });
-  app.post('/api/v1/auth/admin/activate',{config:{rateLimit:{max:5,timeWindow:'5 minutes'}}},async(request)=>{
-    const input=activateAdminStaffSchema.parse(request.body);
-    await staffService.activate(input.username,input.initialCredential,input.newPassword,request.id);
-    return {data:await adminAuthService.login(input.username,input.newPassword)};
-  });
-  app.post('/api/v1/auth/logout', async (request, reply) => {
-    requireActor(request, ['USER', 'OPERATOR', 'REVIEWER', 'FULFILLMENT', 'PICKUP_MANAGER', 'PICKUP_VERIFIER', 'FINANCE', 'SUPER_ADMIN']);
-    await authService?.logout(request.headers.authorization);
-    await adminAuthService.logout(request.headers.authorization);
-    return reply.status(204).send();
+  registerAuthRoutes(app, { authService, adminAuthService, staffService, privacyNoticeVersion: dependencies.config.PRIVACY_NOTICE_VERSION });
+
+  registerPublicCatalogRoutes(app, {
+    campaigns,
+    listServiceAreas: () => store.listServiceAreas(),
+    listPickupPoints: (serviceAreaId) => store.listPickupPoints(serviceAreaId),
+    getDeliveryPlanByCampaign: (campaignId) => store.getDeliveryPlanByCampaign(campaignId),
+    withCampaignItems,
+    publicDeliveryPlan,
   });
 
-  app.get('/api/v1/campaigns', async () => ({ data: await Promise.all((await campaigns.listPublic()).map(withCampaignItems)) }));
-  app.get('/api/v1/service-areas', async () => ({ data: (await store.listServiceAreas()).filter((item) => item.status === 'ENABLED' && item.orderEnabled) }));
-  app.get('/api/v1/pickup-points', async (request) => {
-    const query = request.query as { serviceAreaId?: string };
-    return { data: (await store.listPickupPoints(query.serviceAreaId)).filter((item)=>item.status==='ACTIVE') };
-  });
-  app.get('/api/v1/campaigns/:id', async (request) => {
-    const id = identifierSchema.parse((request.params as { id: string }).id);
-    return { data: await withCampaignItems(await campaigns.getPublic(id)) };
-  });
-  app.get('/api/v1/delivery-plans/:campaignId', async (request) => {
-    const campaignId = identifierSchema.parse((request.params as { campaignId: string }).campaignId);
-    await campaigns.getPublic(campaignId);
-    return { data: publicDeliveryPlan(await store.getDeliveryPlanByCampaign(campaignId)) };
-  });
+  registerOrderRoutes(app, { store, orders, payments, communityOperations, audit, rejectCommunityExternalEvidence });
 
   app.get('/api/v1/admin/campaigns', async (request) => {
     requireActor(request, ['OPERATOR', 'FULFILLMENT', 'FINANCE', 'SUPER_ADMIN']);
@@ -546,40 +538,6 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
   app.post('/api/v1/admin/platform/fulfillment-exceptions/:id/transfer-reinspection',async(request)=>{const actor=requireActor(request,['WAREHOUSE_RECEIVER','QUALITY_INSPECTOR','WAREHOUSE_OPERATOR','FULFILLMENT','SUPER_ADMIN']);const id=identifierSchema.parse((request.params as{id:string}).id);const value=await platformProcurement.reinspectWrongPointTransfer(id,actor.userId,transferReinspectionSchema.parse(request.body),actor.roles.includes('SUPER_ADMIN'),{requestId:request.id});return{data:value};});
   app.post('/api/v1/admin/platform/fulfillment-exceptions/:id/partial-refund',async(request)=>{const actor=requireActor(request,['FINANCE','SUPER_ADMIN']);const id=identifierSchema.parse((request.params as{id:string}).id);const input=partialRefundExecutionSchema.parse(request.body);await payments.executePartialRefund(id,{actorId:actor.userId,requestId:request.id,confirmationNote:input.confirmationNote});const value=await store.getFulfillmentException(id);if(!value)throw new BusinessError('RESOURCE_NOT_FOUND','异常不存在',404);return{data:value};});
 
-  app.post('/api/v1/orders/preview', async (request) => {
-    const actor = requireActor(request, ['USER', 'SUPER_ADMIN']);
-    return { data: await orders.preview(actor.userId, orderRequestSchema.parse(request.body)) };
-  });
-  app.post('/api/v1/orders', async (request, reply) => {
-    const actor = requireActor(request, ['USER', 'SUPER_ADMIN']);
-    const key = request.headers['idempotency-key'];
-    if (typeof key !== 'string' || key.length < 8 || key.length > 128) {
-      throw new BusinessError('VALIDATION_ERROR', 'Idempotency-Key 长度必须为 8 到 128 个字符');
-    }
-    const order = await orders.create(actor.userId, orderRequestSchema.parse(request.body), key);
-    return reply.status(201).send({ data: order });
-  });
-  app.get('/api/v1/orders', async (request) => {
-    const actor = requireActor(request, ['USER', 'SUPER_ADMIN']);
-    return { data: (await Promise.all((await store.listOrdersByUser(actor.userId)).map(withOrderDelivery))).filter(Boolean) };
-  });
-  app.get('/api/v1/orders/:id', async (request) => {
-    const actor = requireActor(request, ['USER', 'SUPER_ADMIN']);
-    const id = identifierSchema.parse((request.params as { id: string }).id);
-    return { data: await withOrderDelivery(await orders.getForUser(id, actor.userId)) };
-  });
-  app.post('/api/v1/orders/:id/cancel', async (request) => {
-    const actor=requireActor(request,['USER','SUPER_ADMIN']);
-    const id=identifierSchema.parse((request.params as{id:string}).id);
-    const before=await orders.getForUser(id,actor.userId);
-    if(before.businessModelVersion==='PLATFORM_COMMUNITY'){
-      await rejectCommunityExternalEvidence(request,actor.userId,'ORDER',id,request.body);
-      cancelOrderSchema.parse(request.body??{});
-    }
-    const after=await orders.cancelPending(id,actor.userId);
-    if(before.status!==after.status)await audit(request,actor.userId,'ORDER_CANCELLED_BY_USER','ORDER',id,before,after);
-    return {data:await withOrderDelivery(after)};
-  });
   app.post('/api/v1/service-area-interests',async(request,reply)=>{
     const actor=requireActor(request,['USER','SUPER_ADMIN']);const input=createServiceAreaInterestSchema.parse(request.body);
     if(input.privacyVersion!==dependencies.config.PRIVACY_NOTICE_VERSION)throw new BusinessError('VALIDATION_ERROR','隐私说明已更新，请阅读并同意最新版本',400);
@@ -618,36 +576,17 @@ export async function buildApp(dependencies: AppDependencies): Promise<FastifyIn
     const notification=paymentProvider.parseRefundNotification(request.rawBody,{'wechatpay-timestamp':header('wechatpay-timestamp'),'wechatpay-nonce':header('wechatpay-nonce'),'wechatpay-signature':header('wechatpay-signature'),'wechatpay-serial':header('wechatpay-serial')});
     await payments.handleRefundNotification(notification);return reply.status(204).send();
   });
-  app.post('/api/v1/admin/dispatch-batches',async(request,reply)=>{requireActor(request,['FULFILLMENT','OPERATOR','SUPER_ADMIN']);const input=createDispatchBatchSchema.parse(request.body);return reply.status(201).send({data:await fulfillment.createBatch(input.campaignId)});});
-  app.get('/api/v1/admin/dispatch-batches',async(request)=>{requireActor(request,['FULFILLMENT','OPERATOR','SUPER_ADMIN']);return{data:await store.listDispatchBatches()};});
-  app.post('/api/v1/admin/dispatch-batches/:id/dispatch',async(request)=>{requireActor(request,['FULFILLMENT','OPERATOR','SUPER_ADMIN']);const id=identifierSchema.parse((request.params as{id:string}).id);return{data:await fulfillment.dispatch(id)};});
-  app.get('/api/v1/admin/community/deliveries',async(request)=>{const actor=requireActor(request,['OPERATOR','FULFILLMENT','PICKUP_MANAGER','PICKUP_VERIFIER','SUPER_ADMIN']);const plans=await store.listDeliveryPlans();const batches=await store.listDispatchBatches();const allowed=actor.roles.includes('SUPER_ADMIN')||actor.roles.includes('OPERATOR')||actor.roles.includes('FULFILLMENT');const filtered=[];for(const plan of plans){const campaign=await store.getCampaign(plan.campaignId);if(!campaign||campaign.businessModelVersion!=='PLATFORM_COMMUNITY')continue;if(!allowed&&(!plan.pickupPointId||!(await store.hasActivePickupPointAssignment(actor.userId,plan.pickupPointId))))continue;const batch=batches.find((item)=>item.campaignId===campaign.id)??null;const items=await store.listCommunityCampaignItems(campaign.id);const expectedBySku=new Map<string,number>();for(const line of await store.listPlatformSalesLinesByCampaign(campaign.id))expectedBySku.set(line.platformSkuId,(expectedBySku.get(line.platformSkuId)??0)+line.quantity);const confirmation=batch?await store.getCommunityDeliveryConfirmationByBatch(batch.id):null;filtered.push({id:plan.id,campaignId:plan.campaignId,campaignTitle:campaign.title,pickupPointId:plan.pickupPointId,status:plan.status,siteName:plan.siteName,address:plan.address,vehicleOrderNo:plan.vehicleOrderNo,logisticsPlatform:plan.logisticsPlatform,driverName:plan.driverName,vehiclePlate:plan.vehiclePlate,estimatedArrivalAt:plan.estimatedArrivalAt,dispatchedAt:plan.dispatchedAt,arrivedAt:plan.arrivedAt,dispatchBatchId:batch?.status==='IN_TRANSIT'?batch.id:null,arrivalConfirmed:confirmation!==null,arrivalResult:confirmation?.status??null,expectedItems:items.map((item)=>({platformSkuId:item.platformSkuId,title:item.title,skuName:item.skuName,expectedQuantity:expectedBySku.get(item.platformSkuId)??0})).filter((item)=>item.expectedQuantity>0)});}return{data:filtered};});
-  app.post('/api/v1/admin/community/dispatch-batches/:id/arrival',async(request)=>{const actor=requireActor(request,['PICKUP_MANAGER','SUPER_ADMIN']);const id=identifierSchema.parse((request.params as{id:string}).id);const batch=await store.getDispatchBatch(id);if(!batch)throw new BusinessError('RESOURCE_NOT_FOUND','配送批次不存在',404);const plan=await store.getDeliveryPlanByCampaign(batch.campaignId);if(!plan?.pickupPointId)throw new BusinessError('FORBIDDEN','配送批次未绑定固定自提点',403);await assertActivePickupPointAccess(actor,plan.pickupPointId);await rejectCommunityExternalEvidence(request,actor.userId,'COMMUNITY_DISPATCH_BATCH',id,request.body);const input=communityArrivalSchema.parse(request.body);const emergencyProxy=actor.roles.includes('SUPER_ADMIN');if(emergencyProxy&&!input.emergencyReason)throw new BusinessError('VALIDATION_ERROR','紧急代办必须填写代办原因',400);if(!emergencyProxy&&input.emergencyReason)throw new BusinessError('FORBIDDEN','只有平台负责人紧急代办时可以填写代办原因',403);return{data:await communityFulfillment.confirmArrival(id,actor.userId,input,request.id,emergencyProxy)};});
-  app.post('/api/v1/pickup/batches/:id/receive',async(request)=>{requireActor(request,['FULFILLMENT','OPERATOR','SUPER_ADMIN']);const id=identifierSchema.parse((request.params as{id:string}).id);const batch=await store.getDispatchBatch(id);if(!batch)throw new BusinessError('RESOURCE_NOT_FOUND','发车批次不存在',404);const campaign=await store.getCampaign(batch.campaignId);if(!campaign)throw new BusinessError('RESOURCE_NOT_FOUND','团期不存在',404);if(campaign.businessModelVersion==='PLATFORM_COMMUNITY')throw new BusinessError('INVALID_STATE_TRANSITION','社区团购必须使用点位逐商品到货确认入口',409);const input=receiveBatchSchema.parse(request.body);return{data:await fulfillment.receive(id,input.deliveryPlanId)};});
-  app.get('/api/v1/pickup-code',async(request)=>{const actor=requireActor(request,['USER','SUPER_ADMIN']);const query=request.query as{orderId?:string};const orderId=identifierSchema.parse(query.orderId);return{data:await fulfillment.getCode(orderId,actor.userId)};});
-  app.get('/api/v1/pickup/orders/lookup',async(request)=>{
-    const actor=requireActor(request,['PICKUP_MANAGER','PICKUP_VERIFIER','FULFILLMENT','SUPER_ADMIN']);
-    const query=pickupOrderLookupQuerySchema.parse(request.query);
-    const plan=await store.getDeliveryPlan(query.deliveryPlanId);
-    if(!plan||!plan.pickupPointId||plan.status!=='ARRIVED')throw new BusinessError('RESOURCE_NOT_FOUND','配送计划不存在或当前不可核销',404);
-    const pickupPoint=(await store.listPickupPoints(plan.serviceAreaId)).find((item)=>item.id===plan.pickupPointId);
-    if(!pickupPoint||pickupPoint.status!=='ACTIVE')throw new BusinessError('FORBIDDEN','当前自提点未启用，不能核销',403);
-    await assertActivePickupPointAccess(actor,plan.pickupPointId);
-    const order=await store.getOrderByNo(query.orderNo);
-    if(!order||order.deliveryPlanId!==plan.id||order.pickupPointId!==plan.pickupPointId)throw new BusinessError('RESOURCE_NOT_FOUND','未找到本领取点的订单',404);
-    return {data:{id:order.id,orderNo:order.orderNo,deliveryPlanId:order.deliveryPlanId,status:order.status,items:order.items.map((item)=>({skuId:item.skuId,name:item.name,quantity:item.quantity,readyQuantity:item.fulfilledQuantity,alreadyPickedQuantity:item.pickedUpQuantity,remainingPickupQuantity:Math.max(0,item.fulfilledQuantity-item.pickedUpQuantity),exceptionQuantity:item.exceptionQuantity}))}};
-  });
-  app.post('/api/v1/pickup/verify',async(request)=>{const actor=requireActor(request,['PICKUP_MANAGER','PICKUP_VERIFIER','FULFILLMENT','SUPER_ADMIN']);const input=verifyPickupSchema.parse(request.body);return{data:await fulfillment.verify({orderId:input.orderId,deliveryPlanId:input.deliveryPlanId,code:input.code,verifierId:actor.userId,bypassPointAuthorization:actor.roles.includes('SUPER_ADMIN'),...(input.items?{requestedItems:input.items}:{}),...(input.pickupRequestId?{pickupRequestId:input.pickupRequestId}:{})})};});
-  app.get('/api/v1/admin/finance/ledger',async(request)=>{requireActor(request,['FINANCE','SUPER_ADMIN']);const query=request.query as{orderId?:string};return{data:await store.listLedgerTransactions(query.orderId)};});
-  app.get('/api/v1/admin/finance/settlements',async(request)=>{requireActor(request,['FINANCE','SUPER_ADMIN']);const query=request.query as{orderId?:string};return{data:await store.listSettlements(query.orderId)};});
-  app.get('/api/v1/admin/finance/refunds',async(request)=>{requireActor(request,['FINANCE','SUPER_ADMIN']);return{data:await store.listRefunds(500)};});
-  app.get('/api/v1/admin/orders',async(request)=>{requireActor(request,['OPERATOR','FULFILLMENT','FINANCE','CUSTOMER_SERVICE','SUPER_ADMIN']);const query=request.query as{orderNo?:string};if(query.orderNo){const value=await store.getOrderByNo(query.orderNo.trim());return{data:value?[value]:[]};}return{data:await store.listOrders(100)};});
-  app.post('/api/v1/admin/orders/:id/refund',async(request)=>{const actor=requireActor(request,['FINANCE','SUPER_ADMIN']);const id=identifierSchema.parse((request.params as{id:string}).id);const before=await store.getOrder(id);if(before?.businessModelVersion!=='LEGACY_MARKETPLACE')throw new BusinessError('PARTIAL_REFUND_NOT_SUPPORTED','模式 B 订单只能从运营确认的履约异常执行退款',409);if((await store.listSettlements(id)).length)throw new BusinessError('SETTLEMENT_EXISTS','订单已生成结算单，不能自动退款，请转人工财务处理',409);await payments.requestFullRefund(id);const after=await store.getOrder(id);await audit(request,actor.userId,'ORDER_FULL_REFUND_REQUESTED','ORDER',id,before,after);return{data:after};});
+  registerCommunityRoutes(app, { store, communityFulfillment, communityOperations, assertActivePickupPointAccess, rejectCommunityExternalEvidence });
+  registerFulfillmentRoutes(app, { store, fulfillment, assertActivePickupPointAccess });
+  registerFinanceRoutes(app, store);
   app.get('/api/v1/admin/audit-logs',async(request)=>{requireActor(request,['SUPER_ADMIN']);return{data:await store.listAuditLogs(500)};});
   app.get('/api/v1/admin/service-area-interests',async(request)=>{requireActor(request,['OPERATOR','CUSTOMER_SERVICE','SUPER_ADMIN']);return{data:await store.listServiceAreaInterests(500)};});
   app.post('/api/v1/admin/service-area-interests/:id/status',async(request)=>{const actor=requireActor(request,['OPERATOR','CUSTOMER_SERVICE','SUPER_ADMIN']);const id=identifierSchema.parse((request.params as{id:string}).id);const before=await store.getServiceAreaInterest(id);if(!before)throw new BusinessError('RESOURCE_NOT_FOUND','开通意向不存在',404);const after={...before,status:updateServiceAreaInterestStatusSchema.parse(request.body).status};await store.saveServiceAreaInterest(after);await audit(request,actor.userId,'SERVICE_AREA_INTEREST_STATUS_UPDATED','SERVICE_AREA_INTEREST',id,before,{...after,contactPhone:'***'});return{data:after};});
   app.get('/api/v1/admin/after-sales',async(request)=>{requireActor(request,['OPERATOR','CUSTOMER_SERVICE','FINANCE','SUPER_ADMIN']);return{data:await store.listAfterSales(500)};});
-  app.get('/api/v1/admin/community-quality-cases',async(request)=>{requireActor(request,['OPERATOR','CUSTOMER_SERVICE','SUPER_ADMIN']);const cases=await store.listCommunityQualityCases(500);const visible=await Promise.all(cases.map(async(qualityCase)=>{const order=await store.getOrder(qualityCase.orderId);if(!order||order.businessModelVersion!=='PLATFORM_COMMUNITY')return null;const plan=await store.getDeliveryPlan(order.deliveryPlanId);return{id:qualityCase.id,status:qualityCase.status,registeredAt:qualityCase.registeredAt,order:{id:order.id,orderNo:order.orderNo,campaignId:order.campaignId,pickupPointId:order.pickupPointId,pickupPointName:plan?.siteName??order.pickupPointId},items:qualityCase.items.map((item)=>{const salesLine=order.items.find((line)=>line.salesOrderItemId===item.salesOrderItemId);return{salesOrderItemId:item.salesOrderItemId,platformSkuId:item.platformSkuId,skuName:salesLine?.name??item.platformSkuId,pickedUpQuantitySnapshot:item.pickedUpQuantitySnapshot,disputedQuantity:item.disputedQuantity,reason:item.reason,description:item.description};})};}));return{data:visible.filter((item)=>item!==null)};});
+  app.get('/api/v1/admin/community-quality-cases',async(request)=>{requireActor(request,['OPERATOR','CUSTOMER_SERVICE','FINANCE','SUPER_ADMIN']);const cases=await store.listCommunityQualityCases(500);const visible=await Promise.all(cases.map(async(qualityCase)=>{const order=await store.getOrder(qualityCase.orderId);if(!order||order.businessModelVersion!=='PLATFORM_COMMUNITY')return null;const plan=await store.getDeliveryPlan(order.deliveryPlanId);return{id:qualityCase.id,status:qualityCase.status,registeredAt:qualityCase.registeredAt,order:{id:order.id,orderNo:order.orderNo,campaignId:order.campaignId,pickupPointId:order.pickupPointId,pickupPointName:plan?.siteName??order.pickupPointId},items:qualityCase.items.map((item)=>{const salesLine=order.items.find((line)=>line.salesOrderItemId===item.salesOrderItemId);return{salesOrderItemId:item.salesOrderItemId,platformSkuId:item.platformSkuId,skuName:salesLine?.name??item.platformSkuId,pickedUpQuantitySnapshot:item.pickedUpQuantitySnapshot,disputedQuantity:item.disputedQuantity,reason:item.reason,description:item.description};})};}));return{data:visible.filter((item)=>item!==null)};});
+  app.post('/api/v1/admin/community-quality-cases/:id/accept',async(request)=>{const actor=requireActor(request,['CUSTOMER_SERVICE','SUPER_ADMIN']);const id=identifierSchema.parse((request.params as{id:string}).id);const input=communityQualityAcceptanceSchema.parse(request.body);return{data:await communityQuality.accept(id,actor.userId,input.note,request.id)};});
+  app.post('/api/v1/admin/community-quality-cases/:id/decision',async(request)=>{const actor=requireActor(request,['OPERATOR','SUPER_ADMIN']);const id=identifierSchema.parse((request.params as{id:string}).id);const input=communityQualityDecisionSchema.parse(request.body);return{data:await communityQuality.decide(id,actor.userId,input.approved,input.note,request.id)};});
+  app.post('/api/v1/admin/community-quality-cases/:id/refund',async(request)=>{const actor=requireActor(request,['FINANCE','SUPER_ADMIN']);const id=identifierSchema.parse((request.params as{id:string}).id);const value=await store.transaction((transactionStore)=>transactionStore.getCommunityQualityCaseForUpdate(id));if(!value?.refundExceptionId)throw new BusinessError('INVALID_STATE_TRANSITION','品质售后尚未获准退款',409);await payments.executePartialRefund(value.refundExceptionId,{actorId:actor.userId,requestId:request.id,confirmationNote:'社区品质售后财务执行'});return{data:await communityQuality.markFinanceExecuted(id,actor.userId,request.id)};});
   app.post('/api/v1/admin/after-sales/:id/status',async(request)=>{const actor=requireActor(request,['OPERATOR','CUSTOMER_SERVICE','SUPER_ADMIN']);const id=identifierSchema.parse((request.params as{id:string}).id);const before=await store.getAfterSale(id);if(!before)throw new BusinessError('RESOURCE_NOT_FOUND','售后申请不存在',404);const input=updateAfterSaleStatusSchema.parse(request.body);if(['RESOLVED','REJECTED'].includes(before.status))return{data:before};if(input.status==='PROCESSING'&&before.status!=='SUBMITTED')throw new BusinessError('INVALID_STATE_TRANSITION','只有待受理售后可以进入处理中',409);if(input.status==='REJECTED'&&!input.resolutionNote)throw new BusinessError('VALIDATION_ERROR','驳回售后必须填写处理说明',400);const now=new Date().toISOString();const rejected=input.status==='REJECTED';const after={...before,status:input.status,resolutionType:rejected?('REJECTED' as const):before.resolutionType,resolvedBy:rejected?actor.userId:before.resolvedBy,resolutionNote:rejected?input.resolutionNote!:before.resolutionNote,resolvedAt:rejected?now:before.resolvedAt,updatedAt:now};await store.saveAfterSale(after);await audit(request,actor.userId,'AFTER_SALE_STATUS_UPDATED','AFTER_SALE',id,before,after);return{data:after};});
   app.post('/api/v1/admin/after-sales/:id/refund',async(request)=>{const actor=requireActor(request,['FINANCE','SUPER_ADMIN']);const id=identifierSchema.parse((request.params as{id:string}).id);const input=resolveAfterSaleRefundSchema.parse(request.body);const before=await store.getAfterSale(id);if(!before)throw new BusinessError('RESOURCE_NOT_FOUND','售后申请不存在',404);if(before.status==='RESOLVED'&&before.resolutionType==='FULL_REFUND')return{data:before};if(before.status!=='PROCESSING')throw new BusinessError('INVALID_STATE_TRANSITION','只有处理中售后可以批准退款',409);const order=await store.getOrder(before.orderId);if(!order)throw new BusinessError('RESOURCE_NOT_FOUND','售后订单不存在',404);if(order.businessModelVersion!=='LEGACY_MARKETPLACE')throw new BusinessError('PARTIAL_REFUND_NOT_SUPPORTED','模式 B 订单不能走历史售后整单退款',409);if((await store.listSettlements(order.id)).length)throw new BusinessError('SETTLEMENT_EXISTS','订单已生成结算单，不能自动退款，请转人工财务处理',409);await payments.requestFullRefund(order.id);const refunds=await store.listRefundsByOrder(order.id);const now=new Date().toISOString();const after={...before,status:'RESOLVED' as const,resolutionType:'FULL_REFUND' as const,refundAmountCents:order.totalCents,refundIds:refunds.map((item)=>item.id),resolvedBy:actor.userId,resolutionNote:input.resolutionNote,resolvedAt:now,updatedAt:now};await store.saveAfterSale(after);await audit(request,actor.userId,'AFTER_SALE_FULL_REFUND_APPROVED','AFTER_SALE',id,before,after);return{data:after};});
   app.get('/api/v1/admin/notifications/manual',async(request)=>{requireActor(request,['OPERATOR','CUSTOMER_SERVICE','SUPER_ADMIN']);return{data:await store.listManualOrderNotifications(500)};});

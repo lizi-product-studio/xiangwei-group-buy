@@ -1,0 +1,21 @@
+import type { FastifyInstance } from 'fastify';
+import { requireActor } from '../modules/auth/auth.js';
+import type { CommerceStore } from '../modules/core/store.js';
+
+/** Finance reads are isolated from order and fulfilment mutation routes. */
+export function registerFinanceRoutes(app: FastifyInstance, store: CommerceStore): void {
+  app.get('/api/v1/admin/finance/ledger', async (request) => {
+    requireActor(request, ['FINANCE','SUPER_ADMIN']);
+    const query = request.query as { orderId?: string };
+    return { data: await store.listLedgerTransactions(query.orderId) };
+  });
+  app.get('/api/v1/admin/finance/settlements', async (request) => {
+    requireActor(request, ['FINANCE','SUPER_ADMIN']);
+    const query = request.query as { orderId?: string };
+    return { data: await store.listSettlements(query.orderId) };
+  });
+  app.get('/api/v1/admin/finance/refunds', async (request) => {
+    requireActor(request, ['FINANCE','SUPER_ADMIN']);
+    return { data: await store.listRefunds(500) };
+  });
+}

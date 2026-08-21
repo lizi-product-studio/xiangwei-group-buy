@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { CreateCampaignInput, PostponeCampaignInput, UpdateCampaignInput } from '@hometown/api-contracts';
 import { BusinessError, transitionCampaign } from '@hometown/domain';
-import type { CommerceStore } from '../core/store.js';
+import type { LegacyCommerceStore } from '../core/legacy-commerce-store.js';
 import type { Campaign, CampaignItemSnapshot, DeliveryPlan } from '../core/types.js';
 import { NoopCampaignScheduler, type CampaignScheduler } from './campaign-scheduler.js';
 import { isDeliveryPlanReadyForSale } from './sellability.js';
@@ -9,7 +9,7 @@ import { isDeliveryPlanReadyForSale } from './sellability.js';
 export class CampaignService {
   private refundHandler:((orderId:string)=>Promise<void>)|null=null;
   private lockedHandler:((campaignId:string)=>Promise<void>)|null=null;
-  public constructor(private readonly store: CommerceStore, private readonly scheduler: CampaignScheduler = new NoopCampaignScheduler()) {}
+  public constructor(private readonly store: LegacyCommerceStore, private readonly scheduler: CampaignScheduler = new NoopCampaignScheduler()) {}
   public setRefundHandler(handler:(orderId:string)=>Promise<void>):void{this.refundHandler=handler;}
   /** Called after the mode-B lock transaction commits, never inside legacy settlement code. */
   public setLockedHandler(handler:(campaignId:string)=>Promise<void>):void{this.lockedHandler=handler;}
@@ -46,13 +46,13 @@ export class CampaignService {
     return campaign;
   }
 
-  public async get(id: string, store: CommerceStore = this.store): Promise<Campaign> {
+  public async get(id: string, store: LegacyCommerceStore = this.store): Promise<Campaign> {
     const campaign = await store.getCampaign(id);
     if (!campaign) throw new BusinessError('RESOURCE_NOT_FOUND', '团期不存在', 404);
     return campaign;
   }
 
-  private async getForUpdate(id: string, store: CommerceStore): Promise<Campaign> {
+  private async getForUpdate(id: string, store: LegacyCommerceStore): Promise<Campaign> {
     const campaign = await store.getCampaignForUpdate(id);
     if (!campaign) throw new BusinessError('RESOURCE_NOT_FOUND', '团期不存在', 404);
     return campaign;
@@ -89,6 +89,9 @@ export class CampaignService {
   public async updateDraft(id: string, input: UpdateCampaignInput): Promise<Campaign> {
     return this.store.transaction(async (store) => {
       const current = await this.getForUpdate(id, store);
+      if (current.businessModelVersion !== 'LEGACY_MARKETPLACE') {
+        throw new BusinessError('INVALID_STATE_TRANSITION', '社区与平台采购团期必须使用各自的专用运营入口，不能通过历史团期编辑接口修改', 409);
+      }
       if (current.status !== 'DRAFT') throw new BusinessError('INVALID_STATE_TRANSITION', '只有草稿团期可以编辑；已开售团期请新建下一期', 409);
       const area = (await store.listServiceAreas()).find((item) => item.id === input.serviceAreaId && item.status === 'ENABLED' && item.orderEnabled);
       if (!area) throw new BusinessError('RESOURCE_NOT_FOUND', '收货区域不存在或已暂停收单', 404);
@@ -221,9 +224,9 @@ export class CampaignService {
     return result;
   }
 
-  private async releaseOrderStock(store: CommerceStore, order: { campaignId: string; businessModelVersion:Campaign['businessModelVersion']; items: Array<{ skuId: string; quantity: number }> }): Promise<void> {
+  private async releaseOrderStock(store: LegacyCommerceStore, order: { campaignId: string; businessModelVersion:Campaign['businessModelVersion']; items: Array<{ skuId: string; quantity: number }> }): Promise<void> {
     for (const item of order.items) {
-      const released=order.businessModelVersion==='PLATFORM_PROCUREMENT'?await store.releaseCampaignPlatformStock(order.campaignId,item.skuId,item.quantity):order.businessModelVersion==='PLATFORM_COMMUNITY'?await store.releaseCommunityCampaignStock(order.campaignId,item.skuId,item.quantity):await store.releaseCampaignSkuStock(order.campaignId,item.skuId,item.quantity);
+      const released = await store.releaseReservedCampaignInventory(order.campaignId, item.skuId, item.quantity, order.businessModelVersion);
       if (!released) {
         throw new BusinessError('INVENTORY_INCONSISTENT', '订单库存释放失败，已回滚本次结团', 500, {
           campaignId: order.campaignId,
@@ -233,29 +236,29 @@ export class CampaignService {
     }
   }
 
-  private async cancelPendingAndRelease(store: CommerceStore, order: { id:string; campaignId:string; businessModelVersion:Campaign['businessModelVersion']; items:Array<{skuId:string;quantity:number}> }): Promise<boolean> {
+  private async cancelPendingAndRelease(store: LegacyCommerceStore, order: { id:string; campaignId:string; businessModelVersion:Campaign['businessModelVersion']; items:Array<{skuId:string;quantity:number}> }): Promise<boolean> {
     if (!(await store.transitionOrderStatus(order.id, ['PENDING_PAYMENT'], 'CANCELLED'))) return false;
     await this.releaseOrderStock(store, order);
     return true;
   }
 
-  private async refundPaidAndRelease(store: CommerceStore, order: { id:string; campaignId:string; businessModelVersion:Campaign['businessModelVersion']; items:Array<{skuId:string;quantity:number}> }): Promise<boolean> {
+  private async refundPaidAndRelease(store: LegacyCommerceStore, order: { id:string; campaignId:string; businessModelVersion:Campaign['businessModelVersion']; items:Array<{skuId:string;quantity:number}> }): Promise<boolean> {
     if (!(await store.transitionOrderStatus(order.id, ['PAID_WAITING_CLOSE'], 'REFUNDING'))) return false;
     await this.releaseOrderStock(store, order);
     return true;
   }
 
-  private async lockCampaignOrders(store: CommerceStore, campaignId: string) {
+  private async lockCampaignOrders(store: LegacyCommerceStore, campaignId: string) {
     const summaries = await store.listOrdersByCampaign(campaignId);
     const locked = await Promise.all([...summaries].sort((left, right) => left.id.localeCompare(right.id)).map((order) => store.getOrderForUpdate(order.id)));
     return locked.filter((order): order is NonNullable<typeof order> => order !== null);
   }
 
-  private async snapshotItems(store: CommerceStore, skuIds: string[], excludeCampaignId?: string): Promise<CampaignItemSnapshot[]> {
+  private async snapshotItems(store: LegacyCommerceStore, skuIds: string[], excludeCampaignId?: string): Promise<CampaignItemSnapshot[]> {
     const uniqueSkuIds = [...new Set(skuIds)];
     // Every create/edit runs inside a store transaction. Lock in a stable order so two
     // operators cannot both reserve the same unallocated SKU quantity for different campaigns.
-    const lockedSkus = new Map<string, Awaited<ReturnType<CommerceStore['getSkuForUpdate']>>>();
+    const lockedSkus = new Map<string, Awaited<ReturnType<LegacyCommerceStore['getSkuForUpdate']>>>();
     for (const skuId of [...uniqueSkuIds].sort()) lockedSkus.set(skuId, await store.getSkuForUpdate(skuId));
     const products = new Map((await store.listProducts()).map((product) => [product.sku.id, product]));
     const activeCampaigns = (await store.listCampaigns()).filter((campaign) => campaign.id !== excludeCampaignId && !['CANCELLED', 'COMPLETED'].includes(campaign.status));

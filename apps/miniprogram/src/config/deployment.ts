@@ -1,4 +1,4 @@
-export type NotificationType = 'SITE_CONFIRMED' | 'VEHICLE_DISPATCHED' | 'ARRIVED' | 'PARTIAL_REFUND';
+export type NotificationType = 'SITE_CONFIRMED' | 'VEHICLE_DISPATCHED' | 'ARRIVED' | 'PARTIAL_REFUND' | 'PICKUP_DEADLINE' | 'PICKUP_EXPIRED';
 export interface SubscriptionTemplate { type: NotificationType; templateId: string }
 export interface MiniProgramDeployment { apiBaseUrl: string; authMode: 'demo' | 'wechat'; subscriptionTemplates: SubscriptionTemplate[] }
 
