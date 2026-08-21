@@ -185,7 +185,7 @@ describe.skipIf(!databaseUrl || !redisUrl)('real MySQL and Redis integration', (
         expect((await app.inject({ method: 'POST', url: `/api/v1/admin/dispatch-batches/${firstBatch.json().data.id}/dispatch`, headers: operator })).statusCode).toBe(200);
         const deliveries = await app.inject({ method: 'GET', url: '/api/v1/admin/community/deliveries', headers: operator });
         expect(deliveries.statusCode, deliveries.body).toBe(200);
-        expect(deliveries.json().data).toEqual(expect.arrayContaining([expect.objectContaining({ campaignId, vehicleOrderNo: `COMMUNITY-${suffix}`, logisticsPlatform: '货拉拉', expectedItems: [expect.objectContaining({ platformSkuId: skuId, expectedQuantity: 2 })] })]));
+        expect(deliveries.json().data).toEqual(expect.arrayContaining([expect.objectContaining({ campaignId, vehicleOrderNo: `COMMUNITY-${suffix}`, logisticsPlatform: '货拉拉', expectedItems: expect.arrayContaining([expect.objectContaining({ platformSkuId: skuId, expectedQuantity: 2 }), expect.objectContaining({ platformSkuId: secondSkuId, expectedQuantity: 2 })]) })]));
         const orderId = order.json().data.id as string;
         const batchId = firstBatch.json().data.id as string;
         const arrival = await app.inject({ method: 'POST', url: `/api/v1/admin/community/dispatch-batches/${batchId}/arrival`, headers: operator, payload: { receivedBy: 'Integration emergency proxy', confirmationNote: '逐商品现场清点短少', emergencyReason: '真库集成测试代办', items: [{ platformSkuId: skuId, receivedQuantity: 2, rejectedQuantity: 0, shortQuantity: 0, damagedQuantity: 0, reason: null, evidenceNote: null }, { platformSkuId: secondSkuId, receivedQuantity: 1, rejectedQuantity: 0, shortQuantity: 1, damagedQuantity: 0, reason: 'TRANSIT_SHORTAGE', evidenceNote: '真库短少，待运营确认分配' }] } });
@@ -411,13 +411,13 @@ describe.skipIf(!databaseUrl || !redisUrl)('real MySQL and Redis integration', (
             await expect(runMigrationProcess(scratchUrl)).resolves.toBeDefined();
             const verified = await mysql.createConnection({ uri: scratchUrl });
             const [columns] = await verified.query<Array<{
-                column_name: string;
-            }>>("SELECT column_name FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='community_pickup_windows' AND column_name IN ('refund_exception_id','loss_exception_id') ORDER BY column_name");
-            expect(columns.map((column) => column.column_name)).toEqual(['loss_exception_id', 'refund_exception_id']);
+                name: string;
+            }>>("SELECT column_name AS name FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='community_pickup_windows' AND column_name IN ('refund_exception_id','loss_exception_id') ORDER BY column_name");
+            expect(columns.map((column) => column.name)).toEqual(['loss_exception_id', 'refund_exception_id']);
             const [constraints] = await verified.query<Array<{
-                constraint_name: string;
-            }>>("SELECT constraint_name FROM information_schema.key_column_usage WHERE table_schema=DATABASE() AND table_name='community_allocation_drafts' AND referenced_table_name='community_delivery_confirmations'");
-            expect(constraints.map((constraint) => constraint.constraint_name)).toContain('fk_community_allocation_delivery');
+                name: string;
+            }>>("SELECT constraint_name AS name FROM information_schema.key_column_usage WHERE table_schema=DATABASE() AND table_name='community_allocation_drafts' AND referenced_table_name='community_delivery_confirmations'");
+            expect(constraints.map((constraint) => constraint.name)).toContain('fk_community_allocation_delivery');
             const [notificationType] = await verified.query<Array<{
                 Type: string;
             }>>("SHOW COLUMNS FROM order_notifications LIKE 'type'");
