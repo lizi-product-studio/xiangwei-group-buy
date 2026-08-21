@@ -10,7 +10,7 @@
   <view class="campaign-intro">
     <text class="campaign-intro__title">本期团购</text>
     <view class="campaign-intro__meta"><text class="campaign-intro__calendar">日</text><text>{{deliveryText}}</text></view>
-    <view class="campaign-intro__promise"><text class="campaign-intro__check">✓</text><text>平台统一采购 · 按固定自提点集中送达</text></view>
+    <view class="campaign-intro__promise"><text class="campaign-intro__check">✓</text><text>运营统一备货 · 按固定自提点集中送达</text></view>
   </view>
 
   <view class="benefit-row" aria-label="商品分类">

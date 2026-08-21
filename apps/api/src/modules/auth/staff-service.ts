@@ -82,7 +82,9 @@ export class StaffService {
   }
 
   public async list(query?:string):Promise<StaffRecord[]>{
-    return Promise.all((await this.store.listInternalStaff(query)).map((staff)=>this.record(this.store,staff)));
+    const [staff,assignments]=await Promise.all([this.store.listInternalStaff(query),this.store.listStaffPickupPointAssignments()]);
+    const pointsByStaff=new Map<string,string[]>();for(const assignment of assignments){const values=pointsByStaff.get(assignment.staffUserId)??[];values.push(assignment.pickupPointId);pointsByStaff.set(assignment.staffUserId,values);}
+    return staff.map((item)=>({...item,pickupPointIds:pointsByStaff.get(item.userId)??[]}));
   }
 
   public async get(userId:string):Promise<StaffRecord>{
@@ -98,7 +100,9 @@ export class StaffService {
       const currentPointIds=(await store.listStaffPickupPointAssignments(userId)).map((item)=>item.pickupPointId);
       const nextRole=input.role??before.role;
       const requestedStatus=input.status??before.status;
-      const pointIds=await this.validatePointScope(store,nextRole,input.pickupPointIds??currentPointIds);
+      // Point scope belongs exclusively to a pickup manager. A hidden form
+      // value from a previous role must never survive a role change.
+      const pointIds=await this.validatePointScope(store,nextRole,nextRole==='PICKUP_MANAGER'?(input.pickupPointIds??currentPointIds):[]);
       const credential=await store.findAdminCredentialByUserId(userId);
       if(!credential)throw new BusinessError('RESOURCE_NOT_FOUND','员工登录凭据不存在',404);
       if(requestedStatus==='ACTIVE'&&credential.mustChangePassword)throw new BusinessError('INVALID_STATE_TRANSITION','员工必须先使用一次性凭据完成激活',409);

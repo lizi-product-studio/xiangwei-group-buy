@@ -9,10 +9,19 @@ services:
       MYSQL_PASSWORD: ${MYSQL_APP_PASSWORD:?required}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?required}
       TZ: Asia/Shanghai
-    command: ["--character-set-server=utf8mb4","--collation-server=utf8mb4_0900_ai_ci","--default-time-zone=+00:00"]
+    command:
+      [
+        "--character-set-server=utf8mb4",
+        "--collation-server=utf8mb4_0900_ai_ci",
+        "--default-time-zone=+00:00",
+      ]
     volumes: ["mysql_data:/var/lib/mysql"]
     healthcheck:
-      test: ["CMD-SHELL","MYSQL_PWD=\"$$MYSQL_ROOT_PASSWORD\" mysqladmin ping -h 127.0.0.1 -uroot --silent"]
+      test:
+        [
+          "CMD-SHELL",
+          'MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysqladmin ping -h 127.0.0.1 -uroot --silent',
+        ]
       interval: 10s
       timeout: 5s
       retries: 20
@@ -21,10 +30,17 @@ services:
   redis:
     image: redis:7.4-alpine
     restart: unless-stopped
-    command: ["redis-server","--appendonly","yes","--requirepass","${REDIS_PASSWORD:?required}"]
+    command:
+      [
+        "redis-server",
+        "--appendonly",
+        "yes",
+        "--requirepass",
+        "${REDIS_PASSWORD:?required}",
+      ]
     volumes: ["redis_data:/data"]
     healthcheck:
-      test: ["CMD-SHELL","redis-cli -a $$REDIS_PASSWORD ping | grep PONG"]
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping | grep PONG"]
       interval: 10s
       timeout: 5s
       retries: 20
@@ -34,7 +50,7 @@ services:
   migrate:
     build: { context: .., dockerfile: apps/api/Dockerfile }
     restart: "no"
-    command: ["node","dist/scripts/migrate.js"]
+    command: ["node", "dist/scripts/migrate.js"]
     environment:
       DATABASE_URL: mysql://hometown:${MYSQL_APP_PASSWORD:?required}@mysql:3306/hometown_food
     depends_on: { mysql: { condition: service_healthy } }
@@ -68,8 +84,8 @@ services:
       WECHAT_SUBSCRIBE_ARRIVAL_TEMPLATE_DATA: ${WECHAT_SUBSCRIBE_ARRIVAL_TEMPLATE_DATA:?required}
       WECHAT_SUBSCRIBE_PARTIAL_REFUND_TEMPLATE_ID: ${WECHAT_SUBSCRIBE_PARTIAL_REFUND_TEMPLATE_ID:?required}
       WECHAT_SUBSCRIBE_PARTIAL_REFUND_TEMPLATE_DATA: ${WECHAT_SUBSCRIBE_PARTIAL_REFUND_TEMPLATE_DATA:?required}
-      PAYMENT_PROVIDER: wechat-platform
-      WECHAT_PAY_SP_MCHID: ${WECHAT_PAY_SP_MCHID:?required}
+      PAYMENT_PROVIDER: wechat
+      WECHAT_PAY_MCHID: ${WECHAT_PAY_MCHID:?required}
       WECHAT_PAY_CERT_SERIAL: ${WECHAT_PAY_CERT_SERIAL:?required}
       WECHAT_PAY_PRIVATE_KEY_PATH: /run/secrets/wechat_private_key
       WECHAT_PAY_PUBLIC_KEY_ID: ${WECHAT_PAY_PUBLIC_KEY_ID:?required}
@@ -77,14 +93,20 @@ services:
       WECHAT_PAY_API_V3_KEY: ${WECHAT_PAY_API_V3_KEY:?required}
       WECHAT_PAY_NOTIFY_URL: ${WECHAT_PAY_NOTIFY_URL:?required}
       WECHAT_PAY_REFUND_NOTIFY_URL: ${WECHAT_PAY_REFUND_NOTIFY_URL:?required}
-      WECHAT_PAY_PLATFORM_NAME: ${WECHAT_PAY_PLATFORM_NAME:?required}
+      WECHAT_PAY_MERCHANT_NAME: ${WECHAT_PAY_MERCHANT_NAME:?required}
       PICKUP_CODE_SECRET: ${PICKUP_CODE_SECRET:?required}
-    secrets: [wechat_private_key,wechat_public_key]
+    secrets: [wechat_private_key, wechat_public_key]
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
     healthcheck:
-      test: ["CMD","node","-e","fetch('http://127.0.0.1:3100/health/ready',{headers:{'x-forwarded-proto':'https'}}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3100/health/ready',{headers:{'x-forwarded-proto':'https'}}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -109,7 +131,11 @@ services:
       - ./Caddyfile.production:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
-    depends_on: { admin: { condition: service_started }, api: { condition: service_healthy } }
+    depends_on:
+      {
+        admin: { condition: service_started },
+        api: { condition: service_healthy },
+      }
     networks: [backend]
 
 secrets:
