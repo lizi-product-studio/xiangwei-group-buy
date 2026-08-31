@@ -1,97 +1,97 @@
 {
-  "schema_version": 3,
-  "project": "社区团购",
-  "complexity": "Complex",
-  "current_state": "BACKLOG",
-  "previous_state": null,
-  "updated_at": "2026-08-31",
-  "updated_by": "orchestrator",
+  "accepted_risks": [],
+  "active_tasks": [],
   "approval_authority": "BLOCKING_UNKNOWN",
-  "risk_acceptance_authority": "BLOCKING_UNKNOWN",
+  "blocked": null,
+  "complexity": "Complex",
+  "current_state": "DISCOVERY",
   "execution_control": {
-    "model_routing_policy": "2.0.0",
-    "role_routing_policy": "1.2.0",
-    "capability_policy": "1.1.0",
-    "quota_mode": "economy",
-    "max_active_subagents": 1,
-    "active_sessions": [],
     "active_attempts": 0,
-    "blocked_reason_code": null
-  },
-  "quality_gates": {
-    "problem": {
-      "status": "PENDING",
-      "mode": "INLINE",
-      "reviewer": "orchestrator",
-      "session": null,
-      "version": null,
-      "input_fingerprint": null,
-      "evidence": []
-    },
-    "solution": {
-      "status": "PENDING",
-      "mode": "INLINE",
-      "reviewer": "orchestrator",
-      "session": null,
-      "version": null,
-      "input_fingerprint": null,
-      "evidence": []
-    },
-    "release_evidence": {
-      "status": "PENDING",
-      "mode": "INLINE",
-      "reviewer": "orchestrator",
-      "session": null,
-      "version": null,
-      "input_fingerprint": null,
-      "evidence": []
-    }
+    "active_sessions": [],
+    "blocked_reason_code": null,
+    "capability_policy": "1.1.0",
+    "max_active_subagents": 2,
+    "model_routing_policy": "2.0.0",
+    "quota_mode": "balanced",
+    "role_routing_policy": "1.2.0"
   },
   "gates": {
-    "requirements": {
-      "status": "PENDING",
-      "version": null,
-      "evidence": []
-    },
-    "product": {
-      "status": "PENDING",
-      "version": null,
-      "evidence": []
-    },
-    "ux": {
-      "status": "PENDING",
-      "version": null,
-      "evidence": []
-    },
-    "ui": {
-      "status": "PENDING",
-      "version": null,
-      "evidence": []
-    },
     "architecture": {
+      "evidence": [],
       "status": "PENDING",
-      "version": null,
-      "evidence": []
+      "version": null
     },
     "build": {
+      "evidence": [],
       "status": "PENDING",
-      "version": null,
-      "evidence": []
+      "version": null
+    },
+    "product": {
+      "evidence": [],
+      "status": "PENDING",
+      "version": null
     },
     "qa": {
+      "evidence": [],
       "status": "PENDING",
-      "version": null,
-      "evidence": []
+      "version": null
     },
     "release": {
+      "evidence": [],
       "status": "PENDING",
-      "version": null,
-      "evidence": []
+      "version": null
+    },
+    "requirements": {
+      "evidence": [],
+      "status": "PENDING",
+      "version": null
+    },
+    "ui": {
+      "evidence": [],
+      "status": "PENDING",
+      "version": null
+    },
+    "ux": {
+      "evidence": [],
+      "status": "PENDING",
+      "version": null
     }
   },
-  "blocked": null,
-  "rework": null,
   "open_p0_p1": [],
-  "accepted_risks": [],
-  "active_tasks": []
+  "previous_state": "BACKLOG",
+  "project": "社区团购",
+  "quality_gates": {
+    "problem": {
+      "evidence": [],
+      "input_fingerprint": null,
+      "mode": "INLINE",
+      "reviewer": "orchestrator",
+      "session": null,
+      "status": "PENDING",
+      "version": null
+    },
+    "release_evidence": {
+      "evidence": [],
+      "input_fingerprint": null,
+      "mode": "INLINE",
+      "reviewer": "orchestrator",
+      "session": null,
+      "status": "PENDING",
+      "version": null
+    },
+    "solution": {
+      "evidence": [],
+      "input_fingerprint": null,
+      "mode": "INLINE",
+      "reviewer": "orchestrator",
+      "session": null,
+      "status": "PENDING",
+      "version": null
+    }
+  },
+  "rework": null,
+  "risk_acceptance_authority": "BLOCKING_UNKNOWN",
+  "schema_version": 3,
+  "updated_at": "2026-08-31T04:42:31.451349+00:00",
+  "updated_by": "orchestrator"
 }

@@ -238,6 +238,11 @@ describe("notification at-most-once provider fence", () => {
     expect(provider).not.toHaveBeenCalled();
     const completed = await beforeSendCrash.markOrderNotificationManualCompleted(
       "notification", "operator", "已线下核验，请勿再次发送", now(),
+      {
+        channel: "EXTERNAL_CRM",
+        externalReference: "crm-notification-001",
+        result: "USER_ACKNOWLEDGED",
+      },
     );
     expect(completed).toMatchObject({
       status: "MANUAL_COMPLETED",

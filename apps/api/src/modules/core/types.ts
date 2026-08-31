@@ -23,6 +23,8 @@ export interface Campaign {
   estimatedArrivalEndAt: string;
   minTotalQuantity: number;
   failureAction: "CANCEL_AND_REFUND" | "POSTPONE";
+  /** Number of completed re-openings after a failed close. */
+  postponementCount?: number;
   items: CampaignItem[];
   status: CampaignStatus;
   version: number;
@@ -325,6 +327,12 @@ export interface FulfillmentException {
   clientRequestId: string | null;
   deliveryPlanId: string | null;
   sourceStage: "PICKUP_ARRIVAL" | "CUSTOMER_CLAIM";
+  /**
+   * Accounting fact for refunds created from this exception.
+   * PRE_REVENUE reverses customer contract liability; POST_REVENUE reverses
+   * revenue that was already recognised by a pickup receipt.
+   */
+  refundAccountingStage?: "PRE_REVENUE" | "POST_REVENUE";
   status: FulfillmentExceptionStatus;
   responsibility: ExceptionResponsibility;
   registeredBy: string;
@@ -591,6 +599,17 @@ export interface OrderNotification {
   manualCompletedBy: string | null;
   /** Required operator record; it must never replace the original completion fact. */
   manualCompletionNote: string | null;
+  manualCompletionChannel?:
+    | "WECHAT_CUSTOMER_SERVICE"
+    | "EXTERNAL_CRM"
+    | "OTHER_APPROVED_CHANNEL"
+    | null;
+  manualCompletionExternalReference?: string | null;
+  manualCompletionResult?:
+    | "REACHED"
+    | "USER_ACKNOWLEDGED"
+    | "RESOLVED"
+    | null;
   createdAt: string;
   deliveryAttempts: number;
   nextAttemptAt: string | null;

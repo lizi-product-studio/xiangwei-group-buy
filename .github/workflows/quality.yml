@@ -39,6 +39,8 @@ jobs:
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm db:migrate
+      - name: Verify migration replay is idempotent
+        run: pnpm db:migrate
       - run: pnpm check
       - run: pnpm test:coverage
       - run: pnpm exec playwright install --with-deps chromium

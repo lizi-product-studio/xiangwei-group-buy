@@ -328,6 +328,7 @@ export class CommunityQualityService {
         clientRequestId: `quality:${value.id}`,
         deliveryPlanId: order.deliveryPlanId,
         sourceStage: "CUSTOMER_CLAIM",
+        refundAccountingStage: "POST_REVENUE",
         status: "REFUND_CONFIRMED",
         responsibility: "PLATFORM",
         registeredBy: value.userId,

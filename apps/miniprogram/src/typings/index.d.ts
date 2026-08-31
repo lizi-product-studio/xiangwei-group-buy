@@ -11,7 +11,8 @@ interface IAppOption {
         | "ARRIVED"
         | "PARTIAL_REFUND"
         | "PICKUP_DEADLINE"
-        | "PICKUP_EXPIRED";
+        | "PICKUP_EXPIRED"
+        | "CAMPAIGN_POSTPONED";
       templateId: string;
     }>;
   };

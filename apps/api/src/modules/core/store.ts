@@ -390,6 +390,14 @@ export interface CommerceStore {
     actorId: string,
     note: string,
     completedAt: string,
+    evidence: {
+      channel:
+        | "WECHAT_CUSTOMER_SERVICE"
+        | "EXTERNAL_CRM"
+        | "OTHER_APPROVED_CHANNEL";
+      externalReference: string;
+      result: "REACHED" | "USER_ACKNOWLEDGED" | "RESOLVED";
+    },
   ): Promise<OrderNotification | null>;
   saveNotificationPreference(value: NotificationPreference): Promise<void>;
   getNotificationPreference(
@@ -573,6 +581,10 @@ export class MemoryStore implements CommerceStore {
         ...value,
         manualCompletedBy: value.manualCompletedBy ?? null,
         manualCompletionNote: value.manualCompletionNote ?? null,
+        manualCompletionChannel: value.manualCompletionChannel ?? null,
+        manualCompletionExternalReference:
+          value.manualCompletionExternalReference ?? null,
+        manualCompletionResult: value.manualCompletionResult ?? null,
         providerSubmissionAttemptId: value.providerSubmissionAttemptId ?? null,
         providerSubmissionStartedAt: value.providerSubmissionStartedAt ?? null,
         providerResultRecordedAt: value.providerResultRecordedAt ?? null,
@@ -1776,6 +1788,14 @@ export class MemoryStore implements CommerceStore {
     actorId: string,
     note: string,
     completedAt: string,
+    evidence: {
+      channel:
+        | "WECHAT_CUSTOMER_SERVICE"
+        | "EXTERNAL_CRM"
+        | "OTHER_APPROVED_CHANNEL";
+      externalReference: string;
+      result: "REACHED" | "USER_ACKNOWLEDGED" | "RESOLVED";
+    },
   ) {
     const v = this.data.notifications.get(id);
     if (!v) return null;
@@ -1792,6 +1812,9 @@ export class MemoryStore implements CommerceStore {
     v.manualCompletedAt = completedAt;
     v.manualCompletedBy = actorId;
     v.manualCompletionNote = note;
+    v.manualCompletionChannel = evidence.channel;
+    v.manualCompletionExternalReference = evidence.externalReference;
+    v.manualCompletionResult = evidence.result;
     v.deliveryLeaseUntil = null;
     v.deliveryClaimToken = null;
     v.nextAttemptAt = null;

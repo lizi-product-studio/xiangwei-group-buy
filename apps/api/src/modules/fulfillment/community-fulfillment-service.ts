@@ -345,6 +345,7 @@ export class CommunityFulfillmentService {
             clientRequestId: null,
             deliveryPlanId: plan.id,
             sourceStage: "PICKUP_ARRIVAL",
+            refundAccountingStage: "PRE_REVENUE",
             status: "REGISTERED",
             responsibility: "PENDING",
             registeredBy: actorId,

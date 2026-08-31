@@ -7,10 +7,24 @@ import {
   postponeCampaignSchema,
   createServiceAreaInterestSchema,
   createInternalStaffSchema,
+  notificationManualCompletionSchema,
   wechatLoginSchema,
 } from "./index.js";
 
 describe("public API contracts", () => {
+  it("does not allow an unanswered contact attempt to close a notification", () => {
+    const evidence = {
+      note: "已通过批准渠道联系",
+      channel: "WECHAT_CUSTOMER_SERVICE",
+      externalReference: "wx-session-001",
+      result: "USER_ACKNOWLEDGED",
+    };
+    expect(notificationManualCompletionSchema.safeParse(evidence).success).toBe(true);
+    expect(
+      notificationManualCompletionSchema.safeParse({ ...evidence, result: "NO_RESPONSE" }).success,
+    ).toBe(false);
+  });
+
   it("accepts only an explicit mainland mobile number for a service-area interest", () => {
     expect(
       createServiceAreaInterestSchema.safeParse({

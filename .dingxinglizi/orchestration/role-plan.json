@@ -1,28 +1,66 @@
 {
   "policy_version": "1.2.0",
-  "status": "NOT_ROUTED",
-  "generated_at": null,
-  "current_stage": "BACKLOG",
-  "routing_cycle_id": null,
-  "quota_mode": "economy",
-  "max_active_subagents": 1,
-  "active_subagents": [],
+  "status": "ROUTED",
+  "routing_unit": "current_gate",
+  "complexity": "Complex",
+  "current_stage": "DISCOVERY",
+  "routing_cycle_id": "0ce8739b5363d0b5514f95abf41635ce434ca1b5c6cdd9dd47d88d5053548369",
+  "quota_mode": "balanced",
+  "orchestrator": {
+    "runtime": "main_thread",
+    "spawn": false
+  },
+  "max_active_subagents": 2,
+  "required_now": [
+    "requirements"
+  ],
+  "planned_roles": [
+    "requirements",
+    "quality_governor"
+  ],
+  "deferred_sequence": [
+    "quality_governor"
+  ],
+  "execution_waves": [
+    [
+      "requirements"
+    ],
+    [
+      "quality_governor"
+    ]
+  ],
   "current_wave": 0,
-  "required_now": [],
-  "execution_waves": [],
-  "deferred_available": [],
-  "planned_roles": [],
-  "deferred_sequence": [],
-  "completed_roles": [],
+  "activation_reasons": {
+    "requirements": [
+      "stage:DISCOVERY",
+      "complexity:Complex"
+    ],
+    "quality_governor": [
+      "quality-gate:problem",
+      "independent-challenge-required"
+    ]
+  },
+  "merged_responsibilities": {},
+  "deferred_available": [
+    "product_auditor",
+    "quality_governor",
+    "ux",
+    "ui",
+    "architect",
+    "engineering_lead",
+    "qa"
+  ],
   "delegable_workers": [],
   "worker_parent": "engineering_lead",
   "max_concurrent_workers": 0,
-  "quality_gate": "NOT_APPLICABLE",
-  "quality_review_status": "NOT_REQUIRED",
+  "quality_gate": "problem",
+  "quality_review_status": "INDEPENDENT_REQUIRED",
   "inline_actions": [],
-  "activation_reasons": {},
-  "merged_responsibilities": {},
   "signals": [],
-  "input_fingerprint": null,
-  "plan_fingerprint": null
+  "completed_roles": [],
+  "input_fingerprint": "24e67980c36c7f92ab7d4e6f75f55e7f023748a7f8be5fba6c4a12370912e259",
+  "reviewer_activation": "deferred_until_owner_handoff",
+  "exit_rule": "persist_handoff_release_files_then_remove_from_active_set",
+  "plan_fingerprint": "cfb636dcc6ecd9a1ec3b0dec6f86b0cc537bc389550af033fc61073f760eeb76",
+  "generated_at": "2026-08-31T04:42:31.451450+00:00"
 }

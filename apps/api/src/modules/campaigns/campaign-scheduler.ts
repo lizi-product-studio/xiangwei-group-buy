@@ -1,5 +1,6 @@
 import { Queue, Worker, type JobType } from 'bullmq';
 import { Redis } from 'ioredis';
+import { randomUUID } from 'node:crypto';
 import type { Campaign } from '../core/types.js';
 
 type CloseJobData = { campaignId: string; version: number };
@@ -86,6 +87,7 @@ export interface CampaignScheduler {
   cancelClose(campaignId: string): Promise<void>;
   reconcile(campaigns: Campaign[]): Promise<void>;
   health(): Promise<'ok'>;
+  runReconciliation(work: (assertOwned: () => Promise<void>) => Promise<void>): Promise<boolean>;
   close(): Promise<void>;
 }
 
@@ -94,6 +96,10 @@ export class NoopCampaignScheduler implements CampaignScheduler {
   public async cancelClose(): Promise<void> {}
   public async reconcile(): Promise<void> {}
   public async health(): Promise<'ok'> { return 'ok'; }
+  public async runReconciliation(work: (assertOwned: () => Promise<void>) => Promise<void>): Promise<boolean> {
+    await work(async () => undefined);
+    return true;
+  }
   public async close(): Promise<void> {}
 }
 
@@ -130,6 +136,46 @@ export class RedisCampaignScheduler implements CampaignScheduler {
     await within(this.worker.waitUntilReady(), 2_000, 'BullMQ worker readiness');
     if (!this.worker.isRunning()) throw new Error('campaign lifecycle worker is not running');
     return 'ok';
+  }
+  public async runReconciliation(work: (assertOwned: () => Promise<void>) => Promise<void>): Promise<boolean> {
+    const key = 'hometown:reconciliation:lease';
+    const token = randomUUID();
+    const acquired = await this.connection.set(key, token, 'PX', 120_000, 'NX');
+    if (acquired !== 'OK') return false;
+    let renewalError: Error | null = null;
+    const assertOwned = async (): Promise<void> => {
+      if (renewalError) throw renewalError;
+      if (await this.connection.get(key) !== token)
+        throw new Error('reconciliation lease ownership was lost');
+    };
+    const renewal = setInterval(() => {
+      void this.connection.eval(
+        "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('pexpire', KEYS[1], ARGV[2]) else return 0 end",
+        1,
+        key,
+        token,
+        120_000,
+      ).then((result) => {
+        if (Number(result) !== 1)
+          renewalError = new Error('reconciliation lease renewal lost ownership');
+      }).catch((error: unknown) => {
+        renewalError = error instanceof Error ? error : new Error('reconciliation lease renewal failed');
+      });
+    }, 30_000);
+    renewal.unref();
+    try {
+      await work(assertOwned);
+      await assertOwned();
+      return true;
+    } finally {
+      clearInterval(renewal);
+      await this.connection.eval(
+        "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
+        1,
+        key,
+        token,
+      ).catch(() => undefined);
+    }
   }
   public async close(): Promise<void> { await this.worker.close(); await this.queue.close(); await this.connection.quit(); }
 }

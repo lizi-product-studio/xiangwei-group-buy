@@ -400,12 +400,25 @@ export const createServiceAreaInterestSchema = z.object({
   privacyAccepted: z.literal(true),
   privacyVersion: privacyNoticeVersionSchema,
 });
+export const updateOwnServiceAreaInterestSchema =
+  createServiceAreaInterestSchema;
 export const updateServiceAreaInterestStatusSchema = z.object({
   status: z.enum(["CONTACTED", "CLOSED"]),
   note: z.string().trim().min(2).max(500),
 });
 export const notificationManualCompletionSchema = z.object({
   note: z.string().trim().min(2).max(500),
+  channel: z.enum([
+    "WECHAT_CUSTOMER_SERVICE",
+    "EXTERNAL_CRM",
+    "OTHER_APPROVED_CHANNEL",
+  ]),
+  externalReference: z.string().trim().min(4).max(120),
+  result: z.enum([
+    "REACHED",
+    "USER_ACKNOWLEDGED",
+    "RESOLVED",
+  ]),
 });
 export const notificationPreferenceSchema = z.object({
   types: z
@@ -420,7 +433,7 @@ export const notificationPreferenceSchema = z.object({
         "CAMPAIGN_POSTPONED",
       ]),
     )
-    .max(6),
+    .max(7),
 });
 
 export type CommunityCampaignInput = z.infer<typeof communityCampaignSchema>;

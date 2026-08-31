@@ -1,5 +1,20 @@
 <view class="after-sale-page">
   <view class="tip-card"><text>售后申请</text><text>请如实说明问题，客服会结合订单、领货核销与履约记录处理。{{qualityHint}}</text></view>
   <view wx:if="{{!loggedIn}}" class="form-card"><text>登录后才能查看可申报商品并提交售后。</text><button class="primary-button" bindtap="openLogin">微信快捷登录</button></view>
-  <view wx:else class="form-card"><text class="label">问题类型</text><picker range="{{reasons}}" value="{{reasonIndex}}" bindchange="chooseReason"><view class="picker">{{reasons[reasonIndex]}}<text>›</text></view></picker><block wx:if="{{claimableItems.length && order && (order.status === 'PICKED_UP' || order.status === 'COMPLETED')}}"><text class="label">异常商品</text><picker range="{{claimableItems}}" value="{{selectedItemIndex}}" range-key="label" bindchange="chooseItem"><view class="picker">{{claimableItems[selectedItemIndex].label}}<text>›</text></view></picker><text class="label">异常数量</text><input class="picker" type="number" value="{{claimQuantity}}" bindinput="inputClaimQuantity" /></block><text class="label">问题说明</text><textarea value="{{description}}" maxlength="300" placeholder="请描述发生的情况、商品数量或领取时间等" bindinput="inputDescription" /><button class="primary-button" loading="{{submitting}}" bindtap="submit">提交申请</button></view>
+  <view wx:else class="form-card">
+    <text class="label">选择异常商品</text>
+    <view wx:if="{{!claimRows.length}}" class="claim-empty">当前没有仍在 24 小时申报期内的已领取商品。</view>
+    <view wx:for="{{claimRows}}" wx:key="skuId" class="claim-row">
+      <view class="claim-row__header"><text>{{item.name}}（最多 {{item.maxQuantity}} 件）</text><switch checked="{{item.selected}}" data-index="{{index}}" bindchange="toggleClaimRow" /></view>
+      <block wx:if="{{item.selected}}">
+        <text class="label">问题类型</text>
+        <picker range="{{reasons}}" value="{{item.reasonIndex}}" data-index="{{index}}" bindchange="chooseRowReason"><view class="picker">{{reasons[item.reasonIndex]}}<text>›</text></view></picker>
+        <text class="label">异常数量</text>
+        <input class="picker" type="number" value="{{item.quantity}}" data-index="{{index}}" bindinput="inputRowQuantity" />
+        <text class="label">问题说明</text>
+        <textarea value="{{item.description}}" maxlength="300" data-index="{{index}}" placeholder="请描述该商品发生的情况（至少 5 个字）" bindinput="inputRowDescription" />
+      </block>
+    </view>
+    <button class="primary-button" loading="{{submitting}}" disabled="{{!claimRows.length}}" bindtap="submit">提交申请</button>
+  </view>
 </view>

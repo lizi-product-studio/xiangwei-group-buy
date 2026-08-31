@@ -1,4 +1,4 @@
-export type NotificationType = 'SITE_CONFIRMED' | 'VEHICLE_DISPATCHED' | 'ARRIVED' | 'PARTIAL_REFUND' | 'PICKUP_DEADLINE' | 'PICKUP_EXPIRED';
+export type NotificationType = 'SITE_CONFIRMED' | 'VEHICLE_DISPATCHED' | 'ARRIVED' | 'PARTIAL_REFUND' | 'PICKUP_DEADLINE' | 'PICKUP_EXPIRED' | 'CAMPAIGN_POSTPONED';
 export interface SubscriptionTemplate { type: NotificationType; templateId: string }
 export interface MiniProgramDeployment {
   apiBaseUrl: string;
@@ -53,8 +53,12 @@ export function resolveDeployment(environment: string): MiniProgramDeployment {
   const host = deployment?.apiBaseUrl.match(/^https:\/\/([^/:?#]+)/i)?.[1]?.toLowerCase() ?? '';
   const isPlaceholderHost = host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.example.com') || host.endsWith('.example.org') || host.endsWith('.example.net') || host === 'example.invalid' || host.endsWith('.example.invalid') || host.endsWith('.invalid');
   const hasPlaceholderTemplate = deployment?.subscriptionTemplates.some((item) => !item.templateId.trim() || /(?:example|approved-(?:trial|release)-)/i.test(item.templateId)) ?? true;
-  if (!deployment || (key !== 'develop' && key !== 'local' && (deployment.authMode !== 'wechat' || !/^https:\/\/[a-z0-9.-]+(?::\d+)?(?:\/|$)/i.test(deployment.apiBaseUrl) || isPlaceholderHost || deployment.subscriptionTemplates.length !== 4 || hasPlaceholderTemplate))) {
-    throw new Error('上传体验版或正式版前，请通过 CI 或预上传脚本生成 deployment.local.ts，并填入已备案 HTTPS 域名及四类已审核订阅模板 ID。');
+  const requiredTypes: NotificationType[] = ['SITE_CONFIRMED', 'VEHICLE_DISPATCHED', 'ARRIVED', 'PARTIAL_REFUND', 'PICKUP_DEADLINE', 'PICKUP_EXPIRED', 'CAMPAIGN_POSTPONED'];
+  const configuredTypes = new Set(deployment?.subscriptionTemplates.map((item) => item.type) ?? []);
+  const uniqueTemplateIds = new Set(deployment?.subscriptionTemplates.map((item) => item.templateId) ?? []);
+  const hasCompleteSemanticMap = requiredTypes.every((type) => configuredTypes.has(type));
+  if (!deployment || (key !== 'develop' && key !== 'local' && (deployment.authMode !== 'wechat' || !/^https:\/\/[a-z0-9.-]+(?::\d+)?(?:\/|$)/i.test(deployment.apiBaseUrl) || isPlaceholderHost || !hasCompleteSemanticMap || uniqueTemplateIds.size !== 4 || hasPlaceholderTemplate))) {
+    throw new Error('上传体验版或正式版前，请生成 deployment.local.ts，填入备案 HTTPS 域名，并用四类已审核模板完整映射七类订单事件。');
   }
   return {
     ...deployment,

@@ -39,11 +39,11 @@ function replyMessage(body: Record<string, unknown>): string {
 
 const eventTemplate = (config: AppConfig, type: OrderNotificationType): TemplateDefinition => {
   if (type === 'SITE_CONFIRMED') return { templateId: config.WECHAT_SUBSCRIBE_SITE_TEMPLATE_ID, dataTemplate: config.WECHAT_SUBSCRIBE_SITE_TEMPLATE_DATA };
+  if (type === 'CAMPAIGN_POSTPONED') return { templateId: config.WECHAT_SUBSCRIBE_SITE_TEMPLATE_ID, dataTemplate: config.WECHAT_SUBSCRIBE_SITE_TEMPLATE_DATA };
   if (type === 'VEHICLE_DISPATCHED') return { templateId: config.WECHAT_SUBSCRIBE_DISPATCH_TEMPLATE_ID, dataTemplate: config.WECHAT_SUBSCRIBE_DISPATCH_TEMPLATE_DATA };
   if (type === 'PARTIAL_REFUND') return { templateId: config.WECHAT_SUBSCRIBE_PARTIAL_REFUND_TEMPLATE_ID, dataTemplate: config.WECHAT_SUBSCRIBE_PARTIAL_REFUND_TEMPLATE_DATA };
-  // Deadline notifications use the arrival template until dedicated templates
-  // are provisioned.  Missing configuration still fails closed into the manual
-  // contact queue rather than silently dropping a customer notification.
+  // Arrival and pickup-window events share one approved pickup-arrangement
+  // template. The semantic event type remains distinct in preferences/audit.
   if (type === 'PICKUP_DEADLINE' || type === 'PICKUP_EXPIRED') return { templateId: config.WECHAT_SUBSCRIBE_ARRIVAL_TEMPLATE_ID, dataTemplate: config.WECHAT_SUBSCRIBE_ARRIVAL_TEMPLATE_DATA };
   return { templateId: config.WECHAT_SUBSCRIBE_ARRIVAL_TEMPLATE_ID, dataTemplate: config.WECHAT_SUBSCRIBE_ARRIVAL_TEMPLATE_DATA };
 };

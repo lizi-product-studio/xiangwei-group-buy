@@ -164,6 +164,12 @@ export class CampaignService {
           "只有已顺延团期可以重新开售",
           409,
         );
+      if ((campaign.postponementCount ?? 0) >= 1)
+        throw new BusinessError(
+          "INVALID_STATE_TRANSITION",
+          "团期最多顺延一次，再次未成团必须取消退款",
+          409,
+        );
       const before = structuredClone(campaign);
       const now = Date.now();
       if (
@@ -195,6 +201,7 @@ export class CampaignService {
       const expected = campaign.version;
       Object.assign(campaign, input, {
         status: transitionCampaign(campaign.status, "OPEN"),
+        postponementCount: (campaign.postponementCount ?? 0) + 1,
         version: expected + 1,
       });
       const deliveryPlan = await store.getDeliveryPlanByCampaign(id);
@@ -339,7 +346,10 @@ export class CampaignService {
           else if (order.status === "PENDING_PAYMENT")
             await this.cancelPending(store, order);
         }
-      } else if (campaign.failureAction === "POSTPONE") {
+      } else if (
+        campaign.failureAction === "POSTPONE" &&
+        (campaign.postponementCount ?? 0) < 1
+      ) {
         campaign.status = transitionCampaign(campaign.status, "POSTPONED");
       } else {
         campaign.status = transitionCampaign(campaign.status, "CANCELLED");

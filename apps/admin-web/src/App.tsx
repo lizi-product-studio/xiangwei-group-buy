@@ -4215,7 +4215,9 @@ export function App() {
       if (currentPage === "governance")
         work.push(
           Promise.all([
-            api.manualNotifications(),
+            roles.includes("CUSTOMER_SERVICE") || roles.includes("SUPER_ADMIN")
+              ? api.manualNotifications()
+              : Promise.resolve([]),
             api.serviceAreaInterests(),
           ]).then(([nextNotifications, nextInterests]) => {
             commit(setNotifications)(nextNotifications);
@@ -4339,6 +4341,8 @@ export function App() {
           loading,
           error: loadError,
           reload,
+          canHandleNotifications:
+            roles.includes("CUSTOMER_SERVICE") || roles.includes("SUPER_ADMIN"),
         }}
       />
     ) : currentPage === "finance" ? (

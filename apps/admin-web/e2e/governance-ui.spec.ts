@@ -424,6 +424,14 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
   await expect(manualNotificationRow.getByRole("button", { name: "人工完成" })).toBeVisible();
   await manualNotificationRow.getByRole("button", { name: "人工完成" }).click();
   const manualForm = page.getByRole("dialog", { name: "填写人工处理说明" });
+  await manualForm.getByLabel("联系渠道").click();
+  await manualForm.getByLabel("联系渠道").press("ArrowDown");
+  await manualForm.getByLabel("联系渠道").press("Enter");
+  await manualForm.getByLabel("外部会话或工单编号").fill("wx-session-e2e-001");
+  await manualForm.getByLabel("联系结果").click();
+  await manualForm.getByLabel("联系结果").press("ArrowDown");
+  await manualForm.getByLabel("联系结果").press("ArrowDown");
+  await manualForm.getByLabel("联系结果").press("Enter");
   await manualForm.getByLabel("处理说明").fill("已通过既有合规渠道完成到货提醒处理");
   await manualForm.getByRole("button", { name: "继续复核" }).click();
   await page.getByRole("dialog", { name: "二次确认人工完成" }).getByRole("button", { name: "确认人工完成" }).click();

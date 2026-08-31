@@ -365,6 +365,9 @@ export interface Notification {
   manualCompletedAt: string | null;
   manualCompletedBy: string | null;
   manualCompletionNote: string | null;
+  manualCompletionChannel: string | null;
+  manualCompletionExternalReference: string | null;
+  manualCompletionResult: string | null;
   providerSubmissionStartedAt: string | null;
   providerResultRecordedAt: string | null;
   submissionUnknownReason: string | null;
@@ -732,9 +735,17 @@ export const api = {
     request<Notification[]>("/api/v1/admin/notifications/manual"),
   retryNotification: (id: string) =>
     post<Notification>(`/api/v1/admin/notifications/${id}/retry`),
-  completeNotification: (id: string, note: string) =>
+  completeNotification: (
+    id: string,
+    value: {
+      note: string;
+      channel: "WECHAT_CUSTOMER_SERVICE" | "EXTERNAL_CRM" | "OTHER_APPROVED_CHANNEL";
+      externalReference: string;
+      result: "REACHED" | "USER_ACKNOWLEDGED" | "RESOLVED";
+    },
+  ) =>
     post<Notification>(`/api/v1/admin/notifications/${id}/manual-complete`, {
-      note,
+      ...value,
     }),
   serviceAreaInterests: () =>
     request<ServiceAreaInterest[]>("/api/v1/admin/service-area-interests"),

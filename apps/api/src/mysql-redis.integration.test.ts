@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { MysqlStore } from "./modules/core/mysql-store.js";
 import { RedisCampaignScheduler } from "./modules/campaigns/campaign-scheduler.js";
 import type { OrderNotification } from "./modules/core/types.js";
+import { Redis } from "ioredis";
 
 const databaseUrl = process.env.INTEGRATION_DATABASE_URL;
 const redisUrl = process.env.INTEGRATION_REDIS_URL;
@@ -60,13 +61,15 @@ describe.skipIf(!databaseUrl || !redisUrl)(
     let first: MysqlStore;
     let second: MysqlStore;
     let scheduler: RedisCampaignScheduler;
+    let secondScheduler: RedisCampaignScheduler;
     beforeAll(() => {
       first = MysqlStore.create(databaseUrl!);
       second = MysqlStore.create(databaseUrl!);
       scheduler = new RedisCampaignScheduler(redisUrl!, async () => undefined);
+      secondScheduler = new RedisCampaignScheduler(redisUrl!, async () => undefined);
     });
     afterAll(async () => {
-      await Promise.all([first.close(), second.close(), scheduler.close()]);
+      await Promise.all([first.close(), second.close(), scheduler.close(), secondScheduler.close()]);
     });
     it("persists a community aggregate across independent MySQL pools", async () => {
       const id = `integration-${Date.now()}`;
@@ -77,6 +80,27 @@ describe.skipIf(!databaseUrl || !redisUrl)(
         createdAt: new Date().toISOString(),
       });
       expect(await second.getUser(id)).toMatchObject({ id, status: "ACTIVE" });
+    });
+    it("serializes concurrent aggregate writes across pools without losing either update", async () => {
+      const suffix = Date.now();
+      const firstId = `integration-concurrent-a-${suffix}`;
+      const secondId = `integration-concurrent-b-${suffix}`;
+      await Promise.all([
+        first.saveUser({
+          id: firstId,
+          wechatOpenId: null,
+          status: "ACTIVE",
+          createdAt: new Date().toISOString(),
+        }),
+        second.saveUser({
+          id: secondId,
+          wechatOpenId: null,
+          status: "ACTIVE",
+          createdAt: new Date().toISOString(),
+        }),
+      ]);
+      await expect(first.getUser(firstId)).resolves.toMatchObject({ id: firstId });
+      await expect(first.getUser(secondId)).resolves.toMatchObject({ id: secondId });
     });
     it("uses MySQL UTC_TIMESTAMP(3) to reject an expired claim across pools", async () => {
       const id = `integration-notification-${Date.now()}`;
@@ -103,6 +127,28 @@ describe.skipIf(!databaseUrl || !redisUrl)(
           1,
         ),
       ).resolves.toBeUndefined();
+    });
+    it("allows only one API replica to own a reconciliation cycle", async () => {
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => { release = resolve; });
+      const owner = scheduler.runReconciliation(() => held);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await expect(secondScheduler.runReconciliation(async () => undefined)).resolves.toBe(false);
+      release();
+      await expect(owner).resolves.toBe(true);
+      await expect(secondScheduler.runReconciliation(async () => undefined)).resolves.toBe(true);
+    });
+    it("detects a lost reconciliation lease before later workflow steps", async () => {
+      const control = new Redis(redisUrl!, { maxRetriesPerRequest: null });
+      try {
+        await expect(scheduler.runReconciliation(async (assertOwned) => {
+          await assertOwned();
+          await control.del("hometown:reconciliation:lease");
+          await assertOwned();
+        })).rejects.toThrow(/ownership was lost/);
+      } finally {
+        await control.quit();
+      }
     });
   },
 );

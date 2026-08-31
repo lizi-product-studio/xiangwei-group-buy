@@ -257,6 +257,39 @@ export const api = {
       method: "POST",
       data: payload,
     }),
+  listOwnServiceAreaInterests: () =>
+    request<
+      Array<{
+        id: string;
+        regionText: string;
+        contactName: string;
+        maskedContactPhone: string;
+        status: "NEW" | "CONTACTED" | "CLOSED";
+        statusNote: string | null;
+        statusChangedAt: string | null;
+        createdAt: string;
+      }>
+    >({ url: "/api/v1/service-area-interests", method: "GET" }),
+  updateOwnServiceAreaInterest: (
+    id: string,
+    payload: {
+      regionText: string;
+      contactName: string;
+      contactPhone: string;
+      privacyAccepted: true;
+      privacyVersion: string;
+    },
+  ) =>
+    request<{ id: string; status: string }>({
+      url: `/api/v1/service-area-interests/${encodeURIComponent(id)}/correct`,
+      method: "POST",
+      data: payload,
+    }),
+  withdrawOwnServiceAreaInterest: (id: string) =>
+    request<{ id: string; status: "CLOSED" }>({
+      url: `/api/v1/service-area-interests/${encodeURIComponent(id)}/withdraw`,
+      method: "POST",
+    }),
   createCommunityQualityCase: (
     orderId: string,
     payload: {
@@ -300,12 +333,28 @@ export const api = {
       | "PARTIAL_REFUND"
       | "PICKUP_DEADLINE"
       | "PICKUP_EXPIRED"
+      | "CAMPAIGN_POSTPONED"
     >,
   ) =>
     request<unknown>({
       url: "/api/v1/notifications/preferences",
       method: "POST",
       data: { types },
+    }),
+  getNotificationPreferences: () =>
+    request<{
+      types: Array<
+        | "SITE_CONFIRMED"
+        | "VEHICLE_DISPATCHED"
+        | "ARRIVED"
+        | "PARTIAL_REFUND"
+        | "PICKUP_DEADLINE"
+        | "PICKUP_EXPIRED"
+        | "CAMPAIGN_POSTPONED"
+      >;
+    }>({
+      url: "/api/v1/notifications/preferences",
+      method: "GET",
     }),
 };
 

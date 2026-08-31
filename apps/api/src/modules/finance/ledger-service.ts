@@ -86,7 +86,13 @@ export class LedgerService {
     exception: FulfillmentException,
     refund: PartialRefund,
   ): Promise<void> {
-    const recognised = exception.sourceStage === "CUSTOMER_CLAIM";
+    // CUSTOMER_CLAIM is an operational source, not an accounting fact:
+    // an expired uncollected order is also created from that source but has
+    // never recognised revenue. Keep the fallback only for legacy snapshots.
+    const recognised =
+      exception.refundAccountingStage === "POST_REVENUE" ||
+      (exception.refundAccountingStage === undefined &&
+        exception.sourceStage === "CUSTOMER_CLAIM");
     await this.append(
       store,
       refund.id,

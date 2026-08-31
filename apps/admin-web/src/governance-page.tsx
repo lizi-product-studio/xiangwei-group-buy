@@ -6,6 +6,7 @@ import {
   Form,
   Input,
   Modal,
+  Select,
   Space,
   Table,
   Tag,
@@ -41,7 +42,14 @@ const InterestStatus = ({ value }: { value: string }) => (
 type PendingNotificationAction =
   | { notification: Notification; stage: "retry-confirm" }
   | { notification: Notification; stage: "form" }
-  | { notification: Notification; stage: "confirm"; note: string };
+  | {
+      notification: Notification;
+      stage: "confirm";
+      note: string;
+      channel: "WECHAT_CUSTOMER_SERVICE" | "EXTERNAL_CRM" | "OTHER_APPROVED_CHANNEL";
+      externalReference: string;
+      result: "REACHED" | "USER_ACKNOWLEDGED" | "RESOLVED";
+    };
 type PendingInterestAction =
   | { interest: ServiceAreaInterest; status: "CONTACTED" | "CLOSED"; stage: "form" }
   | {
@@ -57,12 +65,14 @@ export function GovernancePage({
   loading,
   error,
   reload,
+  canHandleNotifications,
 }: {
   notifications: Notification[];
   interests: ServiceAreaInterest[];
   loading: boolean;
   error: string | null;
   reload: () => Promise<void>;
+  canHandleNotifications: boolean;
 }) {
   const { message } = AntApp.useApp();
   const [notificationAction, setNotificationAction] =
@@ -93,7 +103,12 @@ export function GovernancePage({
     try {
       await api.completeNotification(
         notificationAction.notification.id,
-        notificationAction.note,
+        {
+          note: notificationAction.note,
+          channel: notificationAction.channel,
+          externalReference: notificationAction.externalReference,
+          result: notificationAction.result,
+        },
       );
       setNotificationAction(null);
       await reload();
@@ -147,7 +162,7 @@ export function GovernancePage({
         />
       )}
 
-      <section aria-label="通知人工处理队列">
+      {canHandleNotifications && <section aria-label="通知人工处理队列">
         <Typography.Title level={4}>通知人工处理</Typography.Title>
         <Alert
           type="info"
@@ -207,7 +222,7 @@ export function GovernancePage({
             },
           ]}
         />
-      </section>
+      </section>}
 
       <Modal
         open={notificationAction?.stage === "retry-confirm"}
@@ -279,15 +294,56 @@ export function GovernancePage({
       >
         <Form
           layout="vertical"
-          onFinish={(value: { note: string }) => {
+          onFinish={(value: {
+            note: string;
+            channel: "WECHAT_CUSTOMER_SERVICE" | "EXTERNAL_CRM" | "OTHER_APPROVED_CHANNEL";
+            externalReference: string;
+            result: "REACHED" | "USER_ACKNOWLEDGED" | "RESOLVED";
+          }) => {
             if (!notificationAction || notificationAction.stage !== "form") return;
             setNotificationAction({
               notification: notificationAction.notification,
               stage: "confirm",
               note: value.note.trim(),
+              channel: value.channel,
+              externalReference: value.externalReference.trim(),
+              result: value.result,
             });
           }}
         >
+          <Form.Item
+            name="channel"
+            label="联系渠道"
+            rules={[{ required: true, message: "必须选择已批准的联系渠道" }]}
+          >
+            <Select
+              options={[
+                { value: "WECHAT_CUSTOMER_SERVICE", label: "微信客服" },
+                { value: "EXTERNAL_CRM", label: "外部客服工单" },
+                { value: "OTHER_APPROVED_CHANNEL", label: "其他已批准渠道" },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item
+            name="externalReference"
+            label="外部会话或工单编号"
+            rules={[{ required: true, min: 4, message: "必须填写可复核的外部引用" }]}
+          >
+            <Input placeholder="例如微信客服会话号或 CRM 工单号" />
+          </Form.Item>
+          <Form.Item
+            name="result"
+            label="联系结果"
+            rules={[{ required: true, message: "必须选择联系结果" }]}
+          >
+            <Select
+              options={[
+                { value: "REACHED", label: "已联系到用户" },
+                { value: "USER_ACKNOWLEDGED", label: "用户已知悉" },
+                { value: "RESOLVED", label: "问题已解决" },
+              ]}
+            />
+          </Form.Item>
           <Form.Item
             name="note"
             label="处理说明"
@@ -308,6 +364,11 @@ export function GovernancePage({
         onCancel={() => !submitting && setNotificationAction(null)}
       >
         <Typography.Paragraph>该操作不会发送或展示消费者联系方式。</Typography.Paragraph>
+        <Typography.Paragraph>
+          渠道：{notificationAction?.stage === "confirm" ? notificationAction.channel : "—"}；
+          外部引用：{notificationAction?.stage === "confirm" ? notificationAction.externalReference : "—"}；
+          结果：{notificationAction?.stage === "confirm" ? notificationAction.result : "—"}。
+        </Typography.Paragraph>
         <Typography.Paragraph>处理说明：{notificationAction?.stage === "confirm" ? notificationAction.note : ""}</Typography.Paragraph>
       </Modal>
 

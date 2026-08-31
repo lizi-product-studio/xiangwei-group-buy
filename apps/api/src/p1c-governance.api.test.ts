@@ -275,6 +275,39 @@ describe("P1-C governance API contracts", () => {
     expect(
       (
         await app.inject({
+          method: "GET",
+          url: "/api/v1/admin/notifications/manual",
+          headers: operator,
+        })
+      ).statusCode,
+    ).toBe(403);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/api/v1/admin/notifications/notification-1/retry",
+          headers: operator,
+        })
+      ).statusCode,
+    ).toBe(403);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/api/v1/admin/notifications/notification-1/manual-complete",
+          headers: operator,
+          payload: {
+            note: "运营不得代替客服完成联系",
+            channel: "EXTERNAL_CRM",
+            externalReference: "crm-operator-001",
+            result: "RESOLVED",
+          },
+        })
+      ).statusCode,
+    ).toBe(403);
+    expect(
+      (
+        await app.inject({
           method: "POST",
           url: "/api/v1/admin/notifications/notification-1/manual-complete",
           headers: customerService,
@@ -282,23 +315,52 @@ describe("P1-C governance API contracts", () => {
         })
       ).statusCode,
     ).toBe(400);
+    const unanswered = await app.inject({
+      method: "POST",
+      url: "/api/v1/admin/notifications/notification-1/manual-complete",
+      headers: customerService,
+      payload: {
+        note: "已尝试联系但用户未回应",
+        channel: "WECHAT_CUSTOMER_SERVICE",
+        externalReference: "wx-session-unanswered-001",
+        result: "NO_RESPONSE",
+      },
+    });
+    expect(unanswered.statusCode).toBe(400);
+    await expect(store.getOrderNotification("notification-1")).resolves.toMatchObject({
+      status: "MANUAL_REQUIRED",
+      manualCompletedAt: null,
+    });
     const completed = await app.inject({
       method: "POST",
       url: "/api/v1/admin/notifications/notification-1/manual-complete",
       headers: customerService,
-      payload: { note: "已通过既有合规渠道完成处理" },
+      payload: {
+        note: "已通过既有合规渠道完成处理",
+        channel: "WECHAT_CUSTOMER_SERVICE",
+        externalReference: "wx-session-20260831-001",
+        result: "USER_ACKNOWLEDGED",
+      },
     });
     expect(completed.statusCode, completed.body).toBe(200);
     expect(completed.json().data).toMatchObject({
       status: "MANUAL_COMPLETED",
       manualCompletedBy: "cs",
       manualCompletionNote: "已通过既有合规渠道完成处理",
+      manualCompletionChannel: "WECHAT_CUSTOMER_SERVICE",
+      manualCompletionExternalReference: "wx-session-20260831-001",
+      manualCompletionResult: "USER_ACKNOWLEDGED",
     });
     const replay = await app.inject({
       method: "POST",
       url: "/api/v1/admin/notifications/notification-1/manual-complete",
-      headers: operator,
-      payload: { note: "不得覆盖首次人工事实" },
+      headers: customerService,
+      payload: {
+        note: "不得覆盖首次人工事实",
+        channel: "EXTERNAL_CRM",
+        externalReference: "crm-replay-001",
+        result: "RESOLVED",
+      },
     });
     expect(replay.statusCode).toBe(200);
     expect(replay.json().data.manualCompletedBy).toBe("cs");
@@ -470,7 +532,12 @@ describe("P1-C governance API contracts", () => {
       method: "POST",
       url: "/api/v1/admin/notifications/retry-SUBMISSION_UNKNOWN/manual-complete",
       headers: customerService,
-      payload: { note: "已在线下核验，请勿再次系统发送" },
+      payload: {
+        note: "已在线下核验，请勿再次系统发送",
+        channel: "EXTERNAL_CRM",
+        externalReference: "crm-unknown-001",
+        result: "REACHED",
+      },
     });
     expect(unknownCompleted.statusCode, unknownCompleted.body).toBe(200);
     expect(unknownCompleted.json().data).toMatchObject({
@@ -495,18 +562,74 @@ describe("P1-C governance API contracts", () => {
     });
     expect(created.statusCode, created.body).toBe(201);
     const id = created.json().data.id as string;
+    const ownList = await app.inject({
+      method: "GET",
+      url: "/api/v1/service-area-interests",
+      headers: headers("user", "USER"),
+    });
+    expect(ownList.statusCode).toBe(200);
+    expect(ownList.json().data[0]).toMatchObject({
+      id,
+      maskedContactPhone: "139****0000",
+      status: "NEW",
+    });
+    expect(ownList.body).not.toContain("13900000000");
+    const corrected = await app.inject({
+      method: "POST",
+      url: `/api/v1/service-area-interests/${id}/correct`,
+      headers: headers("user", "USER"),
+      payload: {
+        regionText: "朝阳区酒仙桥",
+        contactName: "王小明",
+        contactPhone: "13700000000",
+        privacyAccepted: true,
+        privacyVersion: "2026-08-12",
+      },
+    });
+    expect(corrected.statusCode, corrected.body).toBe(200);
+    expect(corrected.json().data).toMatchObject({
+      regionText: "朝阳区酒仙桥",
+      maskedContactPhone: "137****0000",
+    });
+    const crossUser = await app.inject({
+      method: "POST",
+      url: `/api/v1/service-area-interests/${id}/withdraw`,
+      headers: headers("other-user", "USER"),
+    });
+    expect(crossUser.statusCode).toBe(404);
+    const withdrawCandidate = await app.inject({
+      method: "POST",
+      url: "/api/v1/service-area-interests",
+      headers: headers("user", "USER"),
+      payload: {
+        regionText: "海淀区学院路",
+        contactName: "王小明",
+        contactPhone: "13600000000",
+        privacyAccepted: true,
+        privacyVersion: "2026-08-12",
+      },
+    });
+    const withdrawn = await app.inject({
+      method: "POST",
+      url: `/api/v1/service-area-interests/${withdrawCandidate.json().data.id}/withdraw`,
+      headers: headers("user", "USER"),
+    });
+    expect(withdrawn.statusCode, withdrawn.body).toBe(200);
+    expect(withdrawn.json().data.status).toBe("CLOSED");
     const list = await app.inject({
       method: "GET",
       url: "/api/v1/admin/service-area-interests",
       headers: customerService,
     });
     expect(list.statusCode).toBe(200);
-    expect(list.json().data[0]).toMatchObject({
-      maskedContactPhone: "139****0000",
+    expect(
+      list.json().data.find((value: { id: string }) => value.id === id),
+    ).toMatchObject({
+      maskedContactPhone: "137****0000",
       status: "NEW",
       createdAt: expect.any(String),
     });
-    expect(list.body).not.toContain("13900000000");
+    expect(list.body).not.toContain("13700000000");
     await store.saveServiceAreaInterest({
       id: "legacy-without-consent",
       userId: "user",
@@ -526,7 +649,7 @@ describe("P1-C governance API contracts", () => {
       url: "/api/v1/admin/service-area-interests",
       headers: customerService,
     });
-    expect(filtered.json().data).toHaveLength(1);
+    expect(filtered.json().data).toHaveLength(2);
     const contacted = await app.inject({
       method: "POST",
       url: `/api/v1/admin/service-area-interests/${id}/status`,
@@ -534,6 +657,19 @@ describe("P1-C governance API contracts", () => {
       payload: { status: "CONTACTED", note: "已按既有合规渠道处理" },
     });
     expect(contacted.statusCode, contacted.body).toBe(200);
+    const editAfterHandling = await app.inject({
+      method: "POST",
+      url: `/api/v1/service-area-interests/${id}/correct`,
+      headers: headers("user", "USER"),
+      payload: {
+        regionText: "朝阳区望京",
+        contactName: "王小明",
+        contactPhone: "13900000000",
+        privacyAccepted: true,
+        privacyVersion: "2026-08-12",
+      },
+    });
+    expect(editAfterHandling.statusCode).toBe(409);
     const closed = await app.inject({
       method: "POST",
       url: `/api/v1/admin/service-area-interests/${id}/status`,
@@ -944,7 +1080,7 @@ describe("P1-C governance API contracts", () => {
       dispatchAt,
       estimatedArrivalStartAt: arrivalStartAt,
       estimatedArrivalEndAt: arrivalEndAt,
-      minTotalQuantity: 1,
+      minTotalQuantity: 100,
       failureAction: "POSTPONE",
       items: [
         {
@@ -1079,5 +1215,17 @@ describe("P1-C governance API contracts", () => {
     });
     expect(publicCampaign.statusCode).toBe(200);
     expect(publicCampaign.json().data.items).toEqual([]);
+    const reopened = await store.getCampaign("campaign-1");
+    expect(reopened?.postponementCount).toBe(1);
+    reopened!.cutoffAt = new Date(Date.now() - 1000).toISOString();
+    expect(await store.updateCampaign(reopened!, reopened!.version)).toBe(true);
+    const secondMiss = await app.inject({
+      method: "POST",
+      url: "/api/v1/admin/campaigns/campaign-1/close",
+      headers: superAdmin,
+      payload: { reason: "第二次仍未达到成团量" },
+    });
+    expect(secondMiss.statusCode, secondMiss.body).toBe(200);
+    expect(secondMiss.json().data.status).toBe("CANCELLED");
   });
 });

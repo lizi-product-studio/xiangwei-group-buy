@@ -95,6 +95,18 @@ const audit = (id: string, action: string) => ({
   createdAt: "2026-08-24T00:00:00.000Z",
 });
 
+const interest = (id: string, regionText: string) => ({
+  id,
+  regionText,
+  contactName: "意向用户",
+  maskedContactPhone: "139****0000",
+  privacyConsentedAt: "2026-08-24T00:00:00.000Z",
+  status: "NEW",
+  createdAt: "2026-08-24T00:00:00.000Z",
+  statusNote: null,
+  statusChangedAt: null,
+});
+
 test("治理和审计读取的同身份迟到响应不会覆盖最新 generation", async ({
   page,
   request,
@@ -190,7 +202,9 @@ test("跨身份后迟到的治理和审计响应不会泄露前一身份数据",
     });
   });
   await page.route("**/api/v1/admin/service-area-interests", (route) =>
-    route.fulfill({ json: { data: [] } }),
+    route.fulfill({
+      json: { data: [interest("current-operator", "CURRENT-OPERATOR")] },
+    }),
   );
   await page.route("**/api/v1/admin/audit-logs", (route) =>
     route.fulfill({ json: { data: [audit("previous-audit", "PREVIOUS_AUDIT")] } }),

@@ -31,6 +31,7 @@ import {
   updateInternalStaffSchema,
   updatePickupPointSchema,
   updateServiceAreaInterestStatusSchema,
+  updateOwnServiceAreaInterestSchema,
   updateServiceAreaOrderStatusSchema,
 } from "@hometown/api-contracts";
 import { BusinessError, moneyCents } from "@hometown/domain";
@@ -178,6 +179,9 @@ export async function buildApp(
       : new MemoryStore(false));
   const holder: { campaigns?: CampaignService } = {};
   let scheduler: CampaignScheduler = new NoopCampaignScheduler();
+  let reconciliationRunning = false;
+  let lastReconciliationAt: string | null = null;
+  let lastReconciliationError: string | null = null;
   if (config.QUEUE_DRIVER === "redis")
     scheduler = new RedisCampaignScheduler(
       config.REDIS_URL!,
@@ -564,13 +568,20 @@ export async function buildApp(
       });
   });
   app.get("/health/live", async () => ({ status: "ok" }));
-  app.get("/health/ready", async () => ({
-    status: "ok",
-    dependencies: {
+  app.get("/health/ready", async (_request, reply) => {
+    const reconciliationStale =
+      !lastReconciliationAt ||
+      Date.now() - Date.parse(lastReconciliationAt) > 150_000;
+    const dependencies = {
       dataStore: await store.health(),
       queue: await scheduler.health(),
-    },
-  }));
+      reconciliation:
+        lastReconciliationError || reconciliationStale ? "degraded" : "ok",
+    };
+    if (lastReconciliationError || reconciliationStale)
+      return reply.status(503).send({ status: "degraded", dependencies });
+    return { status: "ok", dependencies };
+  });
 
   registerAuthRoutes(app, {
     authService,
@@ -1593,6 +1604,108 @@ export async function buildApp(
     await store.saveServiceAreaInterest(value);
     return reply.status(201).send({ data: value });
   });
+  app.get("/api/v1/service-area-interests", async (request) => {
+    const actor = requireActor(request, ["USER", "SUPER_ADMIN"]);
+    return {
+      data: (await store.listServiceAreaInterestsByUser(actor.userId)).map(
+        (value) => ({
+          id: value.id,
+          regionText: value.regionText,
+          contactName: value.contactName,
+          maskedContactPhone: maskPhone(value.contactPhone),
+          status: value.status,
+          statusNote: value.statusNote,
+          statusChangedAt: value.statusChangedAt,
+          createdAt: value.createdAt,
+        }),
+      ),
+    };
+  });
+  app.post(
+    "/api/v1/service-area-interests/:id/correct",
+    async (request) => {
+      const actor = requireActor(request, ["USER", "SUPER_ADMIN"]);
+      const id = identifierSchema.parse((request.params as { id: string }).id);
+      const input = updateOwnServiceAreaInterestSchema.parse(request.body);
+      if (input.privacyVersion !== config.PRIVACY_NOTICE_VERSION)
+        throw new BusinessError("VALIDATION_ERROR", "隐私说明已更新", 400);
+      return {
+        data: await store.transaction(async (transactionStore) => {
+          const value = await transactionStore.getServiceAreaInterest(id);
+          if (!value || value.userId !== actor.userId)
+            throw new BusinessError("RESOURCE_NOT_FOUND", "区域意向不存在", 404);
+          if (value.status !== "NEW")
+            throw new BusinessError(
+              "INVALID_STATE_TRANSITION",
+              "只有尚未处理的开通意向可以直接更正；已处理意向请联系客服",
+              409,
+            );
+          const before = structuredClone(value);
+          Object.assign(value, {
+            regionText: input.regionText,
+            contactName: input.contactName,
+            contactPhone: input.contactPhone,
+            privacyVersion: input.privacyVersion,
+            privacyConsentedAt: await transactionStore.databaseNow(),
+          });
+          await transactionStore.saveServiceAreaInterest(value);
+          await transactionStore.saveAuditLog({
+            id: randomUUID(),
+            actorId: actor.userId,
+            action: "SERVICE_AREA_INTEREST_CORRECTED_BY_USER",
+            resourceType: "SERVICE_AREA_INTEREST",
+            resourceId: id,
+            requestId: request.id,
+            beforeData: before,
+            afterData: value,
+            createdAt: value.privacyConsentedAt!,
+          });
+          return {
+            id: value.id,
+            regionText: value.regionText,
+            contactName: value.contactName,
+            maskedContactPhone: maskPhone(value.contactPhone),
+            status: value.status,
+            createdAt: value.createdAt,
+          };
+        }),
+      };
+    },
+  );
+  app.post(
+    "/api/v1/service-area-interests/:id/withdraw",
+    async (request) => {
+      const actor = requireActor(request, ["USER", "SUPER_ADMIN"]);
+      const id = identifierSchema.parse((request.params as { id: string }).id);
+      return {
+        data: await store.transaction(async (transactionStore) => {
+          const value = await transactionStore.getServiceAreaInterest(id);
+          if (!value || value.userId !== actor.userId)
+            throw new BusinessError("RESOURCE_NOT_FOUND", "区域意向不存在", 404);
+          if (value.status === "CLOSED") return { id, status: "CLOSED" as const };
+          const before = structuredClone(value);
+          const now = await transactionStore.databaseNow();
+          value.status = "CLOSED";
+          value.statusNote = "用户主动撤回开通意向";
+          value.statusChangedBy = actor.userId;
+          value.statusChangedAt = now;
+          await transactionStore.saveServiceAreaInterest(value);
+          await transactionStore.saveAuditLog({
+            id: randomUUID(),
+            actorId: actor.userId,
+            action: "SERVICE_AREA_INTEREST_WITHDRAWN_BY_USER",
+            resourceType: "SERVICE_AREA_INTEREST",
+            resourceId: id,
+            requestId: request.id,
+            beforeData: before,
+            afterData: value,
+            createdAt: now,
+          });
+          return { id, status: value.status };
+        }),
+      };
+    },
+  );
   app.get("/api/v1/admin/service-area-interests", async (request) => {
     requireActor(request, ["CUSTOMER_SERVICE", "OPERATOR", "SUPER_ADMIN"]);
     return {
@@ -1702,8 +1815,19 @@ export async function buildApp(
     await store.saveNotificationPreference(value);
     return { data: value };
   });
+  app.get("/api/v1/notifications/preferences", async (request) => {
+    const actor = requireActor(request, ["USER", "SUPER_ADMIN"]);
+    return {
+      data:
+        (await store.getNotificationPreference(actor.userId)) ?? {
+          userId: actor.userId,
+          types: [],
+          updatedAt: null,
+        },
+    };
+  });
   app.get("/api/v1/admin/notifications/manual", async (request) => {
-    requireActor(request, ["CUSTOMER_SERVICE", "OPERATOR", "SUPER_ADMIN"]);
+    requireActor(request, ["CUSTOMER_SERVICE", "SUPER_ADMIN"]);
     const [notifications, orders] = await Promise.all([
       store.listManualOrderNotifications(500),
       store.listOrders(500),
@@ -1731,6 +1855,10 @@ export async function buildApp(
         manualCompletedAt: value.manualCompletedAt,
         manualCompletedBy: value.manualCompletedBy ?? null,
         manualCompletionNote: value.manualCompletionNote ?? null,
+        manualCompletionChannel: value.manualCompletionChannel ?? null,
+        manualCompletionExternalReference:
+          value.manualCompletionExternalReference ?? null,
+        manualCompletionResult: value.manualCompletionResult ?? null,
         providerSubmissionStartedAt: value.providerSubmissionStartedAt,
         providerResultRecordedAt: value.providerResultRecordedAt,
         submissionUnknownReason: value.submissionUnknownReason,
@@ -1738,7 +1866,7 @@ export async function buildApp(
     };
   });
   app.post("/api/v1/admin/notifications/:id/retry", async (request) => {
-    requireActor(request, ["CUSTOMER_SERVICE", "OPERATOR", "SUPER_ADMIN"]);
+    requireActor(request, ["CUSTOMER_SERVICE", "SUPER_ADMIN"]);
     return {
       data: await notifications.retryPending(
         identifierSchema.parse((request.params as { id: string }).id),
@@ -1750,11 +1878,10 @@ export async function buildApp(
     async (request, reply) => {
       const actor = requireActor(request, [
         "CUSTOMER_SERVICE",
-        "OPERATOR",
         "SUPER_ADMIN",
       ]);
       const id = identifierSchema.parse((request.params as { id: string }).id);
-      const { note } = notificationManualCompletionSchema.parse(request.body);
+      const completion = notificationManualCompletionSchema.parse(request.body);
       const value = await store.transaction(async (transactionStore) => {
         const before = await transactionStore.getOrderNotification(id);
         if (!before)
@@ -1762,8 +1889,13 @@ export async function buildApp(
         const after = await transactionStore.markOrderNotificationManualCompleted(
           id,
           actor.userId,
-          note,
+          completion.note,
           await transactionStore.databaseNow(),
+          {
+            channel: completion.channel,
+            externalReference: completion.externalReference,
+            result: completion.result,
+          },
         );
         if (!after)
           throw new BusinessError(
@@ -1799,42 +1931,53 @@ export async function buildApp(
     };
   });
 
-  await scheduler.reconcile(await store.listCampaigns());
-  await orders.expirePendingOrders();
-  await communityOperations.reconcilePickupDeadlines();
-  const initialRefundReconciliation = await payments.reconcileRefunds();
-  if (initialRefundReconciliation.failed > 0)
-    app.log.error(
-      initialRefundReconciliation,
-      "refund reconciliation completed with recoverable failures",
-    );
-  await communityOperations.reconcileExpiredPickupRefunds();
-  await communityOperations.reconcileCancellationRefunds();
-  await notifications
-    .drainPending()
-    .catch((error) =>
-      app.log.error({ err: error }, "notification drain failed"),
-    );
+  const reconcile = async () => {
+    if (reconciliationRunning) return;
+    reconciliationRunning = true;
+    try {
+      const acquired = await scheduler.runReconciliation(async (assertOwned) => {
+        await assertOwned();
+        await scheduler.reconcile(await store.listCampaigns());
+        await assertOwned();
+        await orders.expirePendingOrders();
+        await assertOwned();
+        await communityOperations.reconcilePickupDeadlines();
+        await assertOwned();
+        const refunds = await payments.reconcileRefunds();
+        if (refunds.failed > 0)
+          app.log.error(refunds, "refund reconciliation completed with recoverable failures");
+        await assertOwned();
+        await communityOperations.reconcileExpiredPickupRefunds();
+        await assertOwned();
+        await communityOperations.reconcileCancellationRefunds();
+        await assertOwned();
+        await notifications.drainPending();
+      });
+      if (acquired) {
+        lastReconciliationAt = new Date().toISOString();
+        lastReconciliationError = null;
+      }
+    } catch (error) {
+      lastReconciliationError = error instanceof Error ? error.message : "unknown reconciliation failure";
+      app.log.error({ err: error }, "background reconciliation failed");
+    } finally {
+      reconciliationRunning = false;
+    }
+  };
+  app.get("/health/reconciliation", async () => ({
+    status:
+      lastReconciliationError ||
+      !lastReconciliationAt ||
+      Date.now() - Date.parse(lastReconciliationAt) > 150_000
+        ? "degraded"
+        : "ok",
+    running: reconciliationRunning,
+    lastCompletedAt: lastReconciliationAt,
+    hasError: Boolean(lastReconciliationError),
+  }));
+  await reconcile();
   const timer = setInterval(() => {
-    void store
-      .listCampaigns()
-      .then((values) => scheduler.reconcile(values))
-      .then(() => orders.expirePendingOrders())
-      .then(() => communityOperations.reconcilePickupDeadlines())
-      .then(() => payments.reconcileRefunds())
-      .then((result) => {
-        if (result.failed > 0)
-          app.log.error(
-            result,
-            "refund reconciliation completed with recoverable failures",
-          );
-      })
-      .then(() => communityOperations.reconcileExpiredPickupRefunds())
-      .then(() => communityOperations.reconcileCancellationRefunds())
-      .then(() => notifications.drainPending())
-      .catch((error) =>
-        app.log.error({ err: error }, "background reconciliation failed"),
-      );
+    void reconcile();
   }, 30_000);
   timer.unref();
   app.addHook("onClose", async () => {
