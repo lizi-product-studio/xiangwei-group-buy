@@ -52,3 +52,20 @@ export function listRegionDirectory(query = ''): RegionDirectoryEntry[] {
 export function getRegionDirectoryEntry(regionCode: string): RegionDirectoryEntry | null {
   return directoryByCode.get(regionCode) ?? null;
 }
+
+/**
+ * Service areas are single administrative-directory nodes in this iteration.
+ * This is deliberately a directory predicate, not a service-geometry check.
+ */
+export function isAdministrativePathCompatible(
+  serviceAreaRegionCode: string,
+  locatedRegionCode: string,
+): boolean {
+  const serviceArea = getRegionDirectoryEntry(serviceAreaRegionCode);
+  const located = getRegionDirectoryEntry(locatedRegionCode);
+  if (!serviceArea || !located) return false;
+  return (
+    located.regionCode === serviceArea.regionCode ||
+    located.path.startsWith(`${serviceArea.path} /`)
+  );
+}

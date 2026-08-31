@@ -1,7 +1,7 @@
 ---
 title: "社区团购 — System Design"
 status: APPROVED
-version: 1.0.0
+version: 1.2.0
 last_updated: "2026-08-31"
 owner: architect
 source_of_truth: project-document-set
@@ -19,6 +19,7 @@ source_of_truth: project-document-set
 | MySQL 8.4 | 当前 InnoDB 单行聚合业务状态；退款/审计等同事务 | durable disk | 单行锁保证原子但限制吞吐 |
 | Redis 7.4 | 团期 close job、lifecycle scheduling、周期调和租约 | Redis | 租约过期后其他实例可接管 |
 | 微信 | 登录、JSAPI、支付退款回调、订阅消息 | 备案 HTTPS/商户凭据 | unknown/manual recovery |
+| 地点解析（管理端） | 地址/POI 搜索、地图交互、GCJ-02 逆地理与行政目录路径相容核验 | 获批准的位置核验适配器、行政区目录；确定性测试夹具 | 适配器/地图不可用或不可映射时 fail-closed；不以公共 OSM 作为生产默认 |
 
 ## Security and permissions
 
@@ -56,6 +57,22 @@ source_of_truth: project-document-set
 - 发布前需补：数据库/Redis 健康、迁移幂等、备份恢复、队列深度、调和 last-success、退款人工挂起、通知人工任务告警。
 - 禁止将单元/mock E2E 结果当作真实微信或 MySQL/Redis 预发布证据。
 
+## 自提点定位契约 Delta（P1，待实现）
+
+- **DEFAULT_ASSUMPTION**：这一迭代把 `ServiceArea.regionCode` 视为单个行政目录节点。`PickupPoint.serviceAreaId` 联结该节点是唯一行政归属链；路径校验只证明坐标反向编码结果与该节点相容，**不能证明**业务配送几何边界、正确门牌或通行性。若服务范围可自定义、重叠或不与目录节点对齐，停止实现，另建边界数据/运营/迁移决策。
+- **EVIDENCE_INFERRED**：现有高德地图使用 GCJ-02；现有 OSM 回退在边界转换 WGS84/GCJ-02。后续 API 和持久化仍统一 GCJ-02；适配器必须显式声明输入/输出坐标系，禁止混存。公共 OSM 端点仅能作为本地开发/测试的明确许可对象，**不得**在未获用户批准的生产配置中自动回退使用。
+- 实现一个提供方无关的 `ReverseLocationAdapter`。成功输出必须含：`coordinateSystem`、输入规范化坐标、`providerAdministrativeId`（原始标识）、`directoryRegionCode`（规范化目录节点）和展示地址；失败输出必须区分 `NOT_CONFIGURED`、`UNAVAILABLE` 与 `UNMAPPABLE`，不能把任何一种折叠为空 POI 结果。目录映射由受控目录映射器完成，未映射不得猜测父/子节点。
+- 写入边界仅在创建、规范化地址改变、六位 GCJ-02 纬度/经度改变、或 INACTIVE→ACTIVE 时调用适配器。其他 PATCH 不调用适配器、不生成持久核验判断，且保留原地址和坐标。客户端回填的省市区、地址、POI 元数据或旧会话结果都不能替代服务端当场核验。
+- 在触发事件中，只有 `MAPPED` 输出才可进行行政目录路径相容比较；`UNMAPPABLE`、`NOT_CONFIGURED`、`UNAVAILABLE`、地图交互不可用和路径不相容全部在写入事务前安全拒绝，产生零位置写入。检查通过也只可显示“行政路径相容”。
+- 重复检查只在相同 `serviceAreaId` 内执行，PATCH 排除自身。按 DR-020 的地址规范化和 Haversine 计算返回候选；首次发现及明确 `confirmDuplicate: true` 覆写均产生审计证据。50 米和覆写字段是 **DEFAULT_ASSUMPTION**，不新增 POI ID、手工微调标志、核验状态或地理围栏表。
+- 兼容：既有 `PickupPoint` 字段、公开目录输出和 `/api/v1` 路径保持不变；不作数据迁移、历史回填或“已/未核验”字段。若产品需要持久核验事实、已批准生产提供方或真实业务几何边界，须另建批准的数据/外部能力契约、迁移与回滚计划。
+
+### 位置失败与安全回滚
+
+- 表单只在当前打开会话中保留输入、候选和图钉；关闭、刷新或离开页面即丢弃，持久草稿不在范围。
+- 地图瓦片或交互、适配器配置、提供方请求、目录映射分别呈现可识别状态；新建、位置变更和 INACTIVE→ACTIVE 在任一失败状态均不得写入。纯非位置 PATCH 仍可执行。
+- 回滚不得恢复“未核验位置可写入”的旧 API 行为。若撤回 UI 或适配器实现，服务端仍对这三类事件返回 fail-closed 拒绝；只有在整个受控定位写路径保持关闭时，才可进行非触发编辑。真实覆盖不足只能阻止定位写入或由用户批准新的提供方/范围，不能放宽校验。
+
 ## Deployment, migration, compatibility, and rollback
 
 1. 新空 MySQL 8.4 执行 `0001`，重复迁移幂等；Redis 健康。
@@ -72,3 +89,4 @@ source_of_truth: project-document-set
 | ADR-002 | 首发存储 | 单行聚合仅用于受控单副本首发；扩容前行级拆分 | APPROVED_WITH_GUARDRAIL |
 | ADR-003 | 外部副作用 | fixed id + lease/fence + unknown/manual recovery | APPROVED |
 | ADR-004 | 通知模板 | 四个已审模板映射七个语义事件；单次最多请求三个唯一模板 | APPROVED_PENDING_EXTERNAL_TEMPLATE_REVIEW |
+| ADR-005 | 自提点行政归属 | 服务区域链唯一；仅校验行政路径相容；提供方、地图或映射失败安全拒绝 | APPROVED（需求冻结；实现待后续包） |

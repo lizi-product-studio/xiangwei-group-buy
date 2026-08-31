@@ -1,0 +1,259 @@
+schema_version: 2
+run_id: "RUN-20260831T032435Z-be4a70"
+task_id: "TASK-PICKUP-LOCATION-REQ"
+project: "社区团购"
+stage: "DISCOVERY"
+status: "COMPLETED"
+source_input_fingerprint: "6d908de5ae363a7b9df75396e57377273932c110b763d1cf29c30f15c818f4e8"
+owner: "requirements"
+reviewer: "quality_governor"
+return_to: "orchestrator"
+may_spawn_agents: false
+may_spawn_workers: false
+priority: "P1"
+objective: "冻结自提点定位配置的产品规则、UX流程、接口数据影响和可验证验收基线"
+task_type: "requirements"
+role_execution:
+  policy_version: "1.2.0"
+  role_plan_fingerprint: "d01fbccaa4214ed52ca91741e8c8d7fa91f6769ab5e748cb889e13e2237e7e68"
+  status: "ROUTED"
+  quota_mode: "balanced"
+  activation_reasons:
+    - "stage:DISCOVERY"
+    - "complexity:Complex"
+  merged_responsibilities: []
+  reviewer_activation: "deferred_until_owner_handoff"
+  concurrency_slot: 1
+risk_profile:
+  flags:
+    - "accessibility"
+    - "cross_module"
+  failed_attempts: 0
+  failure_type: "none"
+execution_profile:
+  policy_version: "2.0.0"
+  route_fingerprint: "f1898cce8a99290f15d5170b0e0d5a3efc617326df3d83b2fedd85079eac49c4"
+  routing_mode: "explicit_spawn_override"
+  availability_source: ".dingxinglizi/orchestration/runtime-manifest.json"
+  availability_verified: true
+  available_models:
+    - "gpt-5.6-luna"
+    - "gpt-5.6-terra"
+    - "gpt-5.6-sol"
+  status: "ROUTED"
+  capability_tier: "Advanced"
+  platform: "codex"
+  preferred_model: ""
+  selected_model: "gpt-5.6-terra"
+  selected_provider: "openai"
+  model_reasoning_effort: "high"
+  actual_model_attested: false
+  fallback_models: []
+  routing_reasons:
+    - "base:Complex/requirements/requirements"
+    - "requested-tier:ADVANCED"
+    - "platform:codex"
+    - "exact-capability-tier"
+  attempt: 1
+  max_attempts: 3
+  downgrade_policy: "new_low_risk_task_package_only"
+  escalation_history: []
+quality_review:
+  gate: "problem"
+  review_mode: "NOT_APPLICABLE"
+  decision_question: "BLOCKING_UNKNOWN"
+  input_fingerprint: "6d908de5ae363a7b9df75396e57377273932c110b763d1cf29c30f15c818f4e8"
+  selected_lenses: []
+  adversarial_tests: []
+  quality_case_ref: "BLOCKING_UNKNOWN"
+review_contract:
+  status: "NOT_APPLICABLE"
+  review_id: "NOT_APPLICABLE"
+  mode: "NOT_APPLICABLE"
+  phase: "NOT_APPLICABLE"
+  shard_id: "NOT_APPLICABLE"
+  baseline_commit: "NOT_APPLICABLE"
+  target_commit: "NOT_APPLICABLE"
+  target_fingerprint: "NOT_APPLICABLE"
+  repository_manifest_fingerprint: "NOT_APPLICABLE"
+  review_plan_fingerprint: "NOT_APPLICABLE"
+  shard_input_fingerprint: "NOT_APPLICABLE"
+  trust_policy_fingerprint: "NOT_APPLICABLE"
+  trusted_instruction_files: []
+  repository_execution_authorized: false
+  default_execution_policy: "NOT_APPLICABLE"
+  included_modules: []
+  included_files: []
+  pinned_file_objects_json: "NOT_APPLICABLE"
+  exclusion_index: "NOT_APPLICABLE"
+  risk_lenses: []
+  findings_output: "NOT_APPLICABLE"
+  evidence_output: "NOT_APPLICABLE"
+  source_write_authorized: false
+  fresh_session_required: false
+  compact_handoff_required: false
+  session_attestation_required: false
+  context_budget:
+    max_files: 0
+    max_bytes: 0
+    max_estimated_tokens: 0
+    estimated_files: 0
+    estimated_bytes: 0
+    estimated_tokens: 0
+    estimate_method: "NOT_APPLICABLE"
+repair_contract:
+  status: "NOT_APPLICABLE"
+  review_id: "NOT_APPLICABLE"
+  repair_plan_id: "NOT_APPLICABLE"
+  repair_plan_fingerprint: "NOT_APPLICABLE"
+  phase: "NOT_APPLICABLE"
+  finding_ids: []
+  allowed_source_files: []
+  target_fingerprint: "NOT_APPLICABLE"
+  source_write_authorized: false
+  evidence_output: "NOT_APPLICABLE"
+capability_requirements:
+  required: []
+  optional: []
+  permission_ceiling: "read"
+  provisioning_status: "READY"
+  resolved_skills: []
+  resolved_mcp_servers: []
+  blocked: []
+business_context:
+  value: "降低运营创建错误自提点、地图落点与服务区域不一致以及消费者前往错误地点的风险，同时保留乡镇农村地址搜索不完整时的可恢复选点能力。"
+  affected_roles:
+    - "OPERATOR"
+    - "SUPER_ADMIN"
+    - "USER"
+    - "PICKUP_MANAGER"
+  affected_objects:
+    - "ServiceArea"
+    - "PickupPoint"
+    - "GeoPlace"
+  rule_refs:
+    - "DR-001"
+    - "DR-002"
+    - "DR-003"
+input_documents:
+  - "docs/00-project-context.md"
+  - "docs/01-domain-rules.md"
+  - "docs/02-glossary.md"
+  - "docs/project-status.json"
+  - "docs/06-ux-spec.md"
+  - "docs/08-system-design.md"
+  - "docs/09-api-data-contract.md"
+  - "docs/10-test-plan.md"
+  - "apps/admin-web/src/App.tsx"
+  - "apps/admin-web/src/pickup-location-picker.tsx"
+  - "apps/admin-web/src/pickup-address.ts"
+  - "apps/admin-web/src/region-cascade.ts"
+  - "apps/admin-web/src/api.ts"
+  - "apps/api/src/app.ts"
+  - "apps/api/src/modules/service-areas/geo-search.ts"
+  - "packages/api-contracts/src/index.ts"
+dependencies: []
+scope:
+  - "核对当前自提点创建/编辑、服务区域、行政区目录、POI 搜索、逆地理编码和地图微调的真实行为与冲突。"
+  - "把服务区域、行政区路径、展示地址和坐标的事实来源与优先级写成明确规则。"
+  - "定义新建、编辑、POI 无结果、上游失败、农村地图点选、越界、地址与坐标不一致及重复点位的交互与恢复路径。"
+  - "明确本轮最小 API/数据契约 Delta、兼容策略和不需要实施的过度设计。"
+  - "补充可供研发和独立 QA 执行的 Given/When/Then 验收矩阵。"
+out_of_scope:
+  - "真实高德 Key 采购、配置或生产调用。"
+  - "消费者实时定位、配送导航、路径规划或电子围栏平台。"
+  - "新增联系人采集、点位排班、照片审核或复杂地址治理后台。"
+  - "修改业务代码、依赖、数据库或运行环境。"
+deliverables:
+  - "更新 docs/01-domain-rules.md，增加自提点定位事实源、区域一致性和恢复规则。"
+  - "更新 docs/04-prd.md，增加 P1 定位配置需求及验收引用。"
+  - "更新 docs/06-ux-spec.md，冻结新建/编辑自提点的定位流程、状态和文案。"
+  - "更新 docs/08-system-design.md 与 docs/09-api-data-contract.md，记录最小契约 Delta、坐标系和兼容边界。"
+  - "更新 docs/10-test-plan.md，加入定位配置的单元、API、浏览器及手工验收项。"
+  - "新增 docs/decisions/2026-08-31-pickup-location-source-of-truth.md，记录选择、备选方案、非目标和回滚触发。"
+acceptance_criteria:
+  - id: "AC-PICKUP-LOC-REQ-01"
+    given: "已有服务区域、行政区目录、地址搜索与地图选点实现"
+    when: "Requirements 对现状和用户批准方向进行对比"
+    then: "文档明确服务区域是行政归属事实源，地址搜索是首选输入，地图是确认/微调与无结果兜底；不存在两个可独立冲突的行政区事实源"
+    evidence: "docs/decisions/2026-08-31-pickup-location-source-of-truth.md"
+  - id: "AC-PICKUP-LOC-REQ-02"
+    given: "POI 可命中、POI 无结果、上游失败和农村地址不完整四类情况"
+    when: "运营创建或编辑自提点"
+    then: "每类情况都有可执行的下一步、清晰反馈和保存条件，且不要求运营直接理解或编辑经纬度"
+    evidence: "docs/06-ux-spec.md"
+  - id: "AC-PICKUP-LOC-REQ-03"
+    given: "地图坐标、逆地理地址和已选服务区域可能不一致"
+    when: "运营尝试保存"
+    then: "契约明确阻止跨服务区域保存并提供纠正路径；编辑旧点位不会因无法解析历史地址而静默改区或丢失坐标"
+    evidence: "docs/01-domain-rules.md + docs/09-api-data-contract.md"
+  - id: "AC-PICKUP-LOC-REQ-04"
+    given: "研发将按冻结基线实施"
+    when: "创建后续 Engineering Lead Task Package"
+    then: "测试计划包含服务区域自动带出、POI 选择、拖动逆编码、越界拒绝、上游失败兜底、编辑兼容和重复点位提示的可验证项"
+    evidence: "docs/10-test-plan.md"
+allowed_files:
+  - "docs/01-domain-rules.md"
+  - "docs/04-prd.md"
+  - "docs/06-ux-spec.md"
+  - "docs/08-system-design.md"
+  - "docs/09-api-data-contract.md"
+  - "docs/10-test-plan.md"
+  - "docs/decisions/2026-08-31-pickup-location-source-of-truth.md"
+forbidden:
+  - "Do not change approved scope, business rules, permissions, contracts, dependencies, or external systems without Orchestrator routing."
+  - "Do not perform production deployment, external messaging, purchases, credential use, destructive actions, or irreversible migrations without explicit authorization."
+  - "Do not modify application code, tests, package manifests, lockfiles, database migrations or environment files."
+  - "Do not make province/city/district a second independent truth source when serviceAreaId already identifies the approved administrative area."
+  - "Do not require a real AMap key or external provider response for document completion."
+validation:
+  commands:
+    - "python3 /Users/lizi/.agents/skills/software-project-orchestrator/scripts/orchestrator.py status /Users/lizi/Desktop/拼团项目"
+    - "git diff --check -- docs/01-domain-rules.md docs/04-prd.md docs/06-ux-spec.md docs/08-system-design.md docs/09-api-data-contract.md docs/10-test-plan.md docs/decisions/2026-08-31-pickup-location-source-of-truth.md"
+  manual:
+    - "Trace every new rule to an acceptance item and identify confirmed, evidence-inferred and default-assumption statements."
+    - "Check that the decision does not expand into navigation, consumer geolocation or complex geofencing."
+  evidence_locations:
+    - "evidence/pickup-location-requirements-handoff-2026-08-31.md"
+assumptions_and_risks:
+  - "CONFIRMED: 用户批准按 service area → address/POI search → map fine-tune → final confirmation 的方向继续。"
+  - "EVIDENCE_INFERRED: 当前坐标以 GCJ-02 供高德底图使用，OSM fallback 已做 WGS84/GCJ-02 转换。"
+  - "DEFAULT_ASSUMPTION: 本轮不新增持久化 POI ID 或人工微调标志，除非代码证据证明没有它就无法满足验收；触发时必须回报 Orchestrator。"
+  - "BLOCKING_UNKNOWN: 生产高德 Key 和真实覆盖质量不在本地需求冻结范围内，仍是发布环境事项。"
+handoff:
+  conclusion: "PASS"
+  inputs_checked:
+    - "AGENTS.md"
+    - "docs/00-project-context.md"
+    - "docs/01-domain-rules.md"
+    - "docs/02-glossary.md"
+    - "docs/project-status.json"
+    - "docs/06-ux-spec.md"
+    - "docs/08-system-design.md"
+    - "docs/09-api-data-contract.md"
+    - "docs/10-test-plan.md"
+    - "apps/admin-web/src/App.tsx"
+    - "apps/admin-web/src/pickup-location-picker.tsx"
+    - "apps/admin-web/src/pickup-address.ts"
+    - "apps/admin-web/src/region-cascade.ts"
+    - "apps/admin-web/src/api.ts"
+    - "apps/api/src/app.ts"
+    - "apps/api/src/modules/service-areas/geo-search.ts"
+    - "packages/api-contracts/src/index.ts"
+  artifacts:
+    - "docs/01-domain-rules.md"
+    - "docs/04-prd.md"
+    - "docs/06-ux-spec.md"
+    - "docs/08-system-design.md"
+    - "docs/09-api-data-contract.md"
+    - "docs/10-test-plan.md"
+    - "docs/decisions/2026-08-31-pickup-location-source-of-truth.md"
+    - "evidence/pickup-location-requirements-handoff-2026-08-31.md"
+  evidence:
+    - "evidence/pickup-location-requirements-handoff-2026-08-31.md"
+  deviations: []
+  downstream_decisions:
+    - "Engineering Lead must create a separate implementation package; this discovery package does not authorize application code changes."
+    - "Quality Governor reviews this frozen baseline before implementation routing."
+    - "50m duplicate threshold and confirmDuplicate are DEFAULT_ASSUMPTION; escalate if they materially affect operations."
+    - "Real AMap Key and rural coverage remain external pre-release evidence, not a requirement-completion prerequisite."

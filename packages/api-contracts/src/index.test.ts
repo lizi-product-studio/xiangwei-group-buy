@@ -157,6 +157,16 @@ describe("public API contracts", () => {
     expect(updatePickupPointSchema.parse({ businessHours: "08:30-21:00" })).toEqual(
       { businessHours: "08:30-21:00" },
     );
+    expect(
+      createPickupPointSchema.parse({ ...input, confirmDuplicate: true })
+        .confirmDuplicate,
+    ).toBe(true);
+    expect(
+      updatePickupPointSchema.parse({
+        address: "东门服务站 1 号",
+        confirmDuplicate: true,
+      }).confirmDuplicate,
+    ).toBe(true);
   });
 
   it("keeps the arrival window valid when a postponed campaign reopens", () => {

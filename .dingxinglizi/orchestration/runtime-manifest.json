@@ -1,0 +1,75 @@
+{
+  "captured_at": "2026-08-31T06:05:02Z",
+  "claims": {
+    "actual_model_used": "UNKNOWN",
+    "authenticated": "UNKNOWN",
+    "native_dispatch_completed": false
+  },
+  "dispatch_evidence": {
+    "consistency": "NOT_CHECKED",
+    "facts": {},
+    "path": "",
+    "sha256": "",
+    "status": "NOT_PROVIDED"
+  },
+  "model_inventory": {
+    "evidence": {
+      "path": "/Users/lizi/Desktop/拼团项目/evidence/runtime-model-inventory-2026-08-31.json",
+      "sha256": "46a2624d57d88b6c9b233bcf95ea15b2b07551ab0b099467ebd0be09833919fa",
+      "source": "Codex Desktop active-thread model availability, 2026-08-31",
+      "status": "VERIFIED"
+    },
+    "models": [
+      {
+        "capability_tier": "ECONOMY",
+        "evidence_status": "VERIFIED",
+        "id": "gpt-5.6-luna",
+        "provider": "openai",
+        "reasoning_efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      {
+        "capability_tier": "ADVANCED",
+        "evidence_status": "VERIFIED",
+        "id": "gpt-5.6-terra",
+        "provider": "openai",
+        "reasoning_efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ]
+      },
+      {
+        "capability_tier": "EXPERT",
+        "evidence_status": "VERIFIED",
+        "id": "gpt-5.6-sol",
+        "provider": "openai",
+        "reasoning_efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ]
+      }
+    ]
+  },
+  "platform": "codex",
+  "runtime": {
+    "evidence_source": "/Applications/ChatGPT.app/Contents/Resources/codex --version (exit 0)",
+    "executable": "/Applications/ChatGPT.app/Contents/Resources/codex",
+    "status": "VERIFIED",
+    "version": "codex-cli 0.151.0-alpha.7.2"
+  },
+  "schema_version": 1,
+  "status": "VERIFIED_WITH_MODEL_INVENTORY"
+}

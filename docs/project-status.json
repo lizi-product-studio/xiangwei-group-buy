@@ -4,7 +4,7 @@
   "approval_authority": "BLOCKING_UNKNOWN",
   "blocked": null,
   "complexity": "Complex",
-  "current_state": "DISCOVERY",
+  "current_state": "REWORK_ENGINEERING",
   "execution_control": {
     "active_attempts": 0,
     "active_sessions": [],
@@ -58,17 +58,20 @@
     }
   },
   "open_p0_p1": [],
-  "previous_state": "BACKLOG",
+  "previous_state": "DISCOVERY",
   "project": "社区团购",
   "quality_gates": {
     "problem": {
-      "evidence": [],
-      "input_fingerprint": null,
-      "mode": "INLINE",
-      "reviewer": "orchestrator",
-      "session": null,
-      "status": "PENDING",
-      "version": null
+      "evidence": [
+        "evidence/pickup-location-quality-governor-2026-08-31.md",
+        "evidence/pickup-location-quality-governor-rereview-2026-08-31.md"
+      ],
+      "input_fingerprint": "3c5ec222b8747c326e48d389d229d115db1adfe32a7daf0884ea27ec3200302a",
+      "mode": "INDEPENDENT",
+      "reviewer": "quality_governor",
+      "session": "pickup_location_qg_rereview",
+      "status": "APPROVED",
+      "version": "pickup-location-v1.2"
     },
     "release_evidence": {
       "evidence": [],
@@ -89,9 +92,24 @@
       "version": null
     }
   },
-  "rework": null,
+  "rework": {
+    "defect_id": "PICKUP-LOCATION-IMPLEMENTATION",
+    "severity": "P1",
+    "failed_criterion": "已批准的自提点定位契约尚未在管理端、API 和确定性测试中实现",
+    "evidence": "evidence/pickup-location-quality-governor-rereview-2026-08-31.md",
+    "primary_owner": "engineering_lead",
+    "affected_artifacts": [
+      "packages/api-contracts/src/index.ts",
+      "apps/api/src/app.ts",
+      "apps/api/src/modules/service-areas/geo-search.ts",
+      "apps/admin-web/src/App.tsx",
+      "apps/admin-web/src/pickup-location-picker.tsx"
+    ],
+    "required_correction": "按已通过 Quality Governor 复核的契约实现单一行政归属、提供方无关校验、安全失败、PATCH 保留和重复提示，并通过独立 QA",
+    "reentry_gate": "CODE_REVIEW"
+  },
   "risk_acceptance_authority": "BLOCKING_UNKNOWN",
   "schema_version": 3,
-  "updated_at": "2026-08-31T04:42:31.451349+00:00",
+  "updated_at": "2026-08-31T06:56:55.540362+00:00",
   "updated_by": "orchestrator"
 }

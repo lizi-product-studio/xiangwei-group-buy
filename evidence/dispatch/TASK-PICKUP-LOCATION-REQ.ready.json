@@ -1,0 +1,16 @@
+{
+  "schema_version": 2,
+  "status": "READY",
+  "run_id": "RUN-20260831T032435Z-be4a70",
+  "task_id": "TASK-PICKUP-LOCATION-REQ",
+  "owner": "requirements",
+  "stage": "DISCOVERY",
+  "role_plan_fingerprint": "d01fbccaa4214ed52ca91741e8c8d7fa91f6769ab5e748cb889e13e2237e7e68",
+  "source_input_fingerprint": "6d908de5ae363a7b9df75396e57377273932c110b763d1cf29c30f15c818f4e8",
+  "execution_route_fingerprint": "f1898cce8a99290f15d5170b0e0d5a3efc617326df3d83b2fedd85079eac49c4",
+  "task_dispatch_fingerprint": "fda5869f8f62fee57dd2c3fee9141d19e7e01e2f1c1d6b522e7d8347660cb030",
+  "required_capabilities": [],
+  "recorded_at": "2026-08-31T06:08:45.817847+00:00",
+  "recorded_by": "check_execution_plan.py",
+  "receipt_fingerprint": "53e9339abea552a454a53e25e536529f5a28239e0276d59e5adf6f8b53156c7e"
+}

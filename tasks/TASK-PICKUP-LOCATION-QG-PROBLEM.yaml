@@ -1,0 +1,235 @@
+schema_version: 2
+run_id: "RUN-20260831T032435Z-be4a70"
+task_id: "TASK-PICKUP-LOCATION-QG-PROBLEM"
+project: "社区团购"
+stage: "DISCOVERY"
+status: "COMPLETED"
+source_input_fingerprint: "99eadf04e70ac3ab083898e5ec8eeb63058f58ec7a0ee1242174b8da37e1947d"
+owner: "quality_governor"
+reviewer: "orchestrator"
+return_to: "orchestrator"
+may_spawn_agents: false
+may_spawn_workers: false
+priority: "P2"
+objective: "第一性原理挑战自提点定位问题、最小方案、重复点阈值和证据边界"
+task_type: "problem_quality"
+role_execution:
+  policy_version: "1.2.0"
+  role_plan_fingerprint: "43b17b113b4f0a78404e888da9a6697ee1f308be50bb8cbe51505ca1694bd20f"
+  status: "ROUTED"
+  quota_mode: "balanced"
+  activation_reasons:
+    - "quality-gate:problem"
+    - "independent-challenge-required"
+  merged_responsibilities: []
+  reviewer_activation: "deferred_until_owner_handoff"
+  concurrency_slot: 1
+risk_profile:
+  flags:
+    - "accessibility"
+    - "ambiguity"
+    - "cross_module"
+  failed_attempts: 0
+  failure_type: "none"
+execution_profile:
+  policy_version: "2.0.0"
+  route_fingerprint: "6455dbe2d7a28ffc2f51469e1a72cfc0d6940aa45f5291574d3450ef5056c3c7"
+  routing_mode: "explicit_spawn_override"
+  availability_source: ".dingxinglizi/orchestration/runtime-manifest.json"
+  availability_verified: true
+  available_models:
+    - "gpt-5.6-luna"
+    - "gpt-5.6-terra"
+    - "gpt-5.6-sol"
+  status: "ROUTED"
+  capability_tier: "Expert"
+  platform: "codex"
+  preferred_model: ""
+  selected_model: "gpt-5.6-sol"
+  selected_provider: "openai"
+  model_reasoning_effort: "high"
+  actual_model_attested: false
+  fallback_models: []
+  routing_reasons:
+    - "base:Complex/problem_quality/quality_governor"
+    - "role-floor:quality_governor/Complex"
+    - "requested-tier:EXPERT"
+    - "platform:codex"
+    - "exact-capability-tier"
+  attempt: 1
+  max_attempts: 3
+  downgrade_policy: "new_low_risk_task_package_only"
+  escalation_history: []
+quality_review:
+  gate: "problem"
+  review_mode: "INDEPENDENT"
+  decision_question: "自提点定位是否是值得解决的真实运营风险，冻结方案是否是最小且可逆的改进，并且其事实源、重复点规则和外部地图证据声明是否可辩护？"
+  input_fingerprint: "99eadf04e70ac3ab083898e5ec8eeb63058f58ec7a0ee1242174b8da37e1947d"
+  selected_lenses:
+    - "operator-error-cost"
+    - "rural-address-coverage"
+    - "single-source-of-truth"
+    - "smallest-reversible-change"
+  adversarial_tests:
+    - "比较不改现状、只修省市区回填、完整引入地理围栏三种替代方案。"
+    - "挑战服务区域能否代表坐标归属，以及跨区判断在无真实高德 Key 时能否可靠实施。"
+    - "挑战 50 米/同地址重复点阈值是否有证据，是否应只提示而非阻止。"
+    - "检查农村地址搜不到、上游失败和历史地址不可解析时是否仍可恢复。"
+  quality_case_ref: "docs/checklists/problem-quality.md"
+review_contract:
+  status: "NOT_APPLICABLE"
+  review_id: "NOT_APPLICABLE"
+  mode: "NOT_APPLICABLE"
+  phase: "NOT_APPLICABLE"
+  shard_id: "NOT_APPLICABLE"
+  baseline_commit: "NOT_APPLICABLE"
+  target_commit: "NOT_APPLICABLE"
+  target_fingerprint: "NOT_APPLICABLE"
+  repository_manifest_fingerprint: "NOT_APPLICABLE"
+  review_plan_fingerprint: "NOT_APPLICABLE"
+  shard_input_fingerprint: "NOT_APPLICABLE"
+  trust_policy_fingerprint: "NOT_APPLICABLE"
+  trusted_instruction_files: []
+  repository_execution_authorized: false
+  default_execution_policy: "NOT_APPLICABLE"
+  included_modules: []
+  included_files: []
+  pinned_file_objects_json: "NOT_APPLICABLE"
+  exclusion_index: "NOT_APPLICABLE"
+  risk_lenses: []
+  findings_output: "NOT_APPLICABLE"
+  evidence_output: "NOT_APPLICABLE"
+  source_write_authorized: false
+  fresh_session_required: false
+  compact_handoff_required: false
+  session_attestation_required: false
+  context_budget:
+    max_files: 0
+    max_bytes: 0
+    max_estimated_tokens: 0
+    estimated_files: 0
+    estimated_bytes: 0
+    estimated_tokens: 0
+    estimate_method: "NOT_APPLICABLE"
+repair_contract:
+  status: "NOT_APPLICABLE"
+  review_id: "NOT_APPLICABLE"
+  repair_plan_id: "NOT_APPLICABLE"
+  repair_plan_fingerprint: "NOT_APPLICABLE"
+  phase: "NOT_APPLICABLE"
+  finding_ids: []
+  allowed_source_files: []
+  target_fingerprint: "NOT_APPLICABLE"
+  source_write_authorized: false
+  evidence_output: "NOT_APPLICABLE"
+capability_requirements:
+  required: []
+  optional: []
+  permission_ceiling: "read"
+  provisioning_status: "READY"
+  resolved_skills: []
+  resolved_mcp_servers: []
+  blocked: []
+business_context:
+  value: "防止未经挑战的地图功能扩张或伪精确校验进入研发，同时确认运营错误地址确实会破坏固定点位履约。"
+  affected_roles:
+    - "OPERATOR"
+    - "SUPER_ADMIN"
+    - "USER"
+    - "PICKUP_MANAGER"
+  affected_objects:
+    - "ServiceArea"
+    - "PickupPoint"
+    - "GeoPlace"
+  rule_refs:
+    - "DR-017"
+    - "DR-018"
+    - "DR-019"
+    - "DR-020"
+input_documents:
+  - "docs/00-project-context.md"
+  - "docs/01-domain-rules.md"
+  - "docs/02-glossary.md"
+  - "docs/project-status.json"
+  - "docs/04-prd.md"
+  - "docs/06-ux-spec.md"
+  - "docs/08-system-design.md"
+  - "docs/09-api-data-contract.md"
+  - "docs/10-test-plan.md"
+  - "docs/decisions/2026-08-31-pickup-location-source-of-truth.md"
+  - "docs/checklists/problem-quality.md"
+  - "evidence/pickup-location-requirements-handoff-2026-08-31.md"
+dependencies: []
+scope:
+  - "只读挑战问题成立性、用户/运营价值、最小方案、事实状态、失败恢复和可证伪条件。"
+  - "识别任何会使后续研发 Task Package 方向错误或证据夸大的 P0/P1 问题。"
+  - "明确 50 米重复点规则、跨区校验和真实地图覆盖的证据边界。"
+out_of_scope:
+  - "修改需求、代码、测试或配置。"
+  - "替用户批准真实地图供应商、生产 Key、业务扩区或风险接受。"
+  - "执行最终实现 QA。"
+deliverables:
+  - "evidence/pickup-location-quality-governor-2026-08-31.md，包含 PASS、CHALLENGE 或 BLOCK 结论、发现、最小修订和研发前置条件。"
+acceptance_criteria:
+  - id: "AC-PICKUP-LOC-QG-01"
+    given: "已完成的需求、UX、架构、API 和测试基线"
+    when: "Quality Governor 做独立第一性原理挑战"
+    then: "明确问题、机制、证据、最强替代、关键假设、反证条件和决策后果"
+    evidence: "evidence/pickup-location-quality-governor-2026-08-31.md"
+  - id: "AC-PICKUP-LOC-QG-02"
+    given: "重复点、跨区和外部地图覆盖含有不确定性"
+    when: "审查实现前置条件"
+    then: "默认假设不被提升为已确认事实；缺真实提供商证据不会被描述为生产可用"
+    evidence: "evidence/pickup-location-quality-governor-2026-08-31.md"
+  - id: "AC-PICKUP-LOC-QG-03"
+    given: "存在更小的只修回填方案和更大的地理围栏方案"
+    when: "比较方案"
+    then: "给出是否允许当前方案进入研发、必须删减/补强什么以及为什么"
+    evidence: "evidence/pickup-location-quality-governor-2026-08-31.md"
+allowed_files:
+  - "evidence/pickup-location-quality-governor-2026-08-31.md"
+forbidden:
+  - "Do not change approved scope, business rules, permissions, contracts, dependencies, or external systems without Orchestrator routing."
+  - "Do not perform production deployment, external messaging, purchases, credential use, destructive actions, or irreversible migrations without explicit authorization."
+  - "Do not modify any product document, source code, tests, dependencies, migrations, environment or runtime control files."
+validation:
+  commands:
+    - "git diff --check -- evidence/pickup-location-quality-governor-2026-08-31.md"
+  manual:
+    - "Check every material claim against an input document and label inference explicitly."
+    - "Confirm the conclusion does not substitute for final implementation QA."
+  evidence_locations:
+    - "evidence/pickup-location-quality-governor-2026-08-31.md"
+assumptions_and_risks:
+  - "The requirements handoff is complete input, not proof that implementation exists."
+  - "Real AMap key and rural POI coverage remain external evidence and cannot be inferred locally."
+handoff:
+  conclusion: "CHALLENGE"
+  inputs_checked:
+    - "AGENTS.md"
+    - "tasks/TASK-PICKUP-LOCATION-QG-PROBLEM.yaml"
+    - "docs/00-project-context.md"
+    - "docs/01-domain-rules.md"
+    - "docs/02-glossary.md"
+    - "docs/project-status.json"
+    - "docs/04-prd.md"
+    - "docs/06-ux-spec.md"
+    - "docs/08-system-design.md"
+    - "docs/09-api-data-contract.md"
+    - "docs/10-test-plan.md"
+    - "docs/decisions/2026-08-31-pickup-location-source-of-truth.md"
+    - "docs/checklists/problem-quality.md"
+    - "evidence/pickup-location-requirements-handoff-2026-08-31.md"
+    - "evidence/dispatch/TASK-PICKUP-LOCATION-QG-PROBLEM.ready.json"
+  artifacts:
+    - "evidence/pickup-location-quality-governor-2026-08-31.md"
+  evidence:
+    - "evidence/pickup-location-quality-governor-2026-08-31.md"
+  deviations:
+    - "Actual session model/effort is attested from the Orchestrator's explicit spawn configuration (gpt-5.6-sol/high), not independently runtime-verified by a separate tool."
+  downstream_decisions:
+    - "CHALLENGE: do not dispatch an unrestricted implementation package until QG-PL-01 through QG-PL-04 are explicitly resolved in Requirements/Architecture/UX contracts."
+    - "Administrative directory containment may be implemented only as administrative-path validation, not proof of a custom service-area geometry or exact pickup address."
+    - "A provider-neutral adapter and deterministic local fixtures may proceed; real provider selection, credentials, rural coverage, licensing/privacy/rate-limit evidence and production writes remain externally blocked."
+    - "The 50m duplicate rule remains a reversible DEFAULT_ASSUMPTION and prompt-only heuristic; it must not become silent merge/deletion or a production-accuracy claim."
+    - "After contract tightening, Engineering Lead owns a separate implementation package and independent QA remains required."

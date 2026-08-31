@@ -26,8 +26,21 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   page,
   request,
 }) => {
+  await page.route("https://webrd0*.is.autonavi.com/**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "image/png",
+      body: Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL50QAAAABJRU5ErkJggg==",
+        "base64",
+      ),
+    }),
+  );
   const browserFailures: string[] = [];
   let campaignCreateRequests = 0;
+  let pickupPointWrites = 0;
+  let allowExpectedLocationVerificationFailure = false;
+  let allowExpectedPickupDuplicate = false;
   page.on("pageerror", (error) => browserFailures.push(`pageerror: ${error.message}`));
   page.on("request", (request) => {
     if (
@@ -35,6 +48,11 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
       request.url().endsWith("/api/v1/admin/campaigns")
     )
       campaignCreateRequests += 1;
+    if (
+      request.method() === "POST" &&
+      request.url().endsWith("/api/v1/admin/pickup-points")
+    )
+      pickupPointWrites += 1;
   });
   page.on("requestfailed", (request) => {
     const error = request.failure()?.errorText ?? "unknown";
@@ -44,7 +62,15 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
       browserFailures.push(`requestfailed: ${request.url()} ${error}`);
   });
   page.on("response", (response) => {
-    if (response.status() >= 400)
+    if (
+      response.status() >= 400 &&
+      !allowExpectedLocationVerificationFailure &&
+      !(
+        allowExpectedPickupDuplicate &&
+        response.status() === 409 &&
+        response.url().endsWith("/api/v1/admin/pickup-points")
+      )
+    )
       browserFailures.push(`http ${response.status()}: ${response.url()}`);
   });
   const suffix = Date.now().toString();
@@ -160,42 +186,130 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
     await page.locator(".ant-select-item-option").last().click();
   }
   await page.getByLabel("自提点名称").fill(reviewPointName);
-  await page.getByLabel("省", { exact: true }).click();
+  await page.getByLabel("详细地址或地点名称").fill("东城区社区大街 88 号一层");
+  await page.route("**/api/v1/admin/geo/reverse?**", (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({
+        code: "LOCATION_VERIFICATION_UNAVAILABLE",
+        message: "模拟位置服务不可用",
+      }),
+    }),
+  );
+  allowExpectedLocationVerificationFailure = true;
   await page
-    .locator(".ant-select-dropdown:visible")
-    .last()
-    .locator(".ant-select-item-option")
-    .filter({ hasText: /^北京市$/ })
-    .click();
-  await page.getByLabel("市", { exact: true }).click();
+    .getByRole("application", { name: "自提点地图，点击或拖动图钉选择实际位置" })
+    .click({ position: { x: 120, y: 100 } });
+  await expect(page.getByText(/位置核验暂时不可用/)).toBeVisible();
+  await expect(
+    page.locator('.ant-modal:visible button[type="submit"]'),
+  ).toBeDisabled();
+  expect(pickupPointWrites).toBe(0);
+  await page.unroute("**/api/v1/admin/geo/reverse?**");
+  await page.route("**/api/v1/admin/geo/reverse?**", (route) => {
+    const url = new URL(route.request().url());
+    const latitude = Number(url.searchParams.get("latitude"));
+    const longitude = Number(url.searchParams.get("longitude"));
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        data: {
+          title: "东城区社区大街自提点",
+          address: "北京市东城区社区大街 88 号一层",
+          latitude,
+          longitude,
+          provinceName: "北京市",
+          cityName: "北京市",
+          districtName: "东城区",
+          adcode: "110101",
+        },
+      }),
+    });
+  });
+  allowExpectedLocationVerificationFailure = false;
+  await page.getByRole("button", { name: "重试核验" }).click();
+  await expect(page.getByText("已定位，可拖动图钉微调")).toBeVisible();
+  await expect(page.getByText(/地图图钉坐标（只读确认）/)).toBeVisible();
+  await page.locator(".leaflet-tile").first().evaluate((tile) => {
+    tile.dispatchEvent(new Event("error"));
+  });
+  await expect(page.getByText(/地图暂时不可用/)).toBeVisible();
+  await expect(
+    page.locator('.ant-modal:visible button[type="submit"]'),
+  ).toBeDisabled();
+  expect(pickupPointWrites).toBe(0);
+  await page.getByRole("button", { name: "重试地图" }).click();
   await page
-    .locator(".ant-select-dropdown:visible")
-    .last()
-    .locator(".ant-select-item-option")
-    .filter({ hasText: /^北京市$/ })
-    .click();
-  await page.getByLabel("区", { exact: true }).click();
-  await page
-    .locator(".ant-select-dropdown:visible")
-    .last()
-    .locator(".ant-select-item-option")
-    .filter({ hasText: /^东城区$/ })
-    .click();
-  await page.getByLabel("详细地址").fill("东城区社区大街 88 号一层");
+    .getByRole("application", { name: "自提点地图，点击或拖动图钉选择实际位置" })
+    .click({ position: { x: 120, y: 100 } });
+  await expect(page.getByText(/地图暂时不可用/)).toHaveCount(0);
+  await expect(
+    page.locator('.ant-modal:visible button[type="submit"]'),
+  ).toBeEnabled();
   await page.getByLabel("营业时间").fill("每日 08:30–21:00");
   await page.getByLabel("领取提示").fill("请从南门进入并出示领取码");
-  await page.getByLabel("地图经度").fill("116.407526");
-  await page.getByLabel("地图纬度").fill("39.90403");
   await page
     .locator('.ant-modal:visible button[type="submit"]')
     .click();
   await expect(page.getByText(reviewPointName)).toBeVisible();
+  expect(pickupPointWrites).toBe(1);
   await expect(
     page
       .getByRole("row")
       .filter({ hasText: reviewPointName })
       .getByText("未关联负责人"),
   ).toBeVisible();
+
+  const duplicatePointName = `${reviewPointName}（重复复核）`;
+  await page.getByRole("button", { name: "新增自提点" }).click();
+  const duplicateAreaSelect = page.getByLabel("服务区域");
+  if (await duplicateAreaSelect.count()) {
+    await duplicateAreaSelect.click();
+    await page.locator(".ant-select-item-option").last().click();
+  }
+  await page.getByLabel("自提点名称").fill(duplicatePointName);
+  await page.getByLabel("详细地址或地点名称").fill("东城区社区大街 88 号一层");
+  await page.route("**/api/v1/admin/pickup-points", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    const body = route.request().postDataJSON() as {
+      name?: string;
+      confirmDuplicate?: boolean;
+    };
+    if (body.name !== duplicatePointName || body.confirmDuplicate)
+      return route.continue();
+    return route.fulfill({
+      status: 409,
+      contentType: "application/json",
+      body: JSON.stringify({
+        code: "POSSIBLE_DUPLICATE_PICKUP_LOCATION",
+        message: "所选服务区域内存在疑似重复自提点",
+        details: {
+          candidates: [
+            {
+              id: "existing-e2e-point",
+              name: reviewPointName,
+              address: "北京市东城区社区大街 88 号一层",
+              distanceMeters: 0,
+            },
+          ],
+        },
+      }),
+    });
+  });
+  await page
+    .getByRole("application", { name: "自提点地图，点击或拖动图钉选择实际位置" })
+    .click({ position: { x: 120, y: 100 } });
+  await expect(page.getByText("已定位，可拖动图钉微调")).toBeVisible();
+  allowExpectedPickupDuplicate = true;
+  await page.locator('.ant-modal:visible button[type="submit"]').click();
+  const duplicateDialog = page.getByRole("dialog", { name: "发现疑似重复自提点" });
+  await expect(duplicateDialog).toBeVisible();
+  allowExpectedPickupDuplicate = false;
+  await duplicateDialog.getByRole("button", { name: "确认不同，仍保存" }).click();
+  await expect(page.getByText(duplicatePointName)).toBeVisible();
+  expect(pickupPointWrites).toBe(3);
 
   const campaignTitle = `E2E 发布复核 ${suffix}`;
   const dateInput = (hoursFromNow: number) => {

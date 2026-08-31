@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AutoComplete, Input, Typography } from "antd";
+import { AutoComplete, Button, Input, Typography } from "antd";
 import type * as Leaflet from "leaflet";
 import type { Map as LeafletMap, Marker as LeafletMarker } from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -21,6 +21,19 @@ export type LocatedPlace = {
   replaceAddress?: boolean;
 };
 
+export type PickupLocationVerificationState =
+  | "UNCONFIRMED"
+  | "VERIFYING"
+  | "CONFIRMED"
+  | "FAILED";
+
+export function isPickupLocationSubmissionBlocked(
+  requiresLocationConfirmation: boolean,
+  state: PickupLocationVerificationState,
+): boolean {
+  return requiresLocationConfirmation && state !== "CONFIRMED";
+}
+
 export function PickupLocationPicker({
   id,
   active,
@@ -28,8 +41,10 @@ export function PickupLocationPicker({
   onChange,
   latitude,
   longitude,
+  disabled = false,
   searchBias = "",
   onLocated,
+  onVerificationStateChange,
 }: {
   id?: string;
   active: boolean;
@@ -37,8 +52,10 @@ export function PickupLocationPicker({
   onChange?: (address: string) => void;
   latitude?: number;
   longitude?: number;
+  disabled?: boolean;
   searchBias?: string;
   onLocated: (place: LocatedPlace) => void;
+  onVerificationStateChange?: (state: PickupLocationVerificationState) => void;
 }) {
   const mapNode = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletMap | null>(null);
@@ -52,30 +69,39 @@ export function PickupLocationPicker({
   valueRef.current = value;
   const [options, setOptions] = useState<GeoPlace[]>([]);
   const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [mapError, setMapError] = useState<string | null>(null);
+  const [verificationState, setVerificationState] =
+    useState<PickupLocationVerificationState>("UNCONFIRMED");
+  const [searchRetry, setSearchRetry] = useState(0);
+  const [mapRetry, setMapRetry] = useState(0);
   const typingRef = useRef(false);
+  const programmaticAddressRef = useRef<string | null>(null);
   const lastQueryRef = useRef("");
   const lastBiasRef = useRef("");
-  const locatedRef = useRef(false);
-  locatedRef.current = latitude != null && longitude != null;
 
+  const reportVerificationState = (state: PickupLocationVerificationState) => {
+    setVerificationState(state);
+    onVerificationStateChange?.(state);
+  };
   const commitCoords = (place: LocatedPlace) => {
     onLocatedRef.current(place);
   };
   const applyPlace = (place: GeoPlace, replaceAddress: boolean) => {
-    if (replaceAddress) {
-      typingRef.current = false;
-      const address = resolvePickupAddress({
-        reverseAddress: place.address,
-        ...(valueRef.current ? { typed: valueRef.current } : {}),
-      });
-      if (address) onChangeRef.current?.(address);
-    }
+    const address = replaceAddress
+      ? resolvePickupAddress({
+          reverseAddress: place.address,
+          ...(valueRef.current ? { typed: valueRef.current } : {}),
+        })
+      : undefined;
+    typingRef.current = false;
+    programmaticAddressRef.current = address ?? null;
     commitCoords({
       latitude: place.latitude,
       longitude: place.longitude,
       replaceAddress,
       ...(place.title ? { title: place.title } : {}),
-      ...(place.address ? { address: place.address } : {}),
+      ...(address ? { address } : {}),
       ...(place.provinceName ? { provinceName: place.provinceName } : {}),
       ...(place.cityName ? { cityName: place.cityName } : {}),
       ...(place.districtName ? { districtName: place.districtName } : {}),
@@ -83,8 +109,29 @@ export function PickupLocationPicker({
     });
   };
 
+  const reverseAt = (latitude: number, longitude: number) => {
+    setMapError(null);
+    reportVerificationState("VERIFYING");
+    void api
+      .reversePlace(latitude, longitude)
+      .then((place) => {
+        if (!place) {
+          setMapError("该位置无法映射到行政目录，请移动图钉后重试");
+          reportVerificationState("FAILED");
+          return;
+        }
+        applyPlace(place, true);
+        setMapError(null);
+        reportVerificationState("CONFIRMED");
+      })
+      .catch(() => {
+        setMapError("位置核验暂时不可用，已保留图钉和输入，可重试或取消");
+        reportVerificationState("FAILED");
+      });
+  };
+
   useEffect(() => {
-    if (!active || !mapNode.current || mapRef.current) return;
+    if (!active || disabled || !mapNode.current || mapRef.current) return;
     let cancelled = false;
     void import("leaflet").then((mod) => {
       if (cancelled || !mapNode.current || mapRef.current) return;
@@ -96,7 +143,7 @@ export function PickupLocationPicker({
         attributionControl: true,
       }).setView(defaultCenter, 5);
       L.control.zoom({ position: "bottomright" }).addTo(map);
-      L.tileLayer(
+      const tiles = L.tileLayer(
         "https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}",
         {
           subdomains: "1234",
@@ -104,22 +151,24 @@ export function PickupLocationPicker({
           attribution: "&copy; 高德地图",
         },
       ).addTo(map);
+      tiles.on("tileerror", () => {
+        setMapError("地图暂时不可用，已保留本次填写内容。请重试或取消。");
+        reportVerificationState("FAILED");
+      });
       const dropAt = (latitude: number, longitude: number) => {
         const next = { latitude: round6(latitude), longitude: round6(longitude) };
         commitCoords(next);
-        void api
-          .reversePlace(next.latitude, next.longitude)
-          .then((place) => {
-            if (!place) return;
-            applyPlace(place, true);
-          })
-          .catch(() => undefined);
+        reverseAt(next.latitude, next.longitude);
       };
       map.on("click", (event: { latlng: { lat: number; lng: number } }) => {
         dropAt(event.latlng.lat, event.latlng.lng);
       });
       mapRef.current = map;
       map.invalidateSize();
+    }).catch(() => {
+      if (cancelled) return;
+      setMapError("地图暂时不可用，已保留本次填写内容。请重试或取消。");
+      reportVerificationState("FAILED");
     });
     return () => {
       cancelled = true;
@@ -127,12 +176,12 @@ export function PickupLocationPicker({
       mapRef.current = null;
       markerRef.current = null;
     };
-  }, [active]);
+  }, [active, disabled, mapRetry]);
 
   useEffect(() => {
     const map = mapRef.current;
     const L = leafletRef.current;
-    if (!map || !L || !active) return;
+    if (!map || !L || !active || disabled) return;
     map.invalidateSize();
     if (
       latitude == null ||
@@ -158,13 +207,7 @@ export function PickupLocationPicker({
           longitude: round6(latlng.lng),
         };
         commitCoords(dropped);
-        void api
-          .reversePlace(dropped.latitude, dropped.longitude)
-          .then((place) => {
-            if (!place) return;
-            applyPlace(place, true);
-          })
-          .catch(() => undefined);
+        reverseAt(dropped.latitude, dropped.longitude);
       });
       markerRef.current = marker;
       map.setView(next, Math.max(map.getZoom(), 15));
@@ -172,9 +215,14 @@ export function PickupLocationPicker({
     }
     markerRef.current.setLatLng(next);
     if (!map.getBounds().contains(next)) map.panTo(next);
-  }, [active, latitude, longitude]);
+  }, [active, disabled, latitude, longitude]);
 
   useEffect(() => {
+    if (disabled) {
+      setOptions([]);
+      setSearchError(null);
+      return;
+    }
     const query = pickupSearchQuery(searchBias, value ?? "");
     if (query.length < 2) {
       setOptions([]);
@@ -184,33 +232,31 @@ export function PickupLocationPicker({
     // user geocoding request. Avoid probing an external provider for a bare
     // province/city prefix; the detail address is searched only after the
     // operator actually types it (or selects a map location).
-    if (!typingRef.current && query === searchBias.replace(/\s/g, "")) {
+    if (!typingRef.current) {
       setOptions([]);
       return;
     }
     const biasChanged = searchBias !== lastBiasRef.current;
     if (query === lastQueryRef.current && !biasChanged) return;
-    const fromTyping = typingRef.current;
     const timer = window.setTimeout(() => {
       setSearching(true);
+      setSearchError(null);
       lastQueryRef.current = query;
       lastBiasRef.current = searchBias;
       void api
         .searchPlaces(query)
         .then((places) => {
           setOptions(places);
-          const first = places[0];
-          if (
-            first &&
-            (fromTyping || biasChanged || !locatedRef.current)
-          )
-            applyPlace(first, false);
         })
-        .catch(() => setOptions([]))
+        .catch(() => {
+          setOptions([]);
+          setSearchError("地点搜索暂时不可用，已保留本次输入。可重试或改用地图选点。");
+          reportVerificationState("FAILED");
+        })
         .finally(() => setSearching(false));
     }, 350);
     return () => window.clearTimeout(timer);
-  }, [value, searchBias]);
+  }, [value, searchBias, disabled, searchRetry]);
 
   const located = latitude != null && longitude != null;
 
@@ -228,24 +274,39 @@ export function PickupLocationPicker({
           ),
         }))}
         filterOption={false}
+        disabled={disabled}
         onSearch={(text) => {
+          // Ant Design may emit onSearch when the controlled address is
+          // replaced after a successful reverse lookup. That is a form
+          // synchronization event, not new operator input, so it must not
+          // invalidate the verification that produced the address.
+          if (programmaticAddressRef.current === text) {
+            programmaticAddressRef.current = null;
+            return;
+          }
           typingRef.current = true;
+          reportVerificationState("UNCONFIRMED");
           onChange?.(text);
         }}
         onSelect={(selected) => {
           const place = options.find((item) => item.address === selected);
           if (!place) return;
           typingRef.current = false;
-          onChange?.(place.address);
-          applyPlace(place, true);
+          commitCoords({
+            latitude: place.latitude,
+            longitude: place.longitude,
+            ...(place.title ? { title: place.title } : {}),
+            ...(place.address ? { address: place.address } : {}),
+          });
+          reverseAt(place.latitude, place.longitude);
           setOptions([]);
         }}
         style={{ width: "100%" }}
       >
-        <Input
+          <Input
           {...(id ? { id } : {})}
-          allowClear
-          placeholder="如：朝阳北路101号大悦城B1层"
+            allowClear
+          placeholder={disabled ? "请先选择服务区域" : "如：朝阳北路101号大悦城B1层"}
         />
       </AutoComplete>
       <div className="pickup-map-wrap">
@@ -253,7 +314,7 @@ export function PickupLocationPicker({
           ref={mapNode}
           className="pickup-map"
           role="application"
-          aria-label="自提点地图"
+          aria-label="自提点地图，点击或拖动图钉选择实际位置"
         />
         <p className="pickup-map-hint">
           {located
@@ -266,8 +327,62 @@ export function PickupLocationPicker({
           ? "正在定位…"
           : located
             ? "已定位，可拖动图钉微调"
-            : "请选择省市区并填写详细地址，或在地图上点选"}
+            : "请选择服务区域并填写详细地址，或在地图上点选"}
       </Typography.Text>
+      <div aria-live="polite">
+        {searchError && (
+          <Typography.Paragraph type="danger">
+            {searchError}{" "}
+            <Button
+              type="link"
+              size="small"
+              onClick={() => {
+                lastQueryRef.current = "";
+                setSearchRetry((value) => value + 1);
+              }}
+            >
+              重试搜索
+            </Button>
+          </Typography.Paragraph>
+        )}
+        {mapError && (
+          <Typography.Paragraph type="danger">
+            {mapError}{" "}
+            {latitude != null && longitude != null && (
+              <Button
+                type="link"
+                size="small"
+                onClick={() => reverseAt(latitude, longitude)}
+              >
+                重试核验
+              </Button>
+            )}
+            <Button
+              type="link"
+              size="small"
+              onClick={() => {
+                setMapError(null);
+                mapRef.current?.remove();
+                mapRef.current = null;
+                markerRef.current = null;
+                reportVerificationState("UNCONFIRMED");
+                setMapRetry((value) => value + 1);
+              }}
+            >
+              重试地图
+            </Button>
+          </Typography.Paragraph>
+          )}
+          {located && verificationState !== "VERIFYING" && (
+            <Button
+              type="link"
+              size="small"
+              onClick={() => reverseAt(latitude!, longitude!)}
+            >
+              重新核验当前位置
+            </Button>
+          )}
+      </div>
     </div>
   );
 }

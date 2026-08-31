@@ -209,6 +209,12 @@ export const createPickupPointSchema = z.object({
     )
     .default(""),
   capacityPerDay: z.int().min(1).max(1_000_000).nullable().default(null),
+  /**
+   * A duplicate is only a review prompt.  The explicit acknowledgement is
+   * intentionally carried on the write request rather than persisted as a
+   * second location fact.
+   */
+  confirmDuplicate: z.boolean().optional().default(false),
 });
 export const updatePickupPointSchema = createPickupPointSchema
   .omit({ serviceAreaId: true })
@@ -227,6 +233,7 @@ export const updatePickupPointSchema = createPickupPointSchema
         "请输入有效的中国大陆手机号",
       )
       .optional(),
+    confirmDuplicate: z.boolean().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: "至少提供一项自提点变更",

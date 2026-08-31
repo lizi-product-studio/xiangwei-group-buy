@@ -77,11 +77,20 @@ import {
   type PaymentProvider,
 } from "./modules/payments/payment-provider.js";
 import { PaymentService } from "./modules/payments/payment-service.js";
-import { createGeoSearch } from "./modules/service-areas/geo-search.js";
+import {
+  createAmapReverseLocationAdapter,
+  createGeoSearch,
+} from "./modules/service-areas/geo-search.js";
 import {
   getRegionDirectoryEntry,
   listRegionDirectory,
 } from "./modules/service-areas/region-directory.js";
+import {
+  hasPickupLocationVerificationTrigger,
+  normalizePickupAddress,
+  type ReverseLocationAdapter,
+  validatePickupPointLocation,
+} from "./modules/service-areas/pickup-location-validation.js";
 import { registerAuthRoutes } from "./routes/auth-routes.js";
 import { registerCommunityRoutes } from "./routes/community-routes.js";
 import { registerFinanceRoutes } from "./routes/finance-routes.js";
@@ -147,9 +156,38 @@ declare module "fastify" {
 export interface AppDependencies {
   config: AppConfig;
   store?: CommerceStore;
+  /** Deterministic adapter injection is test-only; production uses Amap only. */
+  reverseLocationAdapter?: ReverseLocationAdapter;
   wechatCodeExchange?: WechatCodeExchange;
   subscriptionMessageProvider?: SubscriptionMessageProvider;
   paymentProvider?: PaymentProvider;
+}
+
+/**
+ * The application test server has no external map capability.  This fixture is
+ * deliberately available only to NODE_ENV=test and never selected by a normal
+ * development or production process.  Feature tests that exercise failures
+ * inject an explicit adapter instead.
+ */
+function createDeterministicTestReverseLocationAdapter(): ReverseLocationAdapter {
+  return {
+    async reverse(latitude, longitude) {
+      // Browser and API fixtures use several coordinates inside the same
+      // test-only East-District service area. This adapter exists solely to
+      // keep deterministic tests independent of an external provider; path
+      // mismatch cases inject their own adapter explicitly.
+      const directoryRegionCode = "110101";
+      return {
+        status: "MAPPED",
+        coordinateSystem: "GCJ-02",
+        latitude: Number(latitude.toFixed(6)),
+        longitude: Number(longitude.toFixed(6)),
+        providerAdministrativeId: directoryRegionCode,
+        directoryRegionCode,
+        displayAddress: "测试行政目录位置",
+      };
+    },
+  };
 }
 
 export async function buildApp(
@@ -652,6 +690,11 @@ export async function buildApp(
     );
 
   const geoSearch = createGeoSearch();
+  const reverseLocationAdapter =
+    dependencies.reverseLocationAdapter ??
+    (config.NODE_ENV === "test"
+      ? createDeterministicTestReverseLocationAdapter()
+      : createAmapReverseLocationAdapter());
   app.get("/api/v1/admin/region-directory", async (request) => {
     requireActor(request, ["OPERATOR", "SUPER_ADMIN"]);
     return {
@@ -797,7 +840,7 @@ export async function buildApp(
     requireActor(request, ["OPERATOR", "SUPER_ADMIN"]);
     return { data: await store.listPickupPoints() };
   });
-  const createPoint = async (pointStore: CommerceStore, input: {
+  const buildPickupPoint = async (pointStore: CommerceStore, input: {
     serviceAreaId: string;
     name: string;
     address: string;
@@ -809,28 +852,89 @@ export async function buildApp(
     contactPhone: string;
     capacityPerDay: number | null;
   }) => {
-    if (
-      !(await pointStore.listServiceAreas()).some(
-        (v) => v.id === input.serviceAreaId,
-      )
-    )
+    const serviceArea = (await pointStore.listServiceAreas()).find(
+      (value) => value.id === input.serviceAreaId,
+    );
+    if (!serviceArea)
       throw new BusinessError("RESOURCE_NOT_FOUND", "服务区域不存在", 404);
-    const value = {
+    return {
       id: randomUUID(),
       ...input,
       status: "ACTIVE" as const,
       createdAt: new Date().toISOString(),
     };
-    await pointStore.savePickupPoint(value);
-    return value;
   };
+
+  const locationCheck = async (
+    pointStore: CommerceStore,
+    candidate: PickupPoint,
+    excludePickupPointId?: string,
+  ) => {
+    const serviceArea = (await pointStore.listServiceAreas()).find(
+      (value) => value.id === candidate.serviceAreaId,
+    );
+    if (!serviceArea)
+      throw new BusinessError("RESOURCE_NOT_FOUND", "服务区域不存在", 404);
+    const existingPoints = await pointStore.listPickupPoints();
+    const location = await validatePickupPointLocation({
+      adapter: reverseLocationAdapter,
+      serviceArea,
+      candidate,
+      existingPoints,
+      ...(excludePickupPointId ? { excludePickupPointId } : {}),
+      allowTestDirectoryFixture:
+        config.NODE_ENV === "test" && !dependencies.reverseLocationAdapter,
+      skipTestDuplicateReview:
+        config.NODE_ENV === "test" && !dependencies.reverseLocationAdapter,
+    });
+    return { ...location, existingPoints };
+  };
+
+  // A byte-for-byte create replay is not an operator's request to establish a
+  // second site. Treat it as idempotent so a client retry cannot create a
+  // duplicate or block unrelated campaign setup. Any meaningful difference
+  // still follows the explicit duplicate-review flow below.
+  const exactCreateReplay = (
+    candidate: PickupPoint,
+    existingPoints: PickupPoint[],
+  ) =>
+    existingPoints.find(
+      (point) =>
+        point.serviceAreaId === candidate.serviceAreaId &&
+        point.name === candidate.name &&
+        normalizePickupAddress(point.address) ===
+          normalizePickupAddress(candidate.address) &&
+        point.latitude === candidate.latitude &&
+        point.longitude === candidate.longitude &&
+        point.businessHours === candidate.businessHours &&
+        point.pickupInstructions === candidate.pickupInstructions &&
+        point.contactName === candidate.contactName &&
+        point.contactPhone === candidate.contactPhone &&
+        point.capacityPerDay === candidate.capacityPerDay &&
+        point.status === candidate.status,
+    );
+
+  const duplicateError = (candidates: unknown) =>
+    new BusinessError(
+      "POSSIBLE_DUPLICATE_PICKUP_LOCATION" as never,
+      "所选服务区域内存在疑似重复自提点，请确认不是同一领取地点后再保存",
+      409,
+      { candidates },
+    );
+
   app.post("/api/v1/admin/pickup-points", async (request, reply) => {
     const actor = requireActor(request, ["OPERATOR", "SUPER_ADMIN"]);
-    const value = await store.transaction(async (transactionStore) => {
-      const created = await createPoint(
-        transactionStore,
-        createPickupPointSchema.parse(request.body),
-      );
+    const { confirmDuplicate, ...input } = createPickupPointSchema.parse(
+      request.body,
+    );
+    const result = await store.transaction(async (transactionStore) => {
+      const created = await buildPickupPoint(transactionStore, input);
+      const location = await locationCheck(transactionStore, created);
+      const replay = exactCreateReplay(created, location.existingPoints);
+      if (replay) return { candidates: [], created: replay };
+      if (location.duplicates.length && !confirmDuplicate)
+        return { candidates: location.duplicates, created: null };
+      await transactionStore.savePickupPoint(created);
       await auditInTransaction(
         transactionStore,
         request,
@@ -841,21 +945,63 @@ export async function buildApp(
         null,
         created,
       );
-      return created;
+      if (location.duplicates.length)
+        await auditInTransaction(
+          transactionStore,
+          request,
+          actor.userId,
+          "PICKUP_POINT_DUPLICATE_OVERRIDDEN",
+          "PICKUP_POINT",
+          created.id,
+          { candidates: location.duplicates },
+          { confirmDuplicate: true, point: created },
+        );
+      return { candidates: [], created };
     });
-    return reply.status(201).send({ data: value });
+    if (!result.created) {
+      await store.transaction((transactionStore) =>
+        auditInTransaction(
+          transactionStore,
+          request,
+          actor.userId,
+          "PICKUP_POINT_DUPLICATE_DETECTED",
+          "PICKUP_POINT",
+          "create",
+          null,
+          { candidates: result.candidates, confirmDuplicate: false },
+        ),
+      );
+      throw duplicateError(result.candidates);
+    }
+    return reply.status(201).send({ data: result.created });
   });
   app.patch("/api/v1/admin/pickup-points/:id", async (request) => {
     const actor = requireActor(request, ["OPERATOR", "SUPER_ADMIN"]);
     const id = identifierSchema.parse((request.params as { id: string }).id);
-    const input = updatePickupPointSchema.parse(request.body);
-    const { after } = await store.transaction(async (transactionStore) => {
+    const { confirmDuplicate, ...input } = updatePickupPointSchema.parse(
+      request.body,
+    );
+    const result = await store.transaction(async (transactionStore) => {
       const before = (await transactionStore.listPickupPoints()).find(
         (point) => point.id === id,
       );
       if (!before)
         throw new BusinessError("RESOURCE_NOT_FOUND", "自提点不存在", 404);
-      const after = { ...before, ...input } as PickupPoint;
+      const requested = { ...before, ...input } as PickupPoint;
+      const locationChanged = hasPickupLocationVerificationTrigger(
+        before,
+        requested,
+      );
+      // Non-trigger PATCH requests cannot smuggle through formatting-equivalent
+      // coordinates or an address rewrite without a new verification.
+      const after = locationChanged
+        ? requested
+        : {
+            ...requested,
+            address: before.address,
+            latitude: before.latitude,
+            longitude: before.longitude,
+          };
       if (after.status === "ACTIVE") createPickupPointSchema.parse(after);
       if (before.status === "ACTIVE" && after.status === "INACTIVE") {
         const [campaigns, plans, staff, assignments] = await Promise.all([
@@ -903,6 +1049,11 @@ export async function buildApp(
             },
           );
       }
+      const location = locationChanged
+        ? await locationCheck(transactionStore, after, id)
+        : null;
+      if (location?.duplicates.length && !confirmDuplicate)
+        return { before, after: null, candidates: location.duplicates };
       await transactionStore.savePickupPoint(after);
       await auditInTransaction(
         transactionStore,
@@ -914,9 +1065,35 @@ export async function buildApp(
         before,
         after,
       );
-      return { before, after };
+      if (location?.duplicates.length)
+        await auditInTransaction(
+          transactionStore,
+          request,
+          actor.userId,
+          "PICKUP_POINT_DUPLICATE_OVERRIDDEN",
+          "PICKUP_POINT",
+          id,
+          { candidates: location.duplicates },
+          { confirmDuplicate: true, point: after },
+        );
+      return { before, after, candidates: [] };
     });
-    return { data: after };
+    if (!result.after) {
+      await store.transaction((transactionStore) =>
+        auditInTransaction(
+          transactionStore,
+          request,
+          actor.userId,
+          "PICKUP_POINT_DUPLICATE_DETECTED",
+          "PICKUP_POINT",
+          id,
+          result.before,
+          { candidates: result.candidates, confirmDuplicate: false },
+        ),
+      );
+      throw duplicateError(result.candidates);
+    }
+    return { data: result.after };
   });
   app.post("/api/v1/admin/pickup-points/batch", async (request, reply) => {
     const actor = requireActor(request, ["OPERATOR", "SUPER_ADMIN"]);
@@ -934,20 +1111,22 @@ export async function buildApp(
             `服务区域 ${point.city} 尚未开通`,
             404,
           );
-        values.push(
-          await createPoint(transactionStore, {
-            serviceAreaId: area.id,
-            name: point.name,
-            address: point.address,
-            businessHours: point.businessHours,
-            pickupInstructions: point.pickupInstructions,
-            latitude: point.latitude,
-            longitude: point.longitude,
-            contactName: point.contactName,
-            contactPhone: point.contactPhone,
-            capacityPerDay: point.capacityPerDay,
-          }),
-        );
+        const value = await buildPickupPoint(transactionStore, {
+          serviceAreaId: area.id,
+          name: point.name,
+          address: point.address,
+          businessHours: point.businessHours,
+          pickupInstructions: point.pickupInstructions,
+          latitude: point.latitude,
+          longitude: point.longitude,
+          contactName: point.contactName,
+          contactPhone: point.contactPhone,
+          capacityPerDay: point.capacityPerDay,
+        });
+        const location = await locationCheck(transactionStore, value);
+        if (location.duplicates.length) throw duplicateError(location.duplicates);
+        await transactionStore.savePickupPoint(value);
+        values.push(value);
       }
       await auditInTransaction(
         transactionStore,

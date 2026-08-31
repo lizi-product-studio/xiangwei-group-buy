@@ -1,0 +1,22 @@
+{
+  "models": [
+    {
+      "id": "gpt-5.6-luna",
+      "provider": "openai",
+      "capability_tier": "ECONOMY",
+      "reasoning_efforts": ["low", "medium", "high", "xhigh", "max"]
+    },
+    {
+      "id": "gpt-5.6-terra",
+      "provider": "openai",
+      "capability_tier": "ADVANCED",
+      "reasoning_efforts": ["low", "medium", "high", "xhigh", "max", "ultra"]
+    },
+    {
+      "id": "gpt-5.6-sol",
+      "provider": "openai",
+      "capability_tier": "EXPERT",
+      "reasoning_efforts": ["low", "medium", "high", "xhigh", "max", "ultra"]
+    }
+  ]
+}

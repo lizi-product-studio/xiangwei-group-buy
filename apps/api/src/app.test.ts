@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { MemoryStore } from "./modules/core/store.js";
+import type { ReverseLocationAdapter } from "./modules/service-areas/pickup-location-validation.js";
 
 const admin = { "x-demo-user-id": "admin", "x-demo-role": "SUPER_ADMIN" };
 describe("single community application surface", () => {
@@ -59,6 +60,7 @@ describe("single community application surface", () => {
         latitude: 39.9042,
         longitude: 116.4074,
         capacityPerDay: null,
+        confirmDuplicate: true,
       },
     });
     expect(pointWithoutManager.statusCode, pointWithoutManager.body).toBe(201);
@@ -272,5 +274,305 @@ describe("single community application surface", () => {
       code: "RATE_LIMITED",
       message: "请求过于频繁，请稍后再试",
     });
+  });
+
+  it("fails closed without a configured reverse-location adapter and writes nothing", async () => {
+    const store = new MemoryStore(false);
+    let result:
+      | { status: "NOT_CONFIGURED" }
+      | { status: "UNAVAILABLE" }
+      | { status: "UNMAPPABLE" }
+      | {
+          status: "MAPPED";
+          coordinateSystem: "GCJ-02";
+          latitude: number;
+          longitude: number;
+          providerAdministrativeId: string;
+          directoryRegionCode: string;
+          displayAddress: string;
+        } = { status: "NOT_CONFIGURED" };
+    const unavailable: ReverseLocationAdapter = {
+      reverse: async (latitude, longitude) =>
+        result.status === "MAPPED" ? { ...result, latitude, longitude } : result,
+    };
+    app = await buildApp({
+      config: loadConfig({ NODE_ENV: "test" }),
+      store,
+      reverseLocationAdapter: unavailable,
+    });
+    const area = await app.inject({
+      method: "POST",
+      url: "/api/v1/admin/service-areas",
+      headers: admin,
+      payload: { regionCode: "110101" },
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/admin/pickup-points",
+      headers: admin,
+      payload: {
+        serviceAreaId: area.json().data.id,
+        name: "东门提货点",
+        address: "东门服务站 1 号",
+        businessHours: "09:00-20:00",
+        pickupInstructions: "出示领取码",
+        latitude: 39.9042,
+        longitude: 116.4074,
+        contactName: "",
+        contactPhone: "",
+        capacityPerDay: null,
+      },
+    });
+    expect(response.statusCode, response.body).toBe(503);
+    expect(response.json()).toMatchObject({
+      code: "LOCATION_VERIFICATION_NOT_CONFIGURED",
+    });
+    result = { status: "UNMAPPABLE" };
+    const unmappable = await app.inject({
+      method: "POST",
+      url: "/api/v1/admin/pickup-points",
+      headers: admin,
+      payload: {
+        serviceAreaId: area.json().data.id,
+        name: "无法映射的提货点",
+        address: "东门服务站 2 号",
+        businessHours: "09:00-20:00",
+        pickupInstructions: "出示领取码",
+        latitude: 39.9043,
+        longitude: 116.4075,
+        contactName: "",
+        contactPhone: "",
+        capacityPerDay: null,
+      },
+    });
+    expect(unmappable.statusCode, unmappable.body).toBe(422);
+    expect(unmappable.json()).toMatchObject({
+      code: "LOCATION_ADMIN_IDENTIFIER_UNMAPPABLE",
+    });
+    result = {
+      status: "MAPPED",
+      coordinateSystem: "GCJ-02",
+      latitude: 0,
+      longitude: 0,
+      providerAdministrativeId: "110102",
+      directoryRegionCode: "110102",
+      displayAddress: "北京市 / 北京市 / 西城区",
+    };
+    const mismatch = await app.inject({
+      method: "POST",
+      url: "/api/v1/admin/pickup-points",
+      headers: admin,
+      payload: {
+        serviceAreaId: area.json().data.id,
+        name: "跨区的提货点",
+        address: "西城区服务站",
+        businessHours: "09:00-20:00",
+        pickupInstructions: "出示领取码",
+        latitude: 39.9044,
+        longitude: 116.4076,
+        contactName: "",
+        contactPhone: "",
+        capacityPerDay: null,
+      },
+    });
+    expect(mismatch.statusCode, mismatch.body).toBe(409);
+    expect(mismatch.json()).toMatchObject({
+      code: "PICKUP_LOCATION_ADMIN_PATH_MISMATCH",
+    });
+    expect(await store.listPickupPoints()).toEqual([]);
+
+    const inactivePointId = "inactive-point";
+    await store.savePickupPoint({
+      id: inactivePointId,
+      serviceAreaId: area.json().data.id,
+      name: "待重新启用的点位",
+      address: "东门服务站 3 号",
+      businessHours: "09:00-20:00",
+      pickupInstructions: "出示领取码",
+      latitude: 39.9045,
+      longitude: 116.4077,
+      contactName: "",
+      contactPhone: "",
+      status: "INACTIVE",
+      capacityPerDay: null,
+      createdAt: "2026-08-31T00:00:00.000Z",
+    });
+    result = { status: "NOT_CONFIGURED" };
+    const reactivation = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/admin/pickup-points/${inactivePointId}`,
+      headers: admin,
+      payload: { status: "ACTIVE" },
+    });
+    expect(reactivation.statusCode, reactivation.body).toBe(503);
+    expect(
+      (await store.listPickupPoints()).find((point) => point.id === inactivePointId),
+    ).toMatchObject({ status: "INACTIVE" });
+  });
+
+  it("keeps non-location PATCH facts exactly and rejects failed location changes without a write", async () => {
+    const store = new MemoryStore(false);
+    let mode: "MAPPED" | "UNAVAILABLE" = "MAPPED";
+    let calls = 0;
+    const reverse: ReverseLocationAdapter = {
+      reverse: async (latitude, longitude) => {
+        calls += 1;
+        return mode === "UNAVAILABLE"
+          ? { status: "UNAVAILABLE" }
+          : {
+              status: "MAPPED",
+              coordinateSystem: "GCJ-02",
+              latitude,
+              longitude,
+              providerAdministrativeId: "110101",
+              directoryRegionCode: "110101",
+              displayAddress: "北京市 / 北京市 / 东城区",
+            };
+      },
+    };
+    app = await buildApp({
+      config: loadConfig({ NODE_ENV: "test" }),
+      store,
+      reverseLocationAdapter: reverse,
+    });
+    const area = await app.inject({
+      method: "POST",
+      url: "/api/v1/admin/service-areas",
+      headers: admin,
+      payload: { regionCode: "110101" },
+    });
+    const point = await app.inject({
+      method: "POST",
+      url: "/api/v1/admin/pickup-points",
+      headers: admin,
+      payload: {
+        serviceAreaId: area.json().data.id,
+        name: "东门提货点",
+        address: "东门服务站，1号",
+        businessHours: "09:00-20:00",
+        pickupInstructions: "出示领取码",
+        latitude: 39.9042,
+        longitude: 116.4074,
+        contactName: "",
+        contactPhone: "",
+        capacityPerDay: null,
+      },
+    });
+    expect(point.statusCode, point.body).toBe(201);
+    const pointId = point.json().data.id as string;
+    expect(calls).toBe(1);
+
+    const retained = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/admin/pickup-points/${pointId}`,
+      headers: admin,
+      payload: {
+        name: "东门提货点（营业时间更新）",
+        address: "东门服务站,1号",
+      },
+    });
+    expect(retained.statusCode, retained.body).toBe(200);
+    expect(retained.json().data).toMatchObject({
+      address: "东门服务站，1号",
+      latitude: 39.9042,
+      longitude: 116.4074,
+    });
+    expect(calls).toBe(1);
+
+    mode = "UNAVAILABLE";
+    const rejected = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/admin/pickup-points/${pointId}`,
+      headers: admin,
+      payload: { latitude: 39.904202 },
+    });
+    expect(rejected.statusCode, rejected.body).toBe(502);
+    expect(rejected.json()).toMatchObject({
+      code: "LOCATION_VERIFICATION_UNAVAILABLE",
+    });
+    expect((await store.listPickupPoints())[0]).toMatchObject({
+      id: pointId,
+      latitude: 39.9042,
+    });
+  });
+
+  it("requires an explicit duplicate override and excludes the edited point from its own comparison", async () => {
+    const store = new MemoryStore(false);
+    const reverse: ReverseLocationAdapter = {
+      reverse: async (latitude, longitude) => ({
+        status: "MAPPED",
+        coordinateSystem: "GCJ-02",
+        latitude,
+        longitude,
+        providerAdministrativeId: "110101",
+        directoryRegionCode: "110101",
+        displayAddress: "北京市 / 北京市 / 东城区",
+      }),
+    };
+    app = await buildApp({
+      config: loadConfig({ NODE_ENV: "test" }),
+      store,
+      reverseLocationAdapter: reverse,
+    });
+    const area = await app.inject({
+      method: "POST",
+      url: "/api/v1/admin/service-areas",
+      headers: admin,
+      payload: { regionCode: "110101" },
+    });
+    const payload = {
+      serviceAreaId: area.json().data.id,
+      name: "东门提货点",
+      address: "东门服务站 1 号",
+      businessHours: "09:00-20:00",
+      pickupInstructions: "出示领取码",
+      latitude: 39.9042,
+      longitude: 116.4074,
+      contactName: "",
+      contactPhone: "",
+      capacityPerDay: null,
+    };
+    const first = await app.inject({
+      method: "POST",
+      url: "/api/v1/admin/pickup-points",
+      headers: admin,
+      payload,
+    });
+    expect(first.statusCode, first.body).toBe(201);
+    const selfUpdate = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/admin/pickup-points/${first.json().data.id}`,
+      headers: admin,
+      payload: { latitude: 39.904201 },
+    });
+    expect(selfUpdate.statusCode, selfUpdate.body).toBe(200);
+
+    const duplicate = await app.inject({
+      method: "POST",
+      url: "/api/v1/admin/pickup-points",
+      headers: admin,
+      payload: { ...payload, name: "东门提货点二号", address: "东门服务站，1号" },
+    });
+    expect(duplicate.statusCode, duplicate.body).toBe(409);
+    expect(duplicate.json()).toMatchObject({
+      code: "POSSIBLE_DUPLICATE_PICKUP_LOCATION",
+      details: { candidates: [expect.objectContaining({ id: first.json().data.id })] },
+    });
+    expect(await store.listPickupPoints()).toHaveLength(1);
+    expect((await store.listAuditLogs(20)).map((log) => log.action)).toContain(
+      "PICKUP_POINT_DUPLICATE_DETECTED",
+    );
+
+    const overridden = await app.inject({
+      method: "POST",
+      url: "/api/v1/admin/pickup-points",
+      headers: admin,
+      payload: { ...payload, name: "东门提货点二号", confirmDuplicate: true },
+    });
+    expect(overridden.statusCode, overridden.body).toBe(201);
+    expect((await store.listAuditLogs(20)).map((log) => log.action)).toContain(
+      "PICKUP_POINT_DUPLICATE_OVERRIDDEN",
+    );
+
   });
 });

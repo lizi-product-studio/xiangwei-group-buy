@@ -1,14 +1,16 @@
 {
   "active_sessions": [],
   "active_tasks": [],
-  "captured_at": "2026-08-31T03:24:35.304298+00:00",
+  "captured_at": "2026-08-31T08:20:29.716732+00:00",
   "complexity": "Complex",
-  "current_state": "BACKLOG",
-  "input_fingerprint": "4ea54de0f18772e780cedae9896d7f8d073262150255bfa24d1ae740840f1aa0",
+  "current_state": "REWORK_ENGINEERING",
+  "input_fingerprint": "ef1bd0187a32b6ff2a28595ae2c251e60a07b2c0f47308d1c0bd21bcdd4aae15",
   "project": "社区团购",
-  "quota_mode": "economy",
-  "required_now": [],
-  "role_plan_fingerprint": null,
-  "role_plan_status": "NOT_ROUTED",
-  "routing_cycle_id": null
+  "quota_mode": "balanced",
+  "required_now": [
+    "engineering_lead"
+  ],
+  "role_plan_fingerprint": "fa3790802496707aa2f0b45cc88aaf0b165c1b2f635539d32b05e949740b9c94",
+  "role_plan_status": "ROUTED",
+  "routing_cycle_id": "3163ddb78cf6cd40f0efe41bacddaf4910753e77a0592fba1fca0a622a1dc0f3"
 }

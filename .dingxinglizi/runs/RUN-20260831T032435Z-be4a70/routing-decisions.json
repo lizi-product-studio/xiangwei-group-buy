@@ -6,10 +6,57 @@
       "role_plan_fingerprint": null,
       "routing_cycle_id": null,
       "sequence": 1
+    },
+    {
+      "captured_at": "2026-08-31T06:06:14.001619+00:00",
+      "required_now": [
+        "requirements"
+      ],
+      "role_plan_fingerprint": "d01fbccaa4214ed52ca91741e8c8d7fa91f6769ab5e748cb889e13e2237e7e68",
+      "routing_cycle_id": "0361ec2d2ff8b939346a4a4f08325284c0fea431df18d7fefc7cc4ef284eac7b",
+      "sequence": 2
+    },
+    {
+      "captured_at": "2026-08-31T06:16:27.875622+00:00",
+      "required_now": [
+        "quality_governor"
+      ],
+      "role_plan_fingerprint": "43b17b113b4f0a78404e888da9a6697ee1f308be50bb8cbe51505ca1694bd20f",
+      "routing_cycle_id": "0361ec2d2ff8b939346a4a4f08325284c0fea431df18d7fefc7cc4ef284eac7b",
+      "sequence": 4
+    },
+    {
+      "captured_at": "2026-08-31T06:35:37.417514+00:00",
+      "required_now": [
+        "requirements"
+      ],
+      "role_plan_fingerprint": "863dac88100ebc0f74f6c9c0dd2c944e0e895c0b6df1d7c503489d12228bda7a",
+      "routing_cycle_id": "c100e9d04b5569e55dcf567380f359677d26fc84c9191fc9a6ed67b31a3a40b2",
+      "sequence": 7
+    },
+    {
+      "captured_at": "2026-08-31T06:44:07.015423+00:00",
+      "required_now": [
+        "requirements"
+      ],
+      "role_plan_fingerprint": "679b1aa5cec64bc3d312418bca54b8a9eccc5b760cb2f00b1e38e7ab16f27f55",
+      "routing_cycle_id": "06a5c2b5c3b9d987ba2e0242392ea5ee2c9880ee841e30ab236d018ce3401cad",
+      "sequence": 8
+    },
+    {
+      "captured_at": "2026-08-31T07:00:24.903358+00:00",
+      "required_now": [
+        "engineering_lead"
+      ],
+      "role_plan_fingerprint": "fa3790802496707aa2f0b45cc88aaf0b165c1b2f635539d32b05e949740b9c94",
+      "routing_cycle_id": "3163ddb78cf6cd40f0efe41bacddaf4910753e77a0592fba1fca0a622a1dc0f3",
+      "sequence": 9
     }
   ],
-  "required_now": [],
-  "role_plan_fingerprint": null,
-  "routing_cycle_id": null,
+  "required_now": [
+    "engineering_lead"
+  ],
+  "role_plan_fingerprint": "fa3790802496707aa2f0b45cc88aaf0b165c1b2f635539d32b05e949740b9c94",
+  "routing_cycle_id": "3163ddb78cf6cd40f0efe41bacddaf4910753e77a0592fba1fca0a622a1dc0f3",
   "schema_version": 1
 }

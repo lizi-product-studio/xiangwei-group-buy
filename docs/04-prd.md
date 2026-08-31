@@ -1,7 +1,7 @@
 ---
 title: "社区团购 — Product Requirements"
 status: APPROVED
-version: 1.0.0
+version: 1.2.0
 last_updated: "2026-08-31"
 owner: requirements
 source_of_truth: project-document-set
@@ -33,6 +33,8 @@ source_of_truth: project-document-set
 | REQ-012 | P1 | USER/隐私 | 用户可查看自己的区域意向，并提交更正/撤回；保留例外须说明并审计 | 落实最小数据权利 | DR-013 | FEAT-PRIVACY | AC-PRIVACY-01 | CONFIRMED |
 | REQ-013 | P0 | 员工权限 | 状态、角色或点位变化使旧会话立即失效；后端每次敏感操作复验 | 限制内部越权 | DR-015 | FEAT-ADMIN-AUTH | AC-AUTH-01 | CONFIRMED |
 | REQ-014 | P0 | 生产 | 空库不写演示数据；MySQL/Redis/HTTPS/真实微信配置缺失时拒启动 | 防 mock/伪数据进入生产 | DR-016 | FEAT-DEPLOY | AC-DEPLOY-01 | CONFIRMED |
+| REQ-015 | P1 | OPERATOR/SUPER_ADMIN/自提点定位 | 新建按“服务区域→地址/POI→地图确认/微调→保存”完成。仅校验坐标逆编码的行政目录节点与服务区域节点的路径相容；地址、地图或浏览器字段不得自行改行政归属。它不证明实际配送几何边界、门牌或可达性 | 降低行政归属冲突和跨行政路径配置风险；不夸大为地点正确性证明 | DR-017–019 | FEAT-PICKUP-LOCATION | AC-PICKUP-LOC-01–05/08 | CONFIRMED（单一行政链方向）；单节点语义为 DEFAULT_ASSUMPTION |
+| REQ-016 | P1 | OPERATOR/SUPER_ADMIN/既有点位 | 无持久核验状态；只在新建、地址/坐标变更或 INACTIVE→ACTIVE 当场核验。其他编辑原样保留。疑似重复提示可明确覆写，不自动合并或删除 | 不以提供方不可用或不可证明的历史状态破坏既有履约事实，同时减少重复配置 | DR-019/020 | FEAT-PICKUP-LOCATION | AC-PICKUP-LOC-06/07 | CONFIRMED（无状态触发方向）；50 米阈值为 DEFAULT_ASSUMPTION |
 
 ## Non-functional requirements
 
@@ -54,3 +56,5 @@ source_of_truth: project-document-set
 | RISK-003 | 单行聚合存储全局锁 | 首发单副本受控规模；采集性能基线；2.0 行级拆分 | OPEN_GUARDRAIL |
 | RISK-004 | 多实例周期 worker | 首发副本数固定 1；扩容前独立 worker/租约/告警 | OPEN_GUARDRAIL |
 | RISK-005 | 用户注销与法定留存规则未批准 | 不宣称自助注销；保留人工数据权利请求 | BLOCKING_FOR_ACCOUNT_DELETION_ONLY |
+| RISK-006 | 生产地点提供方 Key 与乡镇覆盖质量尚无证据 | 本轮仅冻结可恢复、安全拒绝的本地契约；真实预发布抽样验证后再作为发布证据 | BLOCKING_EXTERNAL（不阻塞需求冻结） |
+| RISK-007 | 行政目录相容不等于实际业务配送几何边界或具体门牌正确 | 本轮只使用行政路径措辞；若 ServiceArea 不是单一目录节点，停止实现并另行决策 | BLOCKING_UNKNOWN |

@@ -1,0 +1,16 @@
+{
+  "schema_version": 2,
+  "status": "READY",
+  "run_id": "RUN-20260831T032435Z-be4a70",
+  "task_id": "TASK-PICKUP-LOCATION-REQ-REPAIR",
+  "owner": "requirements",
+  "stage": "REWORK_REQUIREMENTS",
+  "role_plan_fingerprint": "679b1aa5cec64bc3d312418bca54b8a9eccc5b760cb2f00b1e38e7ab16f27f55",
+  "source_input_fingerprint": "3c5ec222b8747c326e48d389d229d115db1adfe32a7daf0884ea27ec3200302a",
+  "execution_route_fingerprint": "068fc65bce305ec1563c28b3c3e2b94292aed678e53d846abc452c30fd8e39bc",
+  "task_dispatch_fingerprint": "70c40948d230c79073612ee45f44981ba0fbd25110a29050e6a44f4391b5b929",
+  "required_capabilities": [],
+  "recorded_at": "2026-08-31T06:45:04.429267+00:00",
+  "recorded_by": "check_execution_plan.py",
+  "receipt_fingerprint": "d40ec262c87880626b9e7b7469ce2db972ee80cdfee3cf411d131f02745b04f2"
+}

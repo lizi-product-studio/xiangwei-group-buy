@@ -1,7 +1,7 @@
 ---
 title: "社区团购 — Test and Acceptance Plan"
 status: IN_REVIEW
-version: 1.0.0
+version: 1.2.1
 last_updated: "2026-08-31"
 owner: qa
 source_of_truth: project-document-set
@@ -27,6 +27,14 @@ source_of_truth: project-document-set
 | AC-PRIVACY-01 | REQ-012, FEAT-PRIVACY | USER owner | own/cross-user records | list/correct/withdraw | masked own; other owner 404; audit | `p1c-governance.api.test.ts` + mini UI | QA | PASS_LOCAL_POLICY_BLOCKED |
 | AC-AUTH-01 | REQ-013, FEAT-ADMIN-AUTH | all roles | staff/scope changes | old/new requests run | default/scoped pages and old session invalidation | staff/API/browser E2E | QA | PASS_LOCAL |
 | AC-DEPLOY-01 | REQ-014, FEAT-DEPLOY | system/ops | empty baseline/config | migrate/start/reconcile | no demo; fail-closed; cross-pool/Redis lease | CI/integration tests; current run pending | QA | BLOCKED_ENVIRONMENT |
+| AC-PICKUP-LOC-01 | REQ-015, DR-017 | OPERATOR/SUPER_ADMIN | service areas map to one directory node | open new-point modal and select a service area | readonly path derives from `serviceAreaId`; no independent province/city/district truth exists; test labels result only as administrative-path compatibility | browser + API contract test | QA | PLANNED |
+| AC-PICKUP-LOC-02 | REQ-015, DR-018 | OPERATOR/SUPER_ADMIN | deterministic `MAPPED` adapter fixture inside selected administrative path | type address, explicitly select POI and confirm map | GCJ-02 output, raw provider id and normalized directory node are handled at adapter boundary; UI needs no raw coordinates; no claim of physical service-boundary correctness | adapter unit + browser E2E + API test | QA | PLANNED |
+| AC-PICKUP-LOC-03 | REQ-015, DR-018 | OPERATOR/SUPER_ADMIN | POI search returns empty and a map/adapter fixture maps a rural pin | select incomplete rural address then point map | input remains; clear fallback is offered; only mapped, administratively compatible output permits save | browser E2E + adapter unit test | QA | PLANNED |
+| AC-PICKUP-LOC-04 | REQ-015, DR-018 | OPERATOR/SUPER_ADMIN | adapter yields NOT_CONFIGURED, UNAVAILABLE or UNMAPPABLE | attempt create/change/activate | 503/502/422 differs from empty search; current form session retained; zero location writes and no OSM/public fallback | API error/zero-write + browser E2E | QA | PLANNED |
+| AC-PICKUP-LOC-05 | REQ-015, DR-018 | OPERATOR/SUPER_ADMIN | mapped pin has incompatible administrative path | submit create or location-changing patch | API returns `PICKUP_LOCATION_ADMIN_PATH_MISMATCH/409`; UI preserves state and guides correction; test makes no geometric-boundary assertion | API integration + browser E2E | QA | PLANNED |
+| AC-PICKUP-LOC-06 | REQ-016, DR-019 | OPERATOR/SUPER_ADMIN | records have no persisted verification marker; fixtures include NFKC/whitespace/Chinese-or-ASCII-punctuation-equivalent address variants, six-decimal-equivalent GCJ-02 coordinate jitter, and a value just across the six-decimal comparison boundary | PATCH address, one coordinate, INACTIVE→ACTIVE, ACTIVE→ACTIVE, ACTIVE→INACTIVE and non-location fields | address/coordinate/INACTIVE→ACTIVE triggers call adapter and fail closed; ACTIVE→ACTIVE, ACTIVE→INACTIVE and non-location patches skip adapter and retain exact address/coords. Normalized-equivalent address or six-decimal-equivalent coordinate input is ignored and persisted original values remain byte/number-identical; just-across-boundary coordinate triggers verification and failure produces zero position write | API regression + browser E2E | QA | PLANNED |
+| AC-PICKUP-LOC-07 | REQ-016, DR-020 | OPERATOR/SUPER_ADMIN | same-area candidate, same point PATCH, Chinese/full-width punctuation and spacing fixtures | create/change then confirm duplicate | self is excluded; NFKC normalization and Haversine GCJ-02 distance are deterministic; first candidate and accepted override audit; never auto-merge/delete | unit + API + browser E2E | QA | PLANNED |
+| AC-PICKUP-LOC-08 | REQ-015, DR-018 | OPERATOR/SUPER_ADMIN | map tiles or click/drag interaction fails | open form or attempt map confirmation | distinct accessible map-unavailable state preserves only current form session; create/change/activate is disabled and writes zero data | browser E2E + API zero-write test | QA | PLANNED |
 
 ## Test levels and environments
 
@@ -64,6 +72,7 @@ source_of_truth: project-document-set
 - Required final suites: `pnpm check`, `pnpm test:e2e`, `git diff --check`.
 - Required integration: MySQL 8.4/Redis 7.4 migration and integration suite.
 - Required rendered/manual: notification governance fields, multi-item after-sale, own interest correction/withdraw, narrow/mobile viewports.
+- Required location tests before accepting REQ-015/016: deterministic provider-neutral adapter fixtures for GCJ-02/WGS84 conversion, raw-id→directory mapping, `MAPPED/NOT_CONFIGURED/UNAVAILABLE/UNMAPPABLE`, administrative path compatibility (not geometry), POI explicit selection/no automatic first result, search/map/reverse failures, current-session-only recovery, no-write fail-closed, PATCH trigger matrix, legacy preservation, duplicate self exclusion/NFKC punctuation/space normalization/Haversine/audit and keyboard/screen-reader location status. Network calls or a production Key are not test prerequisites.
 - Required external: real WeChat and production-like backup/restore; local mock cannot close them.
 
 ## Defects and risks
@@ -75,6 +84,8 @@ source_of_truth: project-document-set
 | ENV-001 | P1 release | MySQL 8.4/Redis 7.4 unavailable locally | integration suite no-skip | BLOCKED_ENVIRONMENT |
 | ARCH-001 | P1 scale | single JSON global lock | performance baseline + accepted pilot guardrail; normalize before scale | OPEN_GUARDRAIL |
 | ARCH-002 | P1 scale | scheduler runs in API | Redis ownership implemented; real integration, lease-expiry/worker observability and independent-worker extraction before scale | PARTIAL_GUARDRAIL |
+| LOC-001 | P1 release evidence | real map/POI coverage for the intended rural service area is unproven | pre-release samples cover search, map pin, reverse, cross-area refusal and customer-visible address | BLOCKED_EXTERNAL |
+| LOC-002 | P1 implementation boundary | administrative path compatibility does not prove actual delivery boundary, correct doorplate or reachability | keep residual-risk wording; stop and re-route if ServiceArea is custom/overlapping/non-directory-aligned | BLOCKING_UNKNOWN |
 
 ## Independent QA conclusion
 

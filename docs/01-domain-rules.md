@@ -1,7 +1,7 @@
 ---
 title: "社区团购 — Domain Rules"
 status: APPROVED
-version: 1.0.0
+version: 1.2.0
 last_updated: "2026-08-31"
 owner: requirements
 source_of_truth: project-document-set
@@ -34,6 +34,10 @@ source_of_truth: project-document-set
 | DR-014 | 顺延 | 团期最多顺延一次；第一次未成团可重开，第二次未成团必须取消并为已付款订单退款 | 顺延必须通知；通知失败进入 DR-012 | CONFIRMED | 客户端“延期一次”承诺 |
 | DR-015 | 员工权限 | 每次敏感操作校验角色、状态和点位范围；停用/换角色/换点位使旧会话立即失效 | UI 隐藏不代替后端鉴权 | CONFIRMED | PRD |
 | DR-016 | 生产门禁 | 生产必须 MySQL 8.4、Redis 7.4、HTTPS、真实微信登录/支付；缺配置拒启动 | 真实外部验收不能以 mock 代替 | CONFIRMED | README/go-live |
+| DR-017 | OPERATOR/SUPER_ADMIN 创建或变更自提点位置 | `serviceAreaId → ServiceArea.regionCode → 行政区目录路径` 是唯一**行政目录归属**事实链。省/市/区只读展示该链，不得作为第二个可提交、可独立修改或可与 `serviceAreaId` 冲突的事实源。本轮仅把每个 ServiceArea 当作一个行政目录节点校验路径相容，**不证明也不承诺**实际配送几何边界、门牌正确性或可通行性 | 若业务 ServiceArea 是自定义、重叠或非目录对齐范围，此契约不足，必须停止实现路由并回到需求/架构决策；不得自行扩成地理围栏 | CONFIRMED（单一行政链方向）/DEFAULT_ASSUMPTION（本轮单节点语义）/BLOCKING_UNKNOWN（实际业务边界） | TASK-PICKUP-LOCATION-REQ-REPAIR；QG-PL-01 |
+| DR-018 | 新建、位置变更或从 INACTIVE 启用自提点 | 地址/POI 是首选输入，地图用于确认、微调及 POI 无结果兜底。服务端当场以提供方无关的逆地理适配器输出，校验坐标的**规范化行政目录节点**与服务区域节点路径相容；结果只说明“行政路径相容/不相容”，不得称为“已在实际服务区内”。地址文字不决定行政归属 | 未配置获批准适配器、地图不可用、提供方失败或行政标识不可映射时 fail-closed：保留本次表单会话，禁止新建、位置变更或启用写入。运营不直接编辑经纬度；同一路径相容仍保留错图钉、错门牌和不可通行的运营风险 | CONFIRMED（方向）/EVIDENCE_INFERRED（GCJ-02 现状）/BLOCKING_EXTERNAL（真实提供方） | TASK-PICKUP-LOCATION-REQ-REPAIR；QG-PL-01/02/04 |
+| DR-019 | PATCH 编辑既有自提点 | 无持久“已/未核验”状态。本次请求仅在以下事件当场核验：新建；规范化地址改变；以 6 位 GCJ-02 值比较的纬度或经度改变；或状态由 INACTIVE 变 ACTIVE。服务区域不可在 PATCH 改变 | 未触发事件的纯非位置编辑（包括 ACTIVE→ACTIVE、INACTIVE→INACTIVE 及 ACTIVE→INACTIVE）原样保留地址/坐标且不调用逆编码；UI 只能说“本次未变更位置，未重新核验”，不得宣称历史已/待核验。触发事件失败时零位置写入、不得静默换区或丢坐标 | CONFIRMED（无状态触发方向） | TASK-PICKUP-LOCATION-REQ-REPAIR；QG-PL-03 |
+| DR-020 | 在同一服务区域保存候选重复点位 | **DEFAULT_ASSUMPTION**：地址经确定性 NFKC、大小写折叠、空白折叠及中英文逗号/句号/分号/冒号归一后相同，或 GCJ-02 坐标以 Haversine（地球半径 6,371,000 米）计算距离不超过 50 米，即为“疑似重复”。PATCH 必须排除自身 `pickupPointId` | 仅提示，不自动合并/删除。首次候选与明确 `confirmDuplicate: true` 覆写均写审计（actor、请求、点位/候选 ID、匹配原因、距离、确认标记）；真实运营样本可调整或移除该默认值 | DEFAULT_ASSUMPTION | TASK-PICKUP-LOCATION-REQ-REPAIR；QG-PL-05 |
 
 ## Business object invariants
 
@@ -47,6 +51,7 @@ source_of_truth: project-document-set
 | Ledger entry | 借贷金额相等；科目由收入确认事实决定 | 关联订单/退款/操作者 |
 | Notification | outbox 事件与偏好/授权/模板映射可追踪 | 自动提交预算、人工处理证据 |
 | Service-area interest | 仅本人可读；更正/撤回需审计 | 业务处理和合规保留理由 |
+| PickupPoint location | `serviceAreaId` 通过区域目录确定唯一**行政**归属；`address` 是对消费者展示的单一地址，`latitude`/`longitude` 是 GCJ-02 地图位置。路径相容是写入时事件校验，不是持久位置正确性或业务几何边界证明 | 创建/修改与重复候选/覆写审计；未触发位置事件的历史原值保留 |
 
 ## State machines
 
@@ -90,3 +95,5 @@ source_of_truth: project-document-set
 | Version | Date | Rule IDs | Decision | Summary |
 |---|---|---|---|---|
 | 1.0.0 | 2026-08-31 | DR-001–016 | existing approved product baseline | 将 README/PRD/architecture/go-live 与当前实现收敛为编号规则 |
+| 1.1.0 | 2026-08-31 | DR-017–020 | TASK-PICKUP-LOCATION-REQ | 冻结区域事实源、地图恢复、历史编辑兼容和重复点位提示；不改变消费者定位范围 |
+| 1.2.0 | 2026-08-31 | DR-017–020 | TASK-PICKUP-LOCATION-REQ-REPAIR | 收紧为行政路径相容；明确无状态 PATCH 触发、提供方/地图 fail-closed 和重复算法/审计 |
