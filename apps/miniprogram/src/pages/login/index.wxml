@@ -1,0 +1,30 @@
+<view class="login-page">
+  <view class="login-page__hero">
+    <view class="login-page__mark"><image src="/assets/wechat-white.png" mode="aspectFit" /></view>
+    <text class="login-page__title">微信快捷登录</text>
+    <text class="login-page__subtitle">登录后继续使用{{sourceText}}</text>
+  </view>
+
+  <view class="login-page__card">
+    <text class="login-page__card-title">确认微信身份</text>
+    <text wx:if="{{status !== 'SIGNED_OUT'}}" class="login-page__status">{{statusText}}</text>
+    <text class="login-page__copy">仅使用微信授权确认账号，不获取手机号。订单、取货码和售后信息仅对本人可见。</text>
+    <view wx:if="{{error}}" class="login-page__error" role="alert">{{error}}</view>
+    <button class="primary-button login-page__button" loading="{{status === 'AUTHENTICATING'}}" disabled="{{status === 'AUTHENTICATING'}}" bindtap="login">
+      <image class="login-page__button-icon" src="/assets/wechat-white.png" mode="aspectFit" aria-label="微信" />
+      <text>{{status === 'ERROR' ? '重新登录' : (status === 'AUTHENTICATING' ? '登录中…' : '微信快捷登录')}}</text>
+    </button>
+    <view wx:if="{{demoLoginAvailable}}" class="login-page__dev-zone">
+      <text class="login-page__dev-zone-title">仅本地开发环境</text>
+      <text class="login-page__dev-zone-copy">用于预览认证流程，不是正式账号登录</text>
+      <button class="secondary-button login-page__experience-button" loading="{{status === 'AUTHENTICATING'}}" disabled="{{status === 'AUTHENTICATING'}}" bindtap="experienceLogin">开发体验登录</button>
+    </view>
+    <checkbox-group bindchange="changePrivacy">
+      <label class="login-page__consent"><checkbox value="accepted" checked="{{privacyAccepted}}" color="#547b36" />我已阅读并同意用户服务协议和隐私说明（版本 {{privacyVersion}}）</label>
+    </checkbox-group>
+    <text wx:if="{{privacyError}}" class="login-page__inline-error" role="alert">{{privacyError}}</text>
+    <view class="login-page__links"><text bindtap="openTerms">查看《用户服务协议》</text><text>和</text><text bindtap="openPrivacy">《隐私说明》</text></view>
+  </view>
+
+  <button class="ghost-button login-page__cancel" bindtap="cancel" disabled="{{status === 'AUTHENTICATING'}}">暂不登录，返回</button>
+</view>

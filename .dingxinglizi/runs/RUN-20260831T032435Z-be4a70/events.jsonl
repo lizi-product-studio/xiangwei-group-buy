@@ -1,0 +1,1 @@
+{"event_type":"RUN_CREATED","input_fingerprint":"4ea54de0f18772e780cedae9896d7f8d073262150255bfa24d1ae740840f1aa0","reason_codes":["local-control-plane"],"role_plan_fingerprint":null,"run_id":"RUN-20260831T032435Z-be4a70","sequence":1,"stage_after":"BACKLOG","stage_before":"BACKLOG","status":"OPEN","timestamp":"2026-08-31T03:24:35.304776+00:00"}

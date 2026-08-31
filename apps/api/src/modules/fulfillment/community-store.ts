@@ -1,7 +1,7 @@
 import type {
   Campaign,
   CommunityAllocationDraft,
-  CommunityCampaignItem,
+  CampaignItem,
   CommunityDeliveryConfirmation,
   CommunityPickupWindow,
   DeliveryPlan,
@@ -11,36 +11,67 @@ import type {
   Order,
   PickupCredential,
   PickupPoint,
-  PlatformSalesLine,
-  PlatformSku,
+  NotificationPreference,
+  OrderNotification,
+  OrderLine,
+  CatalogSku,
   ServiceArea,
-} from '../core/types.js';
+} from "../core/types.js";
 
-/** Community delivery and entitlement capabilities, excluding procurement facts. */
+/** Storage capabilities required by community delivery and pickup entitlement. */
 export interface CommunityStore {
   transaction<T>(work: (store: CommunityStore) => Promise<T>): Promise<T>;
   listServiceAreas(): Promise<ServiceArea[]>;
   listPickupPoints(serviceAreaId?: string): Promise<PickupPoint[]>;
-  getPlatformSku(id: string): Promise<PlatformSku | null>;
+  getCatalogSku(id: string): Promise<CatalogSku | null>;
   saveCampaign(campaign: Campaign): Promise<void>;
-  replaceCommunityCampaignItems(campaignId: string, items: CommunityCampaignItem[]): Promise<void>;
+  replaceCampaignItems(
+    campaignId: string,
+    items: CampaignItem[],
+  ): Promise<void>;
   saveDeliveryPlan(value: DeliveryPlan): Promise<void>;
   getDeliveryPlanByCampaign(campaignId: string): Promise<DeliveryPlan | null>;
   getDispatchBatch(id: string): Promise<DispatchBatch | null>;
   saveDispatchBatch(value: DispatchBatch): Promise<void>;
   getCampaignForUpdate(id: string): Promise<Campaign | null>;
-  getCommunityDeliveryConfirmationByBatch(batchId: string): Promise<CommunityDeliveryConfirmation | null>;
-  saveCommunityDeliveryConfirmation(value: CommunityDeliveryConfirmation): Promise<boolean>;
-  listPlatformSalesLinesByCampaignForUpdate(campaignId: string): Promise<PlatformSalesLine[]>;
-  updatePlatformSalesLine(value: PlatformSalesLine): Promise<boolean>;
+  getCommunityDeliveryConfirmationByBatch(
+    batchId: string,
+  ): Promise<CommunityDeliveryConfirmation | null>;
+  saveCommunityDeliveryConfirmation(
+    value: CommunityDeliveryConfirmation,
+  ): Promise<boolean>;
+  listOrderLinesByCampaignForUpdate(campaignId: string): Promise<OrderLine[]>;
+  updateOrderLine(value: OrderLine): Promise<boolean>;
   saveFulfillmentException(value: FulfillmentException): Promise<void>;
-  getFulfillmentExceptionForUpdate(id: string): Promise<FulfillmentException | null>;
+  getFulfillmentExceptionForUpdate(
+    id: string,
+  ): Promise<FulfillmentException | null>;
   saveFulfillmentAllocations(values: FulfillmentAllocation[]): Promise<void>;
-  getCommunityAllocationDraftByDeliveryForUpdate(communityDeliveryId: string): Promise<CommunityAllocationDraft | null>;
-  saveCommunityAllocationDraft(value: CommunityAllocationDraft): Promise<boolean>;
+  getCommunityAllocationDraftByDeliveryForUpdate(
+    communityDeliveryId: string,
+  ): Promise<CommunityAllocationDraft | null>;
+  saveCommunityAllocationDraft(
+    value: CommunityAllocationDraft,
+  ): Promise<boolean>;
   getOrderForUpdate(id: string): Promise<Order | null>;
+  getOrder(id: string): Promise<Order | null>;
+  listOrdersByCampaign(campaignId: string): Promise<Order[]>;
+  getNotificationPreference(
+    userId: string,
+  ): Promise<NotificationPreference | null>;
+  createOrderNotificationIfAbsent(value: OrderNotification): Promise<boolean>;
   saveOrderStatus(order: Order): Promise<void>;
   savePickupCredential(value: PickupCredential): Promise<void>;
   saveCommunityPickupWindow(value: CommunityPickupWindow): Promise<void>;
-  saveAuditLog(value: { id:string; actorId:string; action:string; resourceType:string; resourceId:string; requestId:string; beforeData:unknown; afterData:unknown; createdAt:string }): Promise<void>;
+  saveAuditLog(value: {
+    id: string;
+    actorId: string;
+    action: string;
+    resourceType: string;
+    resourceId: string;
+    requestId: string;
+    beforeData: unknown;
+    afterData: unknown;
+    createdAt: string;
+  }): Promise<void>;
 }

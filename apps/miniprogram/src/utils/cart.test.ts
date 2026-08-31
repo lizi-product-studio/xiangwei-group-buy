@@ -32,4 +32,14 @@ describe('cart pickup binding and checkout idempotency', () => {
     values.set('standardCart', { ...base, pickupPointId: undefined, items: [line] });
     expect(cart.readCart()).toBeNull();
   });
+
+  it('returns the page to a true empty state after its last line is removed', () => {
+    values.clear();
+    cart.addCartLine(base, line);
+    expect(cart.cartCount()).toBe(1);
+    expect(cart.removeCartLine(line.skuId)).toBeNull();
+    expect(cart.readCart()).toBeNull();
+    expect(cart.cartCount()).toBe(0);
+    expect(values.has('standardCart')).toBe(false);
+  });
 });

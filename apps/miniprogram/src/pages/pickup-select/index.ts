@@ -59,6 +59,24 @@ Page({
 
   choosePoint(event:WechatMiniprogram.BaseEvent){const point=this.data.points.find((item)=>item.id===event.currentTarget.dataset.id);if(!point)return;savePickupPointSelection(point);this.setData({selectedId:point.id});void wx.navigateBack();},
 
+  openLocation(event: WechatMiniprogram.BaseEvent) {
+    const point = this.data.points.find((item) => item.id === event.currentTarget.dataset.id);
+    if (point?.latitude == null || point.longitude == null) {
+      void wx.showToast({ title: '该自提点暂未配置导航坐标', icon: 'none' });
+      return;
+    }
+    void wx.openLocation({ latitude: point.latitude, longitude: point.longitude, name: point.name, address: point.address });
+  },
+
+  callPoint(event: WechatMiniprogram.BaseEvent) {
+    const point = this.data.points.find((item) => item.id === event.currentTarget.dataset.id);
+    if (!point?.contactPhone) {
+      void wx.showToast({ title: '该自提点暂未配置联系电话', icon: 'none' });
+      return;
+    }
+    void wx.makePhoneCall({ phoneNumber: point.contactPhone });
+  },
+
   showInterest() {
     void wx.navigateTo({ url: '/pages/interest/index' });
   },

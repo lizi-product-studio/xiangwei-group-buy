@@ -1,0 +1,378 @@
+import { describe, expect, it } from "vitest";
+import { AdminAuthService, createAdminCredential } from "./admin-auth.js";
+import { StaffService } from "./staff-service.js";
+import { MemoryStore } from "../core/store.js";
+
+const password = "correct horse battery staple";
+const bootstrapActor = {
+  userId: "bootstrap-admin",
+  roles: ["SUPER_ADMIN"] as const,
+  authorizationVersion: 1,
+};
+
+async function createBootstrap(store: MemoryStore): Promise<void> {
+  const now = new Date().toISOString();
+  await store.saveUser({
+    id: bootstrapActor.userId,
+    wechatOpenId: null,
+    status: "ACTIVE",
+    createdAt: now,
+  });
+  await store.replaceUserRoles(bootstrapActor.userId, ["SUPER_ADMIN"]);
+  await store.saveInternalStaff({
+    userId: bootstrapActor.userId,
+    staffNo: "BOOTSTRAP-ADMIN",
+    displayName: "受管超管",
+    phone: "13800138000",
+    role: "SUPER_ADMIN",
+    status: "ACTIVE",
+    createdBy: null,
+    activatedAt: now,
+    suspendedAt: null,
+    suspensionReason: null,
+    authorizationVersion: 1,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await store.saveAdminCredential(
+    await createAdminCredential(
+      "bootstrap.admin",
+      bootstrapActor.userId,
+      password,
+      ["SUPER_ADMIN"],
+      false,
+      1,
+    ),
+  );
+}
+
+describe("StaffService lifecycle and authorization revision", () => {
+  it("requires a reason for sensitive changes and revokes the former session", async () => {
+    const store = new MemoryStore();
+    await createBootstrap(store);
+    const staff = new StaffService(store);
+    const auth = new AdminAuthService(store, 3600);
+    const created = await staff.create(
+      {
+        displayName: "客服小李",
+        username: "service.li",
+        phone: "13800138001",
+        role: "CUSTOMER_SERVICE",
+        status: "PENDING_ACTIVATION",
+        pickupPointIds: [],
+      },
+      bootstrapActor,
+      "create-staff",
+    );
+
+    await expect(
+      staff.activate(
+        "service.li",
+        created.initialCredential,
+        password,
+        "activate-staff",
+      ),
+    ).resolves.toMatchObject({ status: "ACTIVE", authorizationVersion: 2 });
+    const session = await auth.login("service.li", password);
+
+    await expect(
+      staff.update(
+        created.staff.userId,
+        { role: "FINANCE" },
+        bootstrapActor,
+        "missing-reason",
+      ),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+
+    await staff.update(
+      created.staff.userId,
+      { role: "FINANCE", reason: "调配财务岗位" },
+      bootstrapActor,
+      "change-role",
+    );
+    await expect(
+      auth.authenticate(`Bearer ${session.accessToken}`),
+    ).resolves.toBeNull();
+    const renewed = await auth.login("service.li", password);
+    expect(renewed).toMatchObject({
+      roles: ["FINANCE"],
+    });
+    await expect(
+      auth.authenticate(`Bearer ${renewed.accessToken}`),
+    ).resolves.toEqual({
+      userId: created.staff.userId,
+      roles: ["FINANCE"],
+      authorizationVersion: 3,
+    });
+    await expect(store.getInternalStaff(created.staff.userId)).resolves.toMatchObject({
+      role: "FINANCE",
+      authorizationVersion: 3,
+    });
+    await expect(
+      store.findAdminCredentialByUserId(created.staff.userId),
+    ).resolves.toMatchObject({
+      roles: ["FINANCE"],
+      authorizationVersion: 3,
+    });
+  });
+
+  it("preserves the authorization revision and session for profile-only or redundant edits", async () => {
+    const store = new MemoryStore();
+    await createBootstrap(store);
+    const staff = new StaffService(store);
+    const auth = new AdminAuthService(store, 3600);
+    const created = await staff.create(
+      {
+        displayName: "客服小陈",
+        username: "service.chen",
+        phone: "13800138004",
+        role: "CUSTOMER_SERVICE",
+        status: "PENDING_ACTIVATION",
+        pickupPointIds: [],
+      },
+      bootstrapActor,
+      "create-profile-staff",
+    );
+    await staff.activate(
+      "service.chen",
+      created.initialCredential,
+      password,
+      "activate-profile-staff",
+    );
+    const session = await auth.login("service.chen", password);
+    const active = await staff.get(created.staff.userId);
+
+    await staff.update(
+      created.staff.userId,
+      { displayName: "客服小陈（白班）", role: "CUSTOMER_SERVICE", pickupPointIds: [] },
+      bootstrapActor,
+      "display-name-only",
+    );
+    await staff.update(
+      created.staff.userId,
+      { phone: "13800138005", role: "CUSTOMER_SERVICE", pickupPointIds: [] },
+      bootstrapActor,
+      "phone-only",
+    );
+    await staff.update(
+      created.staff.userId,
+      { role: "CUSTOMER_SERVICE", pickupPointIds: [] },
+      bootstrapActor,
+      "redundant-permissions",
+    );
+
+    await expect(
+      auth.authenticate(`Bearer ${session.accessToken}`),
+    ).resolves.toEqual({
+      userId: created.staff.userId,
+      roles: ["CUSTOMER_SERVICE"],
+      authorizationVersion: active.authorizationVersion,
+    });
+    await expect(store.getInternalStaff(created.staff.userId)).resolves.toMatchObject({
+      authorizationVersion: active.authorizationVersion,
+      displayName: "客服小陈（白班）",
+      phone: "13800138005",
+    });
+    await expect(
+      store.findAdminCredentialByUserId(created.staff.userId),
+    ).resolves.toMatchObject({ authorizationVersion: active.authorizationVersion });
+  });
+
+  it("keeps credential and staff versions aligned across suspension and restoration", async () => {
+    const store = new MemoryStore();
+    await createBootstrap(store);
+    const staff = new StaffService(store);
+    const auth = new AdminAuthService(store, 3600);
+    const created = await staff.create(
+      {
+        displayName: "运营小何",
+        username: "operator.he",
+        phone: "13800138006",
+        role: "OPERATOR",
+        status: "PENDING_ACTIVATION",
+        pickupPointIds: [],
+      },
+      bootstrapActor,
+      "create-operator",
+    );
+    await staff.activate(
+      "operator.he",
+      created.initialCredential,
+      password,
+      "activate-operator",
+    );
+    const oldSession = await auth.login("operator.he", password);
+    await staff.update(
+      created.staff.userId,
+      { status: "SUSPENDED", reason: "调岗交接" },
+      bootstrapActor,
+      "suspend-operator",
+    );
+    await expect(
+      auth.authenticate(`Bearer ${oldSession.accessToken}`),
+    ).resolves.toBeNull();
+    await staff.update(
+      created.staff.userId,
+      { status: "ACTIVE", reason: "调岗完成" },
+      bootstrapActor,
+      "restore-operator",
+    );
+    const renewed = await auth.login("operator.he", password);
+    const after = await store.getInternalStaff(created.staff.userId);
+    await expect(
+      store.findAdminCredentialByUserId(created.staff.userId),
+    ).resolves.toMatchObject({ authorizationVersion: after!.authorizationVersion });
+    await expect(
+      auth.authenticate(`Bearer ${renewed.accessToken}`),
+    ).resolves.toMatchObject({
+      roles: ["OPERATOR"],
+      authorizationVersion: after!.authorizationVersion,
+    });
+  });
+
+  it("rejects a write whose administrator was revoked after request authentication", async () => {
+    const store = new MemoryStore();
+    await createBootstrap(store);
+    const staff = new StaffService(store);
+    const created = await staff.create(
+      {
+        displayName: "运营小周",
+        username: "operator.zhou",
+        phone: "13800138002",
+        role: "OPERATOR",
+        status: "PENDING_ACTIVATION",
+        pickupPointIds: [],
+      },
+      bootstrapActor,
+      "create-target",
+    );
+    const credential = await store.findAdminCredentialByUserId(
+      bootstrapActor.userId,
+    );
+    await store.saveAdminCredential({
+      ...credential!,
+      roles: ["OPERATOR"],
+      authorizationVersion: 2,
+    });
+    await store.replaceUserRoles(bootstrapActor.userId, ["OPERATOR"]);
+
+    await expect(
+      staff.update(
+        created.staff.userId,
+        { displayName: "不应写入" },
+        bootstrapActor,
+        "stale-admin",
+      ),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(staff.get(created.staff.userId)).resolves.toMatchObject({
+      displayName: "运营小周",
+    });
+  });
+
+  it("invalidates sessions on credential reset and forbids repeated activation", async () => {
+    const store = new MemoryStore();
+    await createBootstrap(store);
+    const staff = new StaffService(store);
+    const auth = new AdminAuthService(store, 3600);
+    const created = await staff.create(
+      {
+        displayName: "财务小王",
+        username: "finance.wang",
+        phone: "13800138003",
+        role: "FINANCE",
+        status: "PENDING_ACTIVATION",
+        pickupPointIds: [],
+      },
+      bootstrapActor,
+      "create-finance",
+    );
+    await staff.activate(
+      "finance.wang",
+      created.initialCredential,
+      password,
+      "activate-finance",
+    );
+    await expect(
+      staff.activate("finance.wang", created.initialCredential, password, "repeat"),
+    ).rejects.toMatchObject({ code: "AUTH_REQUIRED" });
+    const session = await auth.login("finance.wang", password);
+    const reset = await staff.resetCredential(
+      created.staff.userId,
+      "员工遗失凭据",
+      bootstrapActor,
+      "reset-finance",
+    );
+    await expect(auth.authenticate(`Bearer ${session.accessToken}`)).resolves.toBeNull();
+    await expect(
+      auth.login("finance.wang", reset.initialCredential),
+    ).rejects.toMatchObject({
+      code: "ACTIVATION_REQUIRED",
+    });
+    await expect(
+      staff.activate(
+        "finance.wang",
+        reset.initialCredential,
+        "another correct password",
+        "activate-after-reset",
+      ),
+    ).resolves.toMatchObject({ status: "ACTIVE" });
+  });
+
+  it("copies the pickup manager contact onto authorized points", async () => {
+    const store = new MemoryStore();
+    await createBootstrap(store);
+    const now = new Date().toISOString();
+    await store.savePickupPoint({
+      id: "point-east",
+      serviceAreaId: "area-1",
+      name: "东门点",
+      address: "东门服务站 1 号",
+      businessHours: "09:00-20:00",
+      pickupInstructions: "出示领取码",
+      latitude: 39.9042,
+      longitude: 116.4074,
+      contactName: "",
+      contactPhone: "",
+      status: "ACTIVE",
+      capacityPerDay: null,
+      createdAt: now,
+    });
+    const staff = new StaffService(store);
+    await staff.create(
+      {
+        displayName: "核销小周",
+        username: "pickup.zhou",
+        phone: "13800138008",
+        role: "PICKUP_MANAGER",
+        status: "PENDING_ACTIVATION",
+        pickupPointIds: ["point-east"],
+      },
+      bootstrapActor,
+      "create-manager",
+    );
+    expect(await store.listPickupPoints()).toMatchObject([
+      {
+        id: "point-east",
+        contactName: "核销小周",
+        contactPhone: "13800138008",
+      },
+    ]);
+    const manager = (await store.listInternalStaff()).find(
+      (item) => item.displayName === "核销小周",
+    );
+    expect(manager).toBeTruthy();
+    await staff.update(
+      manager!.userId,
+      { displayName: "核销小周改", phone: "13900139008" },
+      bootstrapActor,
+      "update-manager-contact",
+    );
+    expect(await store.listPickupPoints()).toMatchObject([
+      {
+        id: "point-east",
+        contactName: "核销小周改",
+        contactPhone: "13900139008",
+      },
+    ]);
+  });
+});

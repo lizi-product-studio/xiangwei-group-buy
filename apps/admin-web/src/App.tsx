@@ -1,2140 +1,4444 @@
-import { useEffect, useMemo, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  AppstoreOutlined,
-  AuditOutlined,
-  CarOutlined,
-  EnvironmentOutlined,
-  LogoutOutlined,
-  PlusOutlined,
-  WalletOutlined,
-} from "@ant-design/icons";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  App as AntApp,
   Button,
+  Card,
   DatePicker,
+  Descriptions,
   Empty,
   Form,
   Input,
   InputNumber,
+  Layout,
+  Menu,
   Modal,
-  Popconfirm,
-  Radio,
   Select,
-  Skeleton,
+  Space,
+  Statistic,
   Table,
   Tag,
-  message,
+  Typography,
 } from "antd";
-import type { Dayjs } from "dayjs";
+import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import {
   api,
   auth,
   requiresLogin,
   type Campaign,
+  type CatalogSku,
+  type CommunityArrivalRequest,
   type CommunityDelivery,
   type DeliveryPlan,
-  type Merchant,
+  type FulfillmentException,
+  type InternalStaff,
   type Order,
-  type PickupOrderLookup,
-  type PlatformSku,
-  type PurchaseOrder,
-  type OutboundOrder,
-  type Product,
+  type PackingLabel,
+  type PickupLookup,
+  type PickupPoint,
+  type PickupWindow,
   type RegionDirectoryEntry,
   type ServiceArea,
-  type PickupPoint,
-  type ServiceAreaInterest,
-  type AfterSale,
-  type InternalStaff,
-  type OrderNotification,
 } from "./api.ts";
-import { getAdminNavigation, isPointWorkbenchUser, type AdminPage } from "./navigation.ts";
-import { beginPickupRequest, clearPickupRequest, getPendingPickupRequest, isTerminalPickupError, mapPickupRequestItemsToOrder, markPickupRequestConfirmed } from "./pickup-request.ts";
-import { StaffCreateModal, StaffScopeModal, staffRoleOptions, type InternalStaffRole } from './features/staff/StaffModals.tsx';
-import { FinancePage } from './features/finance/FinancePage.tsx';
-import { CommunityCaseQueues } from './features/service/CommunityCaseQueues.tsx';
-import { CommunityLogisticsPage } from './features/community/CommunityLogisticsPage.tsx';
-import { PickupPointWorkbenchPage } from './features/community/PickupPointWorkbenchPage.tsx';
+import {
+  getAdminNavigation,
+  getDefaultAdminPage,
+  isAllowedAdminPage,
+  type AdminPage,
+} from "./navigation.ts";
+import {
+  centsToYuan,
+  validateYuanInput,
+  yuanToCents,
+} from "./money-input.ts";
+import {
+  beginPickupRequest,
+  clearPickupRequest,
+  isTerminalPickupError,
+  markPickupRequestConfirmed,
+  type PendingPickupRequest,
+} from "./pickup-request.ts";
+import { GovernancePage } from "./governance-page.tsx";
+import { AuditPage } from "./audit-page.tsx";
+import { PickupLocationPicker } from "./pickup-location-picker.tsx";
+import { composePickupAddress } from "./pickup-address.ts";
+import {
+  findRegionEntry,
+  listCities,
+  listDistricts,
+  listProvinces,
+  matchRegionFromAddress,
+  matchRegionFromPlace,
+  regionAddressPrefix,
+  regionSearchBias,
+} from "./region-cascade.ts";
+import { displayLabel, STAFF_ROLE_OPTIONS } from "./labels.ts";
+import {
+  adminLoadErrorText,
+  getDeliveryActionLabels,
+  getLogisticsViewState,
+} from "./logistics-ui.ts";
+import {
+  campaignScheduleError,
+  formatValidationDetails,
+} from "./campaign-form.ts";
 
-type Page = AdminPage;
-const money = (cents: number) =>
-  new Intl.NumberFormat("zh-CN", { style: "currency", currency: "CNY" }).format(
-    cents / 100,
-  );
-const dateTime = new Intl.DateTimeFormat("zh-CN", {
-  month: "2-digit",
-  day: "2-digit",
-  hour: "2-digit",
-  minute: "2-digit",
-  hour12: false,
-});
-const statusMeta: Record<string, { label: string; color: string }> = {
-  DRAFT: { label: "草稿", color: "default" },
-  OPEN: { label: "收单中", color: "success" },
-  LOCKED: { label: "已成团", color: "blue" },
-  FULFILLING: { label: "履约中", color: "cyan" },
-  COMPLETED: { label: "已完成", color: "default" },
-  POSTPONED: { label: "已顺延", color: "orange" },
-  CANCELLED: { label: "已取消", color: "error" },
-  PENDING_SITE: { label: "待确认地点", color: "warning" },
-  SITE_CONFIRMED: { label: "地点已确认", color: "processing" },
-  VEHICLE_BOOKED: { label: "已预约车辆", color: "blue" },
-  IN_TRANSIT: { label: "运输中", color: "processing" },
-  ARRIVED: { label: "已到货", color: "success" },
-  PENDING_REVIEW: { label: "待审核", color: "warning" },
-  APPROVED: { label: "已上架", color: "success" },
-  OFF_SHELF: { label: "已下架", color: "default" },
-  DRAFT_PRODUCT: { label: "草稿", color: "default" },
-  ACTIVE: { label: "已启用", color: "success" },
-  SUSPENDED: { label: "已停用", color: "default" },
-  REJECTED: { label: "已驳回", color: "error" },
-  NEW: { label: "待联系", color: "warning" },
-  CONTACTED: { label: "已联系", color: "processing" },
-  CLOSED: { label: "已关闭", color: "default" },
-  SUBMITTED: { label: "待受理", color: "warning" },
-  PROCESSING: { label: "处理中", color: "processing" },
-  RESOLVED: { label: "已解决", color: "success" },
-  PENDING_PAYMENT: { label: "待支付", color: "warning" },
-  PAID_WAITING_CLOSE: { label: "已付款待结团", color: "success" },
-  ALLOCATING: { label: "备货中", color: "processing" },
-  READY_FOR_PICKUP: { label: "待领取", color: "cyan" },
-  PICKED_UP: { label: "已领取", color: "success" },
-  REFUNDING: { label: "退款中", color: "warning" },
-  REFUNDED: { label: "已退款", color: "default" },
-  PENDING_ACTIVATION: { label: "待激活", color: "warning" },
-  SUCCEEDED: { label: "已完成", color: "success" },
-  FAILED: { label: "处理失败", color: "error" },
-  INACTIVE: { label: "已停用", color: "default" },
-  PARTIALLY_PICKED_UP: { label: "部分提货", color: "processing" },
-  REGISTERED: { label: "待受理", color: "warning" },
+const { Header, Sider, Content } = Layout;
+const statusColor = (value: string) =>
+  value.includes("ACTIVE") ||
+  value.includes("OPEN") ||
+  value.includes("SUCCEEDED") ||
+  value.includes("ARRIVED")
+    ? "green"
+    : value.includes("PENDING") ||
+        value.includes("DRAFT") ||
+        value.includes("WAITING")
+      ? "gold"
+      : value.includes("FAILED") ||
+          value.includes("REJECTED") ||
+          value.includes("CANCEL")
+        ? "red"
+        : "blue";
+const Status = ({ value }: { value: string }) => (
+  <Tag color={statusColor(value)}>{displayLabel(value)}</Tag>
+);
+const money = (cents: number) => `¥${centsToYuan(cents)}`;
+const mutationErrorText = (error: unknown): string => {
+  const value = error as Error & {
+    details?: unknown;
+  };
+  const details = value.details;
+  const validationMessage = formatValidationDetails(details);
+  if (validationMessage) return validationMessage;
+  const impact = details as {
+    campaignCount?: number;
+    unfinishedOrderCount?: number;
+    deliveryPlanCount?: number;
+    activeManagerCount?: number;
+  } | null;
+  if (
+    impact &&
+    (impact.campaignCount !== undefined ||
+      impact.unfinishedOrderCount !== undefined ||
+      impact.deliveryPlanCount !== undefined ||
+      impact.activeManagerCount !== undefined)
+  ) {
+    const parts = [
+      impact.campaignCount !== undefined
+        ? `${impact.campaignCount} 个进行中团期`
+        : null,
+      impact.unfinishedOrderCount !== undefined
+        ? `${impact.unfinishedOrderCount} 个未完成订单`
+        : null,
+      impact.deliveryPlanCount !== undefined
+        ? `${impact.deliveryPlanCount} 个进行中配送计划`
+        : null,
+      impact.activeManagerCount !== undefined
+        ? `${impact.activeManagerCount} 个有效点位负责人授权`
+        : null,
+    ].filter((part): part is string => Boolean(part));
+    return `${value.message}（影响：${parts.join("，")}）`;
+  }
+  return value.message || "操作失败";
 };
-const StatusTag = ({ value }: { value: string }) => {
-  const meta = statusMeta[value] ?? { label: "待处理", color: "default" };
-  return <Tag color={meta.color}>{meta.label}</Tag>;
+const priceRule = {
+  validator: (_: unknown, value: unknown) => {
+    const error = validateYuanInput(value);
+    return error ? Promise.reject(new Error(error)) : Promise.resolve();
+  },
 };
-const hasCommunityArrivalDifference = (delivery: CommunityDelivery) => delivery.status === 'ARRIVED' && delivery.arrivalResult === 'EXCEPTION';
-const CommunityDeliveryStatusTag = ({ delivery }: { delivery: CommunityDelivery }) => {
-  if (hasCommunityArrivalDifference(delivery)) return <Tag color="warning">已到货（有差异）</Tag>;
-  return <StatusTag value={delivery.status}/>;
-};
-function PanelTitle({
-  eyebrow,
-  title,
-  action,
-}: {
-  eyebrow: string;
+
+type CampaignDraftValues = {
   title: string;
-  action?: React.ReactNode;
-}) {
-  return (
-    <div className="panel__head">
-      <div>
-        <span className="eyebrow">{eyebrow}</span>
-        <h2>{title}</h2>
-      </div>
-      {action}
-    </div>
-  );
-}
-function StatCard({
-  label,
-  value,
-  note,
-  tone,
-}: {
-  label: string;
-  value: string;
-  note: string;
-  tone: string;
-}) {
-  return (
-    <article className={`stat-card stat-card--${tone}`}>
-      <span className="stat-card__label">{label}</span>
-      <strong>{value}</strong>
-      <small>{note}</small>
-    </article>
-  );
-}
+  serviceAreaId: string;
+  pickupPointId: string;
+  cutoffAt: dayjs.Dayjs;
+  dispatchAt: dayjs.Dayjs;
+  estimatedArrivalStartAt: dayjs.Dayjs;
+  estimatedArrivalEndAt: dayjs.Dayjs;
+  minTotalQuantity: number;
+  failureAction: "CANCEL_AND_REFUND" | "POSTPONE";
+  items: Array<{
+    catalogSkuId: string;
+    expectedQuantity: number;
+    retailPriceYuan: string;
+    sellableQuantity: number;
+  }>;
+};
 
-function Login({ onSuccess }: { onSuccess: () => void }) {
+const failureActionText = (value: CampaignDraftValues["failureAction"]) =>
+  value === "CANCEL_AND_REFUND" ? "取消并原路退款" : "顺延并通知消费者";
+const dateTime = (value: string | dayjs.Dayjs) =>
+  dayjs(value).format("YYYY-MM-DD HH:mm");
+
+function Login({ done }: { done: () => void }) {
+  const { message } = AntApp.useApp();
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [activationUsername,setActivationUsername]=useState<string|null>(null);
+  const [activating, setActivating] = useState(false);
   const submit = async (value: { username: string; password: string }) => {
     setLoading(true);
-    setError("");
     try {
       await api.login(value.username, value.password);
-      onSuccess();
-    } catch (reason) {
-      if((reason as {code?:string})?.code==='ACTIVATION_REQUIRED')setActivationUsername(value.username);
-      setError(
-        reason instanceof Error ? reason.message : "登录失败，请稍后重试",
+      done();
+    } catch (error) {
+      void message.error(error instanceof Error ? error.message : "登录失败");
+    } finally {
+      setLoading(false);
+    }
+  };
+  const activate = async (value: {
+    username: string;
+    initialCredential: string;
+    newPassword: string;
+  }) => {
+    setLoading(true);
+    try {
+      await api.activateStaff(
+        value.username,
+        value.initialCredential,
+        value.newPassword,
+      );
+      void message.success("首次激活成功，已登录");
+      done();
+    } catch (error) {
+      void message.error(
+        error instanceof Error ? error.message : "首次激活失败，请核对一次性凭据",
       );
     } finally {
       setLoading(false);
     }
   };
-  const activate=async(value:{initialCredential:string;newPassword:string})=>{
-    if(!activationUsername)return;
-    setLoading(true);setError("");
-    try{await api.activateStaff(activationUsername,value.initialCredential,value.newPassword);onSuccess();}
-    catch(reason){setError(reason instanceof Error?reason.message:'激活失败，请稍后重试');}
-    finally{setLoading(false);}
-  };
   return (
     <main className="login-page">
-      <section className="login-story">
-        <span className="eyebrow">平台运营入口</span>
-        <h1>
-          按团期组织收单
-          <br />
-          按区域安排集中送达
-        </h1>
-        <p>把今天需要人工确认的地点、车辆和到货任务放在一个工作台处理。</p>
-      </section>
-      <section className="login-card">
-        <h2>{activationUsername?'首次激活账号':'登录运营工作台'}</h2>
-        {error && <Alert type="error" showIcon title={error} />}
-        {activationUsername?<Form layout="vertical" size="large" onFinish={activate}>
-          <Alert type="info" showIcon message="请设置自己的登录密码" description={`账号 ${activationUsername} 需要使用管理员一次性提供的初始凭据完成激活。初始凭据不会再次显示。`} style={{marginBottom:16}}/>
-          <Form.Item label="一次性初始凭据" name="initialCredential" rules={[{required:true,min:12}]}><Input.Password autoComplete="one-time-code" /></Form.Item>
-          <Form.Item label="新密码" name="newPassword" rules={[{required:true,min:12}]}><Input.Password autoComplete="new-password" /></Form.Item>
-          <Button type="primary" htmlType="submit" block loading={loading}>激活并进入工作台</Button>
-          <Button type="link" block onClick={()=>{setActivationUsername(null);setError('');}}>返回登录</Button>
-        </Form>:<Form layout="vertical" size="large" onFinish={submit}>
-          <Form.Item
-            label="管理员账号"
-            name="username"
-            rules={[{ required: true }]}
-          >
+      <Card className="login-card">
+        <Typography.Title level={2}>社区团购运营后台</Typography.Title>
+        <Typography.Paragraph type="secondary">
+          运营、客服、财务与点位负责人使用各自账号登录。
+        </Typography.Paragraph>
+        {activating ? (
+          <Form layout="vertical" onFinish={(value) => void activate(value)}>
+            <Alert
+              type="info"
+              showIcon
+              message="首次激活"
+              description="使用管理员一次性展示的初始凭据设置新密码。已激活或过期的凭据不能重复使用。"
+            />
+            <Form.Item name="username" label="账号" rules={[{ required: true }]}>
+              <Input autoComplete="username" />
+            </Form.Item>
+            <Form.Item
+              name="initialCredential"
+              label="一次性初始凭据"
+              rules={[{ required: true, min: 12 }]}
+            >
+              <Input.Password autoComplete="one-time-code" />
+            </Form.Item>
+            <Form.Item
+              name="newPassword"
+              label="新密码"
+              rules={[{ required: true, min: 12 }]}
+            >
+              <Input.Password autoComplete="new-password" />
+            </Form.Item>
+            <Space direction="vertical" style={{ width: "100%" }}>
+              <Button type="primary" htmlType="submit" block loading={loading}>
+                完成首次激活
+              </Button>
+              <Button block onClick={() => setActivating(false)}>
+                返回登录
+              </Button>
+            </Space>
+          </Form>
+        ) : (
+        <Form layout="vertical" onFinish={(value) => void submit(value)}>
+          <Form.Item name="username" label="账号" rules={[{ required: true }]}>
             <Input autoComplete="username" />
           </Form.Item>
           <Form.Item
-            label="密码"
             name="password"
+            label="密码"
             rules={[{ required: true, min: 12 }]}
           >
             <Input.Password autoComplete="current-password" />
           </Form.Item>
           <Button type="primary" htmlType="submit" block loading={loading}>
-            进入工作台
+            登录
           </Button>
-        </Form>}
-      </section>
+          <Button type="link" block onClick={() => setActivating(true)}>
+            首次激活账号
+          </Button>
+        </Form>
+        )}
+      </Card>
     </main>
   );
 }
 
-interface CampaignValues {
-  title: string;
-  serviceAreaId: string;
-  cutoffAt: Dayjs;
-  dispatchAt: Dayjs;
-  minTotalQuantity: number;
-  failureAction: "CANCEL_AND_REFUND" | "POSTPONE";
-  skuIds: string[];
-}
-function CampaignModal({
-  open,
-  close,
-  saved,
+function Dashboard({
   areas,
-  products,
-}: {
-  open: boolean;
-  close: () => void;
-  saved: () => Promise<unknown>;
-  areas: ServiceArea[];
-  products: Product[];
-}) {
-  const [form] = Form.useForm<CampaignValues>();
-  const [busy, setBusy] = useState(false);
-  const save = async (value: CampaignValues) => {
-    setBusy(true);
-    try {
-      await api.createCampaign({
-        ...value,
-        cutoffAt: value.cutoffAt.toISOString(),
-        dispatchAt: value.dispatchAt.toISOString(),
-      });
-      await saved();
-      form.resetFields();
-      close();
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Modal
-      title="新建团期"
-      open={open}
-      onCancel={close}
-      footer={null}
-      destroyOnHidden
-    >
-      <Form
-        form={form}
-        layout="vertical"
-        initialValues={{
-          minTotalQuantity: 20,
-          failureAction: "CANCEL_AND_REFUND",
-        }}
-        onFinish={save}
-      >
-        <Form.Item
-          label="团期名称"
-          name="title"
-          rules={[{ required: true, min: 2 }]}
-        >
-          <Input placeholder="例：当季杂粮与熟食 · 莲池区" />
-        </Form.Item>
-        <Form.Item
-          label="收货区域"
-          name="serviceAreaId"
-          rules={[{ required: true }]}
-        >
-          <Select
-            placeholder="选择本次开团的区县"
-            options={areas
-              .filter((area) => area.orderEnabled)
-              .map((area) => ({ value: area.id, label: area.name }))}
-          />
-        </Form.Item>
-        <div className="form-grid">
-          <Form.Item
-            label="截单时间"
-            name="cutoffAt"
-            rules={[{ required: true }]}
-          >
-            <DatePicker showTime format="YYYY-MM-DD HH:mm" />
-          </Form.Item>
-          <Form.Item
-            label="计划发车"
-            name="dispatchAt"
-            rules={[{ required: true }]}
-          >
-            <DatePicker showTime format="YYYY-MM-DD HH:mm" />
-          </Form.Item>
-        </div>
-        <Form.Item label="参团商品" name="skuIds" rules={[{ required: true }]}>
-          <Select
-            mode="multiple"
-            options={products
-              .filter((item) => item.status === "APPROVED")
-              .map((item) => ({
-                value: item.sku.id,
-                label: `${item.title} · ${money(item.sku.unitPriceCents)}`,
-              }))}
-          />
-        </Form.Item>
-        <div className="modal-note">
-          保存草稿后，请在开售前绑定本团唯一的已启用固定自提点；消费者会在下单前确认该地点。
-        </div>
-        <div className="form-grid">
-          <Form.Item label="最低成团件数" name="minTotalQuantity">
-            <InputNumber min={1} precision={0} suffix="件" />
-          </Form.Item>
-          <Form.Item label="未成团处理" name="failureAction">
-            <Radio.Group>
-              <Radio value="CANCEL_AND_REFUND">取消退款</Radio>
-              <Radio value="POSTPONE">顺延</Radio>
-            </Radio.Group>
-          </Form.Item>
-        </div>
-        <Button
-          type="primary"
-          htmlType="submit"
-          block
-          size="large"
-          loading={busy}
-        >
-          保存团期草稿
-        </Button>
-      </Form>
-    </Modal>
-  );
-}
-
-interface SiteValues {
-  campaignId: string;
-  pickupPointId: string;
-  siteName: string;
-  address: string;
-  arrivalStartAt?: Dayjs;
-  arrivalEndAt?: Dayjs;
-  contactName?: string;
-  contactPhone?: string;
-  remark?: string;
-}
-function DeliverySiteModal({
-  open,
-  close,
-  saved,
-  plan,
+  points,
   campaigns,
-  pickupPoints,
+  orders,
 }: {
-  open: boolean;
-  close: () => void;
-  saved: () => Promise<unknown>;
-  plan: DeliveryPlan | null;
+  areas: ServiceArea[];
+  points: PickupPoint[];
   campaigns: Campaign[];
-  pickupPoints: PickupPoint[];
+  orders: Order[];
 }) {
-  const [form] = Form.useForm<SiteValues>();
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    if (open && plan)
-      form.setFieldsValue({
-        campaignId: plan.campaignId,
-        ...(plan.pickupPointId?{pickupPointId:plan.pickupPointId}:{}),
-        siteName: plan.siteName ?? "",
-        address: plan.address ?? "",
-        ...(plan.arrivalStartAt
-          ? { arrivalStartAt: dayjs(plan.arrivalStartAt) }
-          : {}),
-        ...(plan.arrivalEndAt
-          ? { arrivalEndAt: dayjs(plan.arrivalEndAt) }
-          : {}),
-        contactName: plan.contactName ?? "",
-        contactPhone: plan.contactPhone ?? "",
-        remark: plan.remark ?? "",
-      });
-  }, [open, plan, form]);
-  const save = async (value: SiteValues) => {
-    if (!plan) return;
-    setBusy(true);
-    try {
-      await api.saveDeliveryPlan({
-        campaignId: plan.campaignId,
-        pickupPointId: value.pickupPointId,
-        siteName: value.siteName || null,
-        address: value.address || null,
-        arrivalStartAt: value.arrivalStartAt?.toISOString() ?? null,
-        arrivalEndAt: value.arrivalEndAt?.toISOString() ?? null,
-        contactName: value.contactName || null,
-        contactPhone: value.contactPhone || null,
-        remark: value.remark || null,
-      });
-      await saved();
-      close();
-    } finally {
-      setBusy(false);
-    }
-  };
   return (
-    <Modal
-      title="确认本团集中领取地点"
-      open={open}
-      onCancel={close}
-      footer={null}
-      destroyOnHidden
-    >
-      {plan?.status === "VEHICLE_BOOKED" && <Alert type="warning" showIcon message="修改地点、到货时间或联系人会自动取消原约车信息，请重新预约车辆。" style={{ marginBottom: 16 }} />}
-      <Form form={form} layout="vertical" onFinish={save}>
-        <Form.Item label="团期">
-          <Input
-            disabled
+    <>
+      <PageTitle title="运营工作台" subtitle="唯一社区团购主线的实时概览" />
+      <div className="stats-grid">
+        <Card>
+          <Statistic
+            title="已开通区域"
+            value={areas.filter((v) => v.orderEnabled).length}
+          />
+        </Card>
+        <Card>
+          <Statistic
+            title="启用自提点"
+            value={points.filter((v) => v.status === "ACTIVE").length}
+          />
+        </Card>
+        <Card>
+          <Statistic
+            title="进行中团期"
             value={
-              campaigns.find((item) => item.id === plan?.campaignId)?.title ??
-              ""
+              campaigns.filter(
+                (v) => !["COMPLETED", "CANCELLED"].includes(v.status),
+              ).length
             }
           />
-        </Form.Item>
-        <Form.Item label="固定自提点" name="pickupPointId" rules={[{ required: true, message: "请选择自提点" }]}>
-          <Select
-            placeholder="选择本团唯一自提点"
-            options={pickupPoints.filter((item) => item.serviceAreaId === plan?.serviceAreaId && item.status === "ACTIVE").map((item) => ({ value: item.id, label: `${item.name} · ${item.address}` }))}
-            onChange={(id) => { const point=pickupPoints.find((item)=>item.id===id); if(point)form.setFieldsValue({ siteName:point.name,address:point.address }); }}
+        </Card>
+        <Card>
+          <Statistic
+            title="待处理订单"
+            value={
+              orders.filter(
+                (v) =>
+                  !["COMPLETED", "CANCELLED", "REFUNDED"].includes(v.status),
+              ).length
+            }
           />
-        </Form.Item>
-        <Form.Item
-          label="地点名称"
-          name="siteName"
-          rules={[{ required: true, min: 2 }]}
-        >
-          <Input disabled placeholder="选择固定自提点后自动填写" />
-        </Form.Item>
-        <Form.Item
-          label="详细地址"
-          name="address"
-          rules={[{ required: true, min: 5 }]}
-        >
-          <Input.TextArea disabled rows={2} />
-        </Form.Item>
-        <div className="form-grid">
-          <Form.Item label="预计到达开始" name="arrivalStartAt">
-            <DatePicker showTime format="MM-DD HH:mm" />
-          </Form.Item>
-          <Form.Item label="预计到达结束" name="arrivalEndAt">
-            <DatePicker showTime format="MM-DD HH:mm" />
-          </Form.Item>
-        </div>
-        <div className="form-grid">
-          <Form.Item label="当地联系人" name="contactName">
+        </Card>
+      </div>
+    </>
+  );
+}
+function PageTitle({
+  title,
+  subtitle,
+  action,
+}: {
+  title: string;
+  subtitle: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <header className="section-header">
+      <div>
+        <Typography.Title level={2}>{title}</Typography.Title>
+        <Typography.Paragraph type="secondary">{subtitle}</Typography.Paragraph>
+      </div>
+      {action}
+    </header>
+  );
+}
+
+function Products({
+  values,
+  reload,
+}: {
+  values: CatalogSku[];
+  reload: () => Promise<void>;
+}) {
+  const { message } = AntApp.useApp();
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<CatalogSku | null>(null);
+  const [form] = Form.useForm();
+  const save = async (value: {
+    title: string;
+    category: string;
+    origin: string;
+    skuName: string;
+    retailPriceYuan: string;
+    defaultSellableQuantity: number;
+    status: "ACTIVE" | "INACTIVE";
+  }) => {
+    try {
+      const { retailPriceYuan, ...product } = value;
+      await api.saveSku({
+        ...(editing ? { id: editing.id, productId: editing.productId } : {}),
+        ...product,
+        retailPriceCents: yuanToCents(retailPriceYuan),
+        imageUrl: null,
+      });
+      setOpen(false);
+      setEditing(null);
+      form.resetFields();
+      await reload();
+      void message.success("商品已保存；历史订单快照不会改变");
+    } catch (error) {
+      void message.error(mutationErrorText(error));
+    }
+  };
+  return (
+    <>
+      <PageTitle
+        title="商品管理"
+        subtitle="维护社区团购商品目录与默认可售量"
+        action={
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => {
+              setEditing(null);
+              form.resetFields();
+              form.setFieldsValue({ status: "ACTIVE" });
+              setOpen(true);
+            }}
+          >
+            新增商品
+          </Button>
+        }
+      />
+      <Table
+        rowKey="id"
+        dataSource={values}
+        columns={[
+          {
+            title: "商品",
+            render: (_, v) => (
+              <>
+                <b>{v.product.title}</b>
+                <div>{v.name}</div>
+              </>
+            ),
+          },
+          {
+            title: "分类/产地",
+            render: (_, v) => `${v.product.category} / ${v.product.origin}`,
+          },
+          { title: "售价", render: (_, v) => money(v.retailPriceCents) },
+          { title: "默认可售量", dataIndex: "defaultSellableQuantity" },
+          { title: "状态", render: (_, v) => <Status value={v.status} /> },
+          {
+            title: "操作",
+            render: (_, value: CatalogSku) => (
+              <Space>
+                <Button
+                  onClick={() => {
+                    setEditing(value);
+                    form.setFieldsValue({
+                      title: value.product.title,
+                      category: value.product.category,
+                      origin: value.product.origin,
+                      skuName: value.name,
+                      retailPriceYuan: centsToYuan(value.retailPriceCents),
+                      defaultSellableQuantity: value.defaultSellableQuantity,
+                      status: value.status,
+                    });
+                    setOpen(true);
+                  }}
+                >
+                  编辑
+                </Button>
+                <Button
+                  danger={value.status === "ACTIVE"}
+                  onClick={() =>
+                    void api
+                      .saveSku({
+                        id: value.id,
+                        productId: value.productId,
+                        title: value.product.title,
+                        category: value.product.category,
+                        origin: value.product.origin,
+                        imageUrl: value.product.imageUrl,
+                        skuName: value.name,
+                        retailPriceCents: value.retailPriceCents,
+                        defaultSellableQuantity: value.defaultSellableQuantity,
+                        status: value.status === "ACTIVE" ? "INACTIVE" : "ACTIVE",
+                      })
+                      .then(reload)
+                      .then(() =>
+                        message.success(
+                          value.status === "ACTIVE"
+                            ? "商品已停用，公共目录不再展示"
+                            : "商品已重新启用",
+                        ),
+                      )
+                      .catch((error) => message.error(mutationErrorText(error)))
+                  }
+                >
+                  {value.status === "ACTIVE" ? "停用" : "启用"}
+                </Button>
+              </Space>
+            ),
+          },
+        ]}
+      />
+      <Modal
+        open={open}
+        title={editing ? "编辑商品" : "新增商品"}
+        footer={null}
+        onCancel={() => {
+          setOpen(false);
+          setEditing(null);
+        }}
+      >
+        <Form form={form} layout="vertical" onFinish={(v) => void save(v)}>
+          <Form.Item
+            name="title"
+            label="商品名称"
+            rules={[{ required: true, min: 2 }]}
+          >
             <Input />
           </Form.Item>
-          <Form.Item label="联系人电话" name="contactPhone" rules={[{ pattern: /^1[3-9]\d{9}$/, message: "请输入11位中国大陆手机号" }]}>
-            <Input inputMode="numeric" maxLength={11} />
+          <div className="form-grid">
+            <Form.Item
+              name="category"
+              label="分类"
+              rules={[{ required: true }]}
+            >
+              <Input />
+            </Form.Item>
+            <Form.Item name="origin" label="产地" rules={[{ required: true }]}>
+              <Input />
+            </Form.Item>
+          </div>
+          <Form.Item name="skuName" label="规格" rules={[{ required: true }]}>
+            <Input />
           </Form.Item>
-        </div>
-        <Form.Item label="运营备注" name="remark">
-          <Input.TextArea rows={2} />
+          <div className="form-grid">
+            <Form.Item
+              name="retailPriceYuan"
+              label="售价（元）"
+              rules={[priceRule]}
+            >
+              <Input
+                inputMode="decimal"
+                placeholder="例如 19.90"
+                autoComplete="off"
+              />
+            </Form.Item>
+            <Form.Item
+              name="defaultSellableQuantity"
+              label="默认可售量"
+              rules={[{ required: true }]}
+            >
+              <InputNumber min={0} />
+            </Form.Item>
+          </div>
+          <Form.Item name="status" label="目录状态" rules={[{ required: true }]}>
+            <Select
+              options={[
+                { value: "ACTIVE", label: "启用（公共目录可见）" },
+                { value: "INACTIVE", label: "停用（历史快照保留）" },
+              ]}
+            />
+          </Form.Item>
+          <Button type="primary" htmlType="submit">
+            保存商品
+          </Button>
+        </Form>
+      </Modal>
+    </>
+  );
+}
+
+function Campaigns({
+  values,
+  areas,
+  points,
+  skus,
+  reload,
+}: {
+  values: Campaign[];
+  areas: ServiceArea[];
+  points: PickupPoint[];
+  skus: CatalogSku[];
+  reload: () => Promise<void>;
+}) {
+  const { message } = AntApp.useApp();
+  const [open, setOpen] = useState(false);
+  const [createReview, setCreateReview] = useState<CampaignDraftValues | null>(
+    null,
+  );
+  const [openReview, setOpenReview] = useState<Campaign | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [labelCampaign, setLabelCampaign] = useState<Campaign | null>(null);
+  const [labels, setLabels] = useState<PackingLabel[]>([]);
+  const [labelsLoading, setLabelsLoading] = useState(false);
+  const [labelsError, setLabelsError] = useState<string | null>(null);
+  const [postponeCampaign, setPostponeCampaign] = useState<Campaign | null>(
+    null,
+  );
+  const [closeReview, setCloseReview] = useState<Campaign | null>(null);
+  const [cancelReview, setCancelReview] = useState<{
+    campaign: Campaign;
+    impact: {
+      pendingPaymentOrderCount: number;
+      paidOrderCount: number;
+      estimatedRefundCents: number;
+    };
+  } | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [postponeForm] = Form.useForm();
+  const [form] = Form.useForm();
+  const areaId = Form.useWatch("serviceAreaId", form);
+  const create = async () => {
+    if (!createReview) return;
+    setSubmitting(true);
+    try {
+      const { items, ...campaign } = createReview;
+      await api.createCampaign({
+        ...campaign,
+        cutoffAt: campaign.cutoffAt.toISOString(),
+        dispatchAt: campaign.dispatchAt.toISOString(),
+        estimatedArrivalStartAt:
+          campaign.estimatedArrivalStartAt.toISOString(),
+        estimatedArrivalEndAt: campaign.estimatedArrivalEndAt.toISOString(),
+        items: items.map(({ retailPriceYuan, ...item }) => ({
+          ...item,
+          retailPriceCents: yuanToCents(retailPriceYuan),
+        })),
+      });
+      setOpen(false);
+      setCreateReview(null);
+      form.resetFields();
+      await reload();
+      void message.success("团期已创建，开售前请再次复核");
+    } catch (error) {
+      // Keep the draft/review open so the operator can fix the exact field
+      // rejected by the API instead of losing all entered values.
+      void message.error(mutationErrorText(error));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  const action = async (id: string, name: "open" | "close" | "cancel") => {
+    if (name === "cancel") {
+      const campaign = values.find((value) => value.id === id);
+      if (!campaign) return;
+      try {
+        setCancelReview({
+          campaign,
+          impact: await api.campaignCancelImpact(id),
+        });
+        setCancelReason("");
+      } catch (error) {
+        void message.error((error as Error).message);
+      }
+      return;
+    }
+    if (name === "close") {
+      const campaign = values.find((value) => value.id === id);
+      if (campaign) setCloseReview(campaign);
+      return;
+    }
+    try {
+      await api.campaignAction(id, name);
+      await reload();
+      if (name === "open") setOpenReview(null);
+    } catch (error) {
+      void message.error((error as Error).message);
+    }
+  };
+  const confirmClose = async () => {
+    if (!closeReview) return;
+    setSubmitting(true);
+    try {
+      await api.campaignAction(closeReview.id, "close", {});
+      setCloseReview(null);
+      await reload();
+      void message.success("团期已截单，库存和订单状态已更新");
+    } catch (error) {
+      void message.error((error as Error).message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  const confirmCancel = async () => {
+    if (!cancelReview || cancelReason.trim().length < 2) return;
+    setSubmitting(true);
+    try {
+      await api.campaignAction(cancelReview.campaign.id, "cancel", {
+        reason: cancelReason.trim(),
+      });
+      setCancelReview(null);
+      await reload();
+      void message.success("团期已取消，待付款订单已释放，已付款订单已进入退款义务");
+    } catch (error) {
+      void message.error((error as Error).message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  const postpone = async (value: {
+    cutoffAt: dayjs.Dayjs;
+    dispatchAt: dayjs.Dayjs;
+    estimatedArrivalStartAt: dayjs.Dayjs;
+    estimatedArrivalEndAt: dayjs.Dayjs;
+  }) => {
+    if (!postponeCampaign) return;
+    setSubmitting(true);
+    try {
+      await api.postponeCampaign(postponeCampaign.id, {
+        cutoffAt: value.cutoffAt.toISOString(),
+        dispatchAt: value.dispatchAt.toISOString(),
+        estimatedArrivalStartAt: value.estimatedArrivalStartAt.toISOString(),
+        estimatedArrivalEndAt: value.estimatedArrivalEndAt.toISOString(),
+      });
+      setPostponeCampaign(null);
+      postponeForm.resetFields();
+      await reload();
+      void message.success("团期已顺延并重新进入开售；通知已进入既有队列");
+    } catch (caught) {
+      void message.error(caught instanceof Error ? caught.message : "团期顺延失败");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  const openLabels = async (campaign: Campaign) => {
+    setLabelCampaign(campaign);
+    setLabels([]);
+    setLabelsError(null);
+    setLabelsLoading(true);
+    try {
+      setLabels(await api.packingLabels(campaign.id));
+    } catch (caught) {
+      setLabelsError(
+        caught instanceof Error ? caught.message : "装袋标签加载失败",
+      );
+    } finally {
+      setLabelsLoading(false);
+    }
+  };
+  const labelsText = () =>
+    labels
+      .map((label, index) =>
+        [
+          `标签 ${index + 1}`,
+          `订单号：${label.orderNo}`,
+          `自提点：${label.pickupPointName ?? label.pickupPointId}`,
+          ...label.items.map((item) => `${item.name} × ${item.quantity}`),
+        ].join("\n"),
+      )
+      .join("\n\n");
+  const exportLabels = () => {
+    const blob = new Blob([labelsText()], { type: "text/plain;charset=utf-8" });
+    const href = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = href;
+    anchor.download = `${labelCampaign?.title ?? "community"}-packing-labels.txt`;
+    anchor.click();
+    URL.revokeObjectURL(href);
+  };
+  const printLabels = () => {
+    const popup = window.open("", "_blank");
+    if (!popup) {
+      void message.error("浏览器阻止了打印窗口，请允许弹出窗口后重试");
+      return;
+    }
+    popup.document.write(
+      `<pre style="font:16px/1.6 sans-serif;white-space:pre-wrap">${labelsText().replaceAll("&", "&amp;").replaceAll("<", "&lt;")}</pre>`,
+    );
+    popup.document.close();
+    popup.focus();
+    popup.print();
+  };
+  return (
+    <>
+      <PageTitle
+        title="团期管理"
+        subtitle="一团一固定自提点；商品、价格、可售量与时间均由后台配置"
+        action={
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => {
+              const area =
+                areas.find(
+                  (value) => value.orderEnabled && value.regionCode === "000000",
+                ) ?? areas.find((value) => value.orderEnabled);
+              const point = area
+                ? (points.find(
+                    (value) =>
+                      value.status === "ACTIVE" &&
+                      value.serviceAreaId === area.id &&
+                      value.id === "point-national-default",
+                  ) ??
+                  points.find(
+                    (value) =>
+                      value.status === "ACTIVE" &&
+                      value.serviceAreaId === area.id,
+                  ))
+                : undefined;
+              form.setFieldsValue({
+                serviceAreaId: area?.id,
+                pickupPointId: point?.id,
+              });
+              setOpen(true);
+            }}
+          >
+            创建团期
+          </Button>
+        }
+      />
+      <Table
+        rowKey="id"
+        dataSource={values}
+        columns={[
+          {
+            title: "团期",
+            render: (_, v) => (
+              <>
+                <b>{v.title}</b>
+                <div>{v.items.length} 个商品</div>
+              </>
+            ),
+          },
+          {
+            title: "截单时间",
+            render: (_, v) => dateTime(v.cutoffAt),
+          },
+          {
+            title: "预计到货",
+            render: (_, v) =>
+              `${dateTime(v.estimatedArrivalStartAt)} 至 ${dateTime(v.estimatedArrivalEndAt)}`,
+          },
+          {
+            title: "固定自提点",
+            render: (_, v) => v.deliveryPlan?.siteName ?? "—",
+          },
+          { title: "状态", render: (_, v) => <Status value={v.status} /> },
+          {
+            title: "操作",
+            render: (_, v) => (
+              <Space>
+                {v.status === "DRAFT" && (
+                  <Button onClick={() => setOpenReview(v)}>
+                    开售
+                  </Button>
+                )}
+                {v.status === "OPEN" && (
+                  <Button onClick={() => void action(v.id, "close")}>
+                    截单
+                  </Button>
+                )}
+                {v.status === "POSTPONED" && (
+                  <Button
+                    type="primary"
+                    onClick={() => {
+                      setPostponeCampaign(v);
+                      postponeForm.setFieldsValue({
+                        cutoffAt: dayjs(v.cutoffAt),
+                        dispatchAt: dayjs(v.dispatchAt),
+                        estimatedArrivalStartAt: dayjs(v.estimatedArrivalStartAt),
+                        estimatedArrivalEndAt: dayjs(v.estimatedArrivalEndAt),
+                      });
+                    }}
+                  >
+                    顺延团期
+                  </Button>
+                )}
+                {["DRAFT", "OPEN", "POSTPONED"].includes(v.status) && (
+                  <Button danger onClick={() => void action(v.id, "cancel")}>
+                    取消
+                  </Button>
+                )}
+                {["LOCKED", "FULFILLING", "COMPLETED"].includes(v.status) && (
+                  <Button onClick={() => void openLabels(v)}>
+                    生成装袋标签
+                  </Button>
+                )}
+              </Space>
+            ),
+          },
+        ]}
+      />
+      <Modal
+        width={760}
+        open={open}
+        title="创建社区团期"
+        footer={null}
+        onCancel={() => setOpen(false)}
+      >
+        <Form
+          form={form}
+          layout="vertical"
+          initialValues={{
+            minTotalQuantity: 1,
+            failureAction: "CANCEL_AND_REFUND",
+            items: [{}],
+          }}
+          onFinish={(v: CampaignDraftValues) => setCreateReview(v)}
+        >
+          <Form.Item
+            name="title"
+            label="团期名称"
+            rules={[{ required: true, min: 2 }]}
+          >
+            <Input />
+          </Form.Item>
+          <div className="form-grid">
+            <Form.Item
+              name="serviceAreaId"
+              label="服务区域"
+              rules={[{ required: true }]}
+            >
+              <Select
+                options={areas
+                  .filter((v) => v.orderEnabled)
+                  .map((v) => ({ value: v.id, label: v.name }))}
+              />
+            </Form.Item>
+            <Form.Item
+              name="pickupPointId"
+              label="固定自提点"
+              rules={[{ required: true }]}
+            >
+              <Select
+                options={points
+                  .filter(
+                    (v) => v.status === "ACTIVE" && v.serviceAreaId === areaId,
+                  )
+                  .map((v) => ({ value: v.id, label: v.name }))}
+              />
+            </Form.Item>
+          </div>
+          <div className="form-grid">
+            <Form.Item
+              name="cutoffAt"
+              label="截单时间"
+              rules={[{ required: true }]}
+            >
+              <DatePicker showTime />
+            </Form.Item>
+            <Form.Item
+              name="dispatchAt"
+              label="计划发车时间"
+              dependencies={["cutoffAt"]}
+              rules={[
+                { required: true },
+                ({ getFieldValue }) => ({
+                  validator: (_, value: dayjs.Dayjs | undefined) => {
+                    const cutoffAt = getFieldValue("cutoffAt") as
+                      | dayjs.Dayjs
+                      | undefined;
+                    const error = campaignScheduleError("dispatchAt", value, {
+                      cutoffAt,
+                    });
+                    return error
+                      ? Promise.reject(new Error(error))
+                      : Promise.resolve();
+                  },
+                }),
+              ]}
+            >
+              <DatePicker showTime />
+            </Form.Item>
+          </div>
+          <div className="form-grid">
+            <Form.Item
+              name="estimatedArrivalStartAt"
+              label="预计到货开始"
+              dependencies={["dispatchAt"]}
+              rules={[
+                { required: true },
+                ({ getFieldValue }) => ({
+                  validator: (_, value: dayjs.Dayjs | undefined) => {
+                    const dispatchAt = getFieldValue("dispatchAt") as
+                      | dayjs.Dayjs
+                      | undefined;
+                    const error = campaignScheduleError(
+                      "estimatedArrivalStartAt",
+                      value,
+                      { dispatchAt },
+                    );
+                    return error
+                      ? Promise.reject(new Error(error))
+                      : Promise.resolve();
+                  },
+                }),
+              ]}
+            >
+              <DatePicker showTime />
+            </Form.Item>
+            <Form.Item
+              name="estimatedArrivalEndAt"
+              label="预计到货结束"
+              dependencies={["estimatedArrivalStartAt"]}
+              rules={[
+                { required: true },
+                ({ getFieldValue }) => ({
+                  validator: (_, value: dayjs.Dayjs | undefined) => {
+                    const startAt = getFieldValue(
+                      "estimatedArrivalStartAt",
+                    ) as dayjs.Dayjs | undefined;
+                    const error = campaignScheduleError(
+                      "estimatedArrivalEndAt",
+                      value,
+                      { estimatedArrivalStartAt: startAt },
+                    );
+                    return error
+                      ? Promise.reject(new Error(error))
+                      : Promise.resolve();
+                  },
+                }),
+              ]}
+            >
+              <DatePicker showTime />
+            </Form.Item>
+          </div>
+          <div className="form-grid">
+            <Form.Item name="minTotalQuantity" label="最小成团件数">
+              <InputNumber min={1} />
+            </Form.Item>
+            <Form.Item name="failureAction" label="未成团处理">
+              <Select
+                options={[
+                  { value: "CANCEL_AND_REFUND", label: "取消并退款" },
+                  { value: "POSTPONE", label: "顺延" },
+                ]}
+              />
+            </Form.Item>
+          </div>
+          <Form.List name="items">
+            {(fields, { add, remove }) => (
+              <>
+                {fields.map((field) => (
+                  <Card
+                    key={field.key}
+                    size="small"
+                    style={{ marginBottom: 12 }}
+                  >
+                    <Space align="start" wrap>
+                      <Form.Item
+                        name={[field.name, "catalogSkuId"]}
+                        label="商品"
+                        rules={[{ required: true }]}
+                      >
+                        <Select
+                          style={{ width: 240 }}
+                          options={skus
+                            .filter((v) => v.status === "ACTIVE")
+                            .map((v) => ({
+                              value: v.id,
+                              label: `${v.product.title} · ${v.name}`,
+                            }))}
+                        />
+                      </Form.Item>
+                      <Form.Item
+                        name={[field.name, "retailPriceYuan"]}
+                        label="本团售价（元）"
+                        rules={[priceRule]}
+                      >
+                        <Input
+                          inputMode="decimal"
+                          placeholder="例如 19.90"
+                          autoComplete="off"
+                        />
+                      </Form.Item>
+                      <Form.Item
+                        name={[field.name, "sellableQuantity"]}
+                        label="可售量"
+                        rules={[{ required: true }]}
+                      >
+                        <InputNumber min={1} />
+                      </Form.Item>
+                      <Button danger onClick={() => remove(field.name)}>
+                        移除
+                      </Button>
+                    </Space>
+                  </Card>
+                ))}
+                <Button onClick={() => add()}>添加商品</Button>
+              </>
+            )}
+          </Form.List>
+          <Button type="primary" htmlType="submit" style={{ marginTop: 16 }}>
+            下一步：发布复核
+          </Button>
+        </Form>
+      </Modal>
+      <Modal
+        open={Boolean(postponeCampaign)}
+        title="顺延团期"
+        footer={null}
+        destroyOnHidden
+        onCancel={() => !submitting && setPostponeCampaign(null)}
+      >
+        <Alert
+          type="info"
+          showIcon
+          message="请填写新的完整时间窗口"
+          description="所有时间必须晚于当前时间，并满足截单早于发车、预计到货不早于发车。"
+          style={{ marginBottom: 16 }}
+        />
+        <Form form={postponeForm} layout="vertical" onFinish={(value) => void postpone(value)}>
+          <div className="form-grid">
+            <Form.Item
+              name="cutoffAt"
+              label="新截单时间"
+              rules={[{ required: true, message: "请选择新的截单时间" }]}
+            >
+              <DatePicker showTime disabled={submitting} />
+            </Form.Item>
+            <Form.Item
+              name="dispatchAt"
+              label="新发车时间"
+              dependencies={["cutoffAt"]}
+              rules={[
+                { required: true, message: "请选择新的发车时间" },
+                ({ getFieldValue }) => ({
+                  validator: (_, value: dayjs.Dayjs | undefined) => {
+                    const cutoffAt = getFieldValue("cutoffAt") as dayjs.Dayjs | undefined;
+                    return !value || !cutoffAt || value.isAfter(cutoffAt)
+                      ? Promise.resolve()
+                      : Promise.reject(new Error("发车时间必须晚于截单时间"));
+                  },
+                }),
+              ]}
+            >
+              <DatePicker showTime disabled={submitting} />
+            </Form.Item>
+          </div>
+          <div className="form-grid">
+            <Form.Item
+              name="estimatedArrivalStartAt"
+              label="新预计到货开始"
+              dependencies={["dispatchAt"]}
+              rules={[
+                { required: true, message: "请选择预计到货开始" },
+                ({ getFieldValue }) => ({
+                  validator: (_, value: dayjs.Dayjs | undefined) => {
+                    const dispatchAt = getFieldValue("dispatchAt") as dayjs.Dayjs | undefined;
+                    return !value || !dispatchAt || !value.isBefore(dispatchAt)
+                      ? Promise.resolve()
+                      : Promise.reject(new Error("预计到货不能早于发车"));
+                  },
+                }),
+              ]}
+            >
+              <DatePicker showTime disabled={submitting} />
+            </Form.Item>
+            <Form.Item
+              name="estimatedArrivalEndAt"
+              label="新预计到货结束"
+              dependencies={["estimatedArrivalStartAt"]}
+              rules={[
+                { required: true, message: "请选择预计到货结束" },
+                ({ getFieldValue }) => ({
+                  validator: (_, value: dayjs.Dayjs | undefined) => {
+                    const start = getFieldValue("estimatedArrivalStartAt") as dayjs.Dayjs | undefined;
+                    return !value || !start || !value.isBefore(start)
+                      ? Promise.resolve()
+                      : Promise.reject(new Error("预计到货结束不能早于开始"));
+                  },
+                }),
+              ]}
+            >
+              <DatePicker showTime disabled={submitting} />
+            </Form.Item>
+          </div>
+          <Button type="primary" htmlType="submit" loading={submitting}>
+            确认顺延
+          </Button>
+        </Form>
+      </Modal>
+      <Modal
+        width={760}
+        open={!!createReview}
+        title="创建前发布复核"
+        okText="确认创建团期"
+        cancelText="返回修改"
+        confirmLoading={submitting}
+        onOk={() => void create()}
+        onCancel={() => setCreateReview(null)}
+      >
+        {createReview && (
+          <CampaignReview
+            title={createReview.title}
+            point={points.find((v) => v.id === createReview.pickupPointId)}
+            cutoffAt={createReview.cutoffAt}
+            dispatchAt={createReview.dispatchAt}
+            estimatedArrivalStartAt={createReview.estimatedArrivalStartAt}
+            estimatedArrivalEndAt={createReview.estimatedArrivalEndAt}
+            minTotalQuantity={createReview.minTotalQuantity}
+            failureAction={failureActionText(createReview.failureAction)}
+            items={createReview.items.map((item) => ({
+              id: item.catalogSkuId,
+              title:
+                skus.find((v) => v.id === item.catalogSkuId)?.product.title ??
+                item.catalogSkuId,
+              price: money(yuanToCents(item.retailPriceYuan)),
+              sellableQuantity: item.sellableQuantity,
+            }))}
+          />
+        )}
+      </Modal>
+      <Modal
+        width={760}
+        open={!!openReview}
+        title="开售前二次确认"
+        okText="已复核，确认开售"
+        cancelText="暂不开售"
+        onOk={() => openReview && void action(openReview.id, "open")}
+        onCancel={() => setOpenReview(null)}
+      >
+        {openReview && (
+          <CampaignReview
+            title={openReview.title}
+            point={points.find(
+              (v) => v.id === openReview.deliveryPlan?.pickupPointId,
+            )}
+            cutoffAt={openReview.cutoffAt}
+            dispatchAt={openReview.dispatchAt}
+            estimatedArrivalStartAt={openReview.estimatedArrivalStartAt}
+            estimatedArrivalEndAt={openReview.estimatedArrivalEndAt}
+            minTotalQuantity={openReview.minTotalQuantity}
+            failureAction={failureActionText(openReview.failureAction)}
+            items={openReview.items.map((item) => ({
+              id: item.skuId,
+              title: `${item.title} · ${item.skuName}`,
+              price: money(item.unitPriceCents),
+              sellableQuantity: item.stock,
+            }))}
+          />
+        )}
+      </Modal>
+      <Modal
+        width={720}
+        open={!!labelCampaign}
+        title={labelCampaign ? `${labelCampaign.title} · 装袋标签` : "装袋标签"}
+        onCancel={() => setLabelCampaign(null)}
+        footer={
+          <Space>
+            <Button
+              onClick={() => labelCampaign && void openLabels(labelCampaign)}
+              loading={labelsLoading}
+            >
+              重试加载
+            </Button>
+            <Button disabled={!labels.length} onClick={printLabels}>
+              打印标签
+            </Button>
+            <Button type="primary" disabled={!labels.length} onClick={exportLabels}>
+              导出标签
+            </Button>
+          </Space>
+        }
+      >
+        {labelsLoading ? (
+          <Card loading />
+        ) : labelsError ? (
+          <Alert
+            type="error"
+            showIcon
+            message="装袋标签加载失败"
+            description={labelsError}
+            action={
+              <Button
+                size="small"
+                onClick={() => labelCampaign && void openLabels(labelCampaign)}
+              >
+                重试
+              </Button>
+            }
+          />
+        ) : labels.length === 0 ? (
+          <Empty description="该已截单团期暂无合格已付款订单，无需生成装袋标签" />
+        ) : (
+          <Table
+            rowKey="orderId"
+            pagination={false}
+            dataSource={labels}
+            columns={[
+              { title: "订单号", dataIndex: "orderNo" },
+              {
+                title: "自提点",
+                render: (_, label) => label.pickupPointName ?? label.pickupPointId,
+              },
+              {
+                title: "逐商品",
+                render: (_, label) =>
+                  label.items.map((item) => `${item.name} × ${item.quantity}`).join("；"),
+              },
+            ]}
+          />
+        )}
+      </Modal>
+      <Modal
+        open={!!closeReview}
+        title="截单前二次确认"
+        okText="确认截单"
+        cancelText="返回"
+        confirmLoading={submitting}
+        onOk={() => void confirmClose()}
+        onCancel={() => !submitting && setCloseReview(null)}
+        destroyOnHidden
+      >
+        {closeReview && (
+          <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+            <Alert
+              type="warning"
+              showIcon
+              message={`${closeReview.title} 截单后不可重新开售`}
+              description="截单会锁定商品和库存，待付款订单将停止支付，已付款订单进入履约。请确认团期、时间和配送信息无误。"
+            />
+            <Descriptions bordered size="small" column={1}>
+              <Descriptions.Item label="截单时间">
+                {dateTime(closeReview.cutoffAt)}
+              </Descriptions.Item>
+              <Descriptions.Item label="预计到货">
+                {dateTime(closeReview.estimatedArrivalStartAt)} 至 {dateTime(closeReview.estimatedArrivalEndAt)}
+              </Descriptions.Item>
+            </Descriptions>
+          </Space>
+        )}
+      </Modal>
+      <Modal
+        open={!!cancelReview}
+        title="取消团期前二次确认"
+        okText="确认取消并创建退款义务"
+        cancelText="返回"
+        confirmLoading={submitting}
+        okButtonProps={{ danger: true, disabled: cancelReason.trim().length < 2 }}
+        onOk={() => void confirmCancel()}
+        onCancel={() => {
+          if (!submitting) {
+            setCancelReview(null);
+            setCancelReason("");
+          }
+        }}
+        destroyOnHidden
+      >
+        {cancelReview && (
+          <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+            <Alert
+              type="error"
+              showIcon
+              message="取消后不可重新开售"
+              description="待付款订单会释放库存；已付款订单会创建唯一、可恢复的退款义务，并按既有通知队列处理。"
+            />
+            <Descriptions bordered size="small" column={1}>
+              <Descriptions.Item label="待付款订单">
+                {cancelReview.impact.pendingPaymentOrderCount} 单
+              </Descriptions.Item>
+              <Descriptions.Item label="已付款订单">
+                {cancelReview.impact.paidOrderCount} 单
+              </Descriptions.Item>
+              <Descriptions.Item label="预计退款金额">
+                {money(cancelReview.impact.estimatedRefundCents)}
+              </Descriptions.Item>
+            </Descriptions>
+            <Input.TextArea
+              value={cancelReason}
+              onChange={(event) => setCancelReason(event.target.value)}
+              placeholder="请填写取消原因（至少 2 个字符）"
+              rows={3}
+              disabled={submitting}
+              aria-label="取消原因"
+            />
+          </Space>
+        )}
+      </Modal>
+    </>
+  );
+}
+
+function CampaignReview({
+  title,
+  point,
+  cutoffAt,
+  dispatchAt,
+  estimatedArrivalStartAt,
+  estimatedArrivalEndAt,
+  minTotalQuantity,
+  failureAction,
+  items,
+}: {
+  title: string;
+  point: PickupPoint | undefined;
+  cutoffAt: string | dayjs.Dayjs;
+  dispatchAt: string | dayjs.Dayjs;
+  estimatedArrivalStartAt: string | dayjs.Dayjs;
+  estimatedArrivalEndAt: string | dayjs.Dayjs;
+  minTotalQuantity: number;
+  failureAction: string;
+  items: Array<{
+    id: string;
+    title: string;
+    price: string;
+    sellableQuantity: number;
+  }>;
+}) {
+  return (
+    <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+      <Alert
+        type="warning"
+        showIcon
+        message="开售后不可修改"
+        description="固定自提点、截单时间、预计到货窗口、商品及售价、可售量、成团门槛和未成团处理将被锁定。"
+      />
+      <Descriptions bordered size="small" column={1}>
+        <Descriptions.Item label="团期">{title}</Descriptions.Item>
+        <Descriptions.Item label="固定自提点">
+          {point ? `${point.name}（${point.address}）` : "未找到自提点"}
+        </Descriptions.Item>
+        <Descriptions.Item label="截单时间">
+          {dateTime(cutoffAt)}
+        </Descriptions.Item>
+        <Descriptions.Item label="计划发车时间">
+          {dateTime(dispatchAt)}
+        </Descriptions.Item>
+        <Descriptions.Item label="预计到货窗口">
+          {dateTime(estimatedArrivalStartAt)} 至 {dateTime(estimatedArrivalEndAt)}
+        </Descriptions.Item>
+        <Descriptions.Item label="最小成团件数">
+          {minTotalQuantity} 件
+        </Descriptions.Item>
+        <Descriptions.Item label="未成团处理">
+          {failureAction}
+        </Descriptions.Item>
+      </Descriptions>
+      <Table
+        rowKey="id"
+        size="small"
+        pagination={false}
+        dataSource={items}
+        columns={[
+          { title: "商品", dataIndex: "title" },
+          { title: "售价", dataIndex: "price" },
+          { title: "可售量", dataIndex: "sellableQuantity" },
+        ]}
+      />
+    </Space>
+  );
+}
+
+function Orders({
+  values,
+  campaigns,
+  roles,
+  reload,
+  onNavigate,
+}: {
+  values: Order[];
+  campaigns: Campaign[];
+  roles: string[];
+  reload: () => Promise<void>;
+  onNavigate: (page: AdminPage) => void;
+}) {
+  const { message } = AntApp.useApp();
+  const [query, setQuery] = useState("");
+  const [searching, setSearching] = useState(false);
+  const [selected, setSelected] = useState<Order | null>(null);
+  const [displayValues, setDisplayValues] = useState(values);
+  useEffect(() => setDisplayValues(values), [values]);
+  const search = async () => {
+    setSearching(true);
+    try {
+      const result = await api.orders(query.trim());
+      setDisplayValues(result);
+      // The parent reload remains the source of truth for all other page
+      // resources; update the selected detail immediately from the exact
+      // order-number lookup and then refresh the list generation.
+      setSelected((current) =>
+        current ? result.find((value) => value.id === current.id) ?? null : current,
+      );
+      if (!query.trim()) await reload();
+      void message.success(query.trim() ? "订单搜索完成" : "订单列表已刷新");
+    } catch (error) {
+      void message.error(error instanceof Error ? error.message : "订单搜索失败");
+    } finally {
+      setSearching(false);
+    }
+  };
+  const detailCampaign = selected
+    ? campaigns.find((campaign) => campaign.id === selected.campaignId)
+    : undefined;
+  const casePage = isAllowedAdminPage(roles, "service") ? "service" : "finance";
+  return (
+    <>
+      <PageTitle
+        title="订单管理"
+        subtitle="按完整订单号搜索并查看支付、履约、领取、退款和售后事实"
+        action={
+          <Space>
+            <Input.Search
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onSearch={() => void search()}
+              allowClear
+              enterButton="搜索订单号"
+              loading={searching}
+              placeholder="输入完整订单号"
+              aria-label="订单号搜索"
+            />
+            <Button onClick={() => void search()} loading={searching}>
+              刷新
+            </Button>
+          </Space>
+        }
+      />
+      <Table
+        rowKey="id"
+        dataSource={displayValues}
+        columns={[
+          { title: "订单号", dataIndex: "orderNo" },
+          { title: "金额", render: (_, v) => money(v.totalCents) },
+          {
+            title: "商品",
+            render: (_, v) =>
+              v.items.map((i) => `${i.name} × ${i.quantity}`).join("；"),
+          },
+          {
+            title: "支付时间",
+            render: (_, v) =>
+              v.paidAt ? dayjs(v.paidAt).format("MM-DD HH:mm") : "未支付",
+          },
+          { title: "状态", render: (_, v) => <Status value={v.status} /> },
+          {
+            title: "操作",
+            render: (_, v) => (
+              <Button onClick={() => setSelected(v)}>查看详情</Button>
+            ),
+          },
+        ]}
+      />
+      <Modal
+        width={900}
+        open={!!selected}
+        title={selected ? `订单详情 · ${selected.orderNo}` : "订单详情"}
+        footer={null}
+        onCancel={() => setSelected(null)}
+        destroyOnHidden
+      >
+        {selected && (
+          <Space direction="vertical" size="large" style={{ width: "100%" }}>
+            <Descriptions bordered size="small" column={{ xs: 1, sm: 2 }}>
+              <Descriptions.Item label="订单号">{selected.orderNo}</Descriptions.Item>
+              <Descriptions.Item label="订单状态"><Status value={selected.status} /></Descriptions.Item>
+              <Descriptions.Item label="团期">
+                {selected.campaignTitle ?? detailCampaign?.title ?? selected.campaignId}
+              </Descriptions.Item>
+              <Descriptions.Item label="固定自提点">
+                {selected.pickupPointName ?? selected.deliveryPlan?.siteName ?? selected.pickupPointId}
+              </Descriptions.Item>
+              <Descriptions.Item label="支付状态">
+                {selected.paidAt ? `已支付（${dateTime(selected.paidAt)}）` : "待支付"}
+              </Descriptions.Item>
+              <Descriptions.Item label="支付截止">
+                {selected.expiresAt ? dateTime(selected.expiresAt) : "—"}
+              </Descriptions.Item>
+              <Descriptions.Item label="订单金额">{money(selected.totalCents)}</Descriptions.Item>
+              <Descriptions.Item label="领取进度">
+                {selected.items.reduce((sum, item) => sum + item.pickedUpQuantity, 0)} /
+                {selected.items.reduce((sum, item) => sum + item.fulfilledQuantity, 0)} 件
+              </Descriptions.Item>
+              <Descriptions.Item label="配送状态">
+                {selected.deliveryPlan ? displayLabel(selected.deliveryPlan.status) : "—"}
+              </Descriptions.Item>
+              <Descriptions.Item label="领取截止">
+                {selected.pickupDeadlineAt ? dateTime(selected.pickupDeadlineAt) : "—"}
+              </Descriptions.Item>
+            </Descriptions>
+            <Typography.Title level={5}>商品与规格快照</Typography.Title>
+            <Table
+              rowKey={(item) => `${item.skuId ?? item.name}-${item.quantity}`}
+              size="small"
+              pagination={false}
+              dataSource={selected.items}
+              columns={[
+                { title: "商品", render: (_, item) => item.productTitle ?? item.name },
+                { title: "规格", render: (_, item) => item.skuName ?? item.name },
+                { title: "数量", dataIndex: "quantity" },
+                { title: "单价", render: (_, item) => money(item.unitPriceCents ?? 0) },
+                { title: "小计", render: (_, item) => money(item.amountCents ?? 0) },
+                { title: "已履约", dataIndex: "fulfilledQuantity" },
+                { title: "已领取", dataIndex: "pickedUpQuantity" },
+                { title: "已退款", dataIndex: "refundedQuantity" },
+              ]}
+            />
+            <Typography.Title level={5}>退款与售后记录</Typography.Title>
+            {(selected.partialRefunds?.length ?? 0) === 0 &&
+            !selected.cancellation &&
+            (selected.communityQualityCases?.length ?? 0) === 0 &&
+            (selected.fulfillmentExceptions?.length ?? 0) === 0 ? (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无退款或售后记录" />
+            ) : (
+              <Space direction="vertical" style={{ width: "100%" }}>
+                {selected.cancellation && (
+                  <Alert
+                    type="info"
+                    message={`取消申请：${displayLabel(selected.cancellation.status)}`}
+                    description={`${selected.cancellation.reason}${selected.cancellation.refundId ? ` · 退款单 ${selected.cancellation.refundId}` : ""}`}
+                    action={
+                      <Button type="link" onClick={() => onNavigate(casePage)}>
+                        查看取消队列
+                      </Button>
+                    }
+                  />
+                )}
+                {selected.partialRefunds?.map((refund) => (
+                  <Alert
+                    key={refund.id}
+                    type={refund.status === "SUCCEEDED" ? "success" : "warning"}
+                    message={`部分退款 ${money(refund.amountCents)} · ${displayLabel(refund.status)}`}
+                    description={`关联异常 ${refund.exceptionId}`}
+                    action={
+                      <Button type="link" onClick={() => onNavigate("finance")}>
+                        查看财务记录
+                      </Button>
+                    }
+                  />
+                ))}
+                {selected.communityQualityCases?.map((qualityCase) => (
+                  <Alert
+                    key={qualityCase.id}
+                    type="info"
+                    message={`品质售后 ${displayLabel(qualityCase.status)}`}
+                    description={qualityCase.items.map((item) => `${item.name} × ${item.quantity}：${item.description}`).join("；")}
+                    action={
+                      <Button type="link" onClick={() => onNavigate(casePage)}>
+                        查看品质队列
+                      </Button>
+                    }
+                  />
+                ))}
+                {selected.fulfillmentExceptions?.map((exception) => (
+                  <Alert
+                    key={exception.id}
+                    type="warning"
+                    message={`履约异常 · ${displayLabel(exception.status)}`}
+                    description={`${exception.sourceStage} · ${exception.responsibility}${exception.resolutionNote ? ` · ${exception.resolutionNote}` : ""}`}
+                    action={
+                      <Button type="link" onClick={() => onNavigate(casePage)}>
+                        查看异常队列
+                      </Button>
+                    }
+                  />
+                ))}
+              </Space>
+            )}
+          </Space>
+        )}
+      </Modal>
+    </>
+  );
+}
+
+type ArrivalFormValues = {
+  receivedBy: string;
+  confirmationNote?: string;
+  emergencyReason?: string;
+  items: Array<{
+    catalogSkuId: string;
+    expectedQuantity: number;
+    receivedQuantity: number;
+    rejectedQuantity: number;
+    shortQuantity: number;
+    damagedQuantity: number;
+    evidenceNote?: string;
+  }>;
+};
+
+/** The normal point-manager payload deliberately omits emergencyReason. */
+export function buildCommunityArrivalRequest(
+  value: ArrivalFormValues,
+  emergencyReason?: string,
+): CommunityArrivalRequest {
+  const items = value.items.map((item) => {
+    const abnormal =
+      item.rejectedQuantity + item.shortQuantity + item.damagedQuantity;
+    if (item.receivedQuantity + abnormal !== item.expectedQuantity)
+      throw new Error("每个商品的实到、拒收、短少和破损数量之和必须等于应到数量");
+    if (abnormal > 0 && !item.evidenceNote?.trim())
+      throw new Error("存在短少、破损或拒收时必须填写差异说明");
+    return {
+      catalogSkuId: item.catalogSkuId,
+      receivedQuantity: item.receivedQuantity,
+      rejectedQuantity: item.rejectedQuantity,
+      shortQuantity: item.shortQuantity,
+      damagedQuantity: item.damagedQuantity,
+      reason:
+        item.rejectedQuantity > 0
+          ? "PICKUP_POINT_REJECTED" as const
+          : item.shortQuantity > 0
+            ? "SHORT_RECEIPT" as const
+            : item.damagedQuantity > 0
+              ? "TRANSIT_DAMAGE" as const
+              : null,
+      evidenceNote: abnormal > 0 ? item.evidenceNote?.trim() || null : null,
+    };
+  });
+  const request: CommunityArrivalRequest = {
+    receivedBy: value.receivedBy.trim(),
+    confirmationNote: value.confirmationNote?.trim() || null,
+    items,
+  };
+  return emergencyReason?.trim()
+    ? { ...request, emergencyReason: emergencyReason.trim() }
+    : request;
+}
+
+function ArrivalConfirmationModal({
+  arrival,
+  emergencyProxy,
+  onClose,
+  onConfirmed,
+}: {
+  arrival: CommunityDelivery | null;
+  emergencyProxy: boolean;
+  onClose: () => void;
+  onConfirmed: () => Promise<void>;
+}) {
+  const { message } = AntApp.useApp();
+  const [form] = Form.useForm<ArrivalFormValues>();
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    setError(null);
+    form.resetFields();
+    if (arrival)
+      form.setFieldsValue({
+        items: arrival.expectedItems.map((item) => ({
+          catalogSkuId: item.catalogSkuId,
+          expectedQuantity: item.expectedQuantity,
+          receivedQuantity: item.expectedQuantity,
+          rejectedQuantity: 0,
+          shortQuantity: 0,
+          damagedQuantity: 0,
+        })),
+      });
+  }, [arrival, form]);
+  const submit = async (value: ArrivalFormValues) => {
+    if (!arrival?.dispatchBatchId) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await api.confirmArrival(
+        arrival.dispatchBatchId,
+        buildCommunityArrivalRequest(
+          value,
+          emergencyProxy ? value.emergencyReason : undefined,
+        ),
+      );
+      void message.success("到货事实已登记");
+      onClose();
+      await onConfirmed();
+    } catch (caught) {
+      const detail = caught instanceof Error ? caught.message : "到货确认失败";
+      setError(detail);
+      void message.error(detail);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  return (
+    <Modal
+      width={760}
+      open={!!arrival}
+      title={emergencyProxy ? "紧急代办：逐商品确认到货" : "逐商品确认到货"}
+      footer={null}
+      onCancel={onClose}
+      destroyOnHidden
+    >
+      {emergencyProxy && (
+        <Alert
+          type="warning"
+          showIcon
+          message="紧急代办将写入审计记录，请填写原因。"
+          style={{ marginBottom: 16 }}
+        />
+      )}
+      {error && (
+        <Alert
+          type="error"
+          showIcon
+          message={error}
+          style={{ marginBottom: 16 }}
+        />
+      )}
+      <Form form={form} layout="vertical" onFinish={(value) => void submit(value)}>
+        <Form.Item
+          name="receivedBy"
+          label="现场接收人"
+          rules={[{ required: true, min: 2, message: "请填写现场接收人" }]}
+        >
+          <Input disabled={submitting} />
         </Form.Item>
-        <Button type="primary" htmlType="submit" block loading={busy}>
-          确认地点
+        {emergencyProxy && (
+          <Form.Item
+            name="emergencyReason"
+            label="紧急代办原因"
+            rules={[{ required: true, min: 2, message: "紧急代办必须填写原因" }]}
+          >
+            <Input disabled={submitting} />
+          </Form.Item>
+        )}
+        <Form.Item name="confirmationNote" label="现场备注">
+          <Input disabled={submitting} />
+        </Form.Item>
+        <Form.List name="items">
+          {(fields) =>
+            fields.map((field, index) => (
+              <Card key={field.key} size="small" style={{ marginBottom: 8 }}>
+                <b>
+                  {arrival?.expectedItems[index]?.title} · {arrival?.expectedItems[index]?.skuName}
+                </b>
+                <Form.Item name={[field.name, "catalogSkuId"]} hidden>
+                  <Input />
+                </Form.Item>
+                <Form.Item name={[field.name, "expectedQuantity"]} hidden>
+                  <InputNumber />
+                </Form.Item>
+                <Space wrap>
+                  <Form.Item name={[field.name, "receivedQuantity"]} label="实到" rules={[{ required: true }]}>
+                    <InputNumber min={0} disabled={submitting} />
+                  </Form.Item>
+                  <Form.Item name={[field.name, "rejectedQuantity"]} label="拒收" rules={[{ required: true }]}>
+                    <InputNumber min={0} disabled={submitting} />
+                  </Form.Item>
+                  <Form.Item name={[field.name, "shortQuantity"]} label="短少" rules={[{ required: true }]}>
+                    <InputNumber min={0} disabled={submitting} />
+                  </Form.Item>
+                  <Form.Item name={[field.name, "damagedQuantity"]} label="破损" rules={[{ required: true }]}>
+                    <InputNumber min={0} disabled={submitting} />
+                  </Form.Item>
+                  <Form.Item name={[field.name, "evidenceNote"]} label="差异说明">
+                    <Input disabled={submitting} />
+                  </Form.Item>
+                </Space>
+              </Card>
+            ))
+          }
+        </Form.List>
+        <Button type="primary" htmlType="submit" loading={submitting} disabled={!arrival?.dispatchBatchId}>
+          提交到货确认
         </Button>
       </Form>
     </Modal>
   );
 }
 
-function VehicleModal({
-  open,
-  close,
-  saved,
-  plan,
+function Logistics({
+  plans,
+  deliveries,
+  batches,
+  campaigns,
+  orders,
+  roles,
+  loading,
+  error,
+  reload,
+  onNavigate,
 }: {
-  open: boolean;
-  close: () => void;
-  saved: () => Promise<unknown>;
-  plan: DeliveryPlan | null;
+  plans: DeliveryPlan[];
+  deliveries: CommunityDelivery[];
+  batches: Array<{ id: string; campaignId: string; status: string }>;
+  campaigns: Campaign[];
+  orders: Order[];
+  roles: string[];
+  loading: boolean;
+  error: string | null;
+  reload: () => Promise<void>;
+  onNavigate: (page: AdminPage) => void;
 }) {
-  const [busy, setBusy] = useState(false);
-  const save = async (value: {
-    logisticsPlatform?: string;
+  const { message } = AntApp.useApp();
+  const [vehicle, setVehicle] = useState<DeliveryPlan | null>(null);
+  const [vehicleEmergency, setVehicleEmergency] = useState(false);
+  const [vehicleForm] = Form.useForm();
+  const [arrival, setArrival] = useState<CommunityDelivery | null>(null);
+  const [dispatchReview, setDispatchReview] = useState<DeliveryPlan | null>(
+    null,
+  );
+  const [dispatchSubmitting, setDispatchSubmitting] = useState(false);
+  const canOperate =
+    roles.includes("OPERATOR") || roles.includes("SUPER_ADMIN");
+  const emergencyProxy = roles.includes("SUPER_ADMIN");
+  const viewState = getLogisticsViewState({
+    loading,
+    error,
+    planCount: plans.length,
+  });
+  const openVehicle = (plan: DeliveryPlan, emergency = false) => {
+    setVehicleEmergency(emergency);
+    setVehicle(plan);
+    vehicleForm.setFieldsValue({
+      logisticsPlatform: plan.logisticsPlatform ?? undefined,
+      vehicleOrderNo: plan.vehicleOrderNo ?? undefined,
+      driverName: plan.driverName ?? undefined,
+      driverPhone: plan.driverPhone ?? undefined,
+      vehiclePlate: plan.vehiclePlate ?? undefined,
+      estimatedArrivalAt: plan.estimatedArrivalAt
+        ? dayjs(plan.estimatedArrivalAt)
+        : undefined,
+      reason: undefined,
+    });
+  };
+  const dispatch = async () => {
+    if (!dispatchReview) return;
+    const campaignId = dispatchReview.campaignId;
+    const existing = batches.find((value) => value.campaignId === campaignId);
+    setDispatchSubmitting(true);
+    try {
+      const batch = existing ?? (await api.createBatch(campaignId));
+      if (batch.status === "DRAFT") await api.dispatch(batch.id);
+      setDispatchReview(null);
+      await reload();
+    } catch (error) {
+      void message.error(
+        `${(error as Error).message}；已创建的批次可继续复用，不会重复建批次`,
+      );
+      await reload().catch(() => undefined);
+    } finally {
+      setDispatchSubmitting(false);
+    }
+  };
+  const saveVehicle = async (value: {
+    logisticsPlatform: string;
     vehicleOrderNo: string;
     driverName?: string;
     driverPhone?: string;
     vehiclePlate?: string;
-    estimatedArrivalAt?: Dayjs;
+    estimatedArrivalAt?: dayjs.Dayjs;
+    reason?: string;
   }) => {
-    if (!plan) return;
-    setBusy(true);
+    if (!vehicle) return;
     try {
-      await api.bookVehicle(plan.id, {
-        logisticsPlatform: value.logisticsPlatform || '货拉拉',
+      const body = {
+        logisticsPlatform: value.logisticsPlatform,
         vehicleOrderNo: value.vehicleOrderNo,
-        driverName: value.driverName || null,
-        driverPhone: value.driverPhone || null,
-        vehiclePlate: value.vehiclePlate || null,
+        driverName: value.driverName ?? null,
+        driverPhone: value.driverPhone ?? null,
+        vehiclePlate: value.vehiclePlate ?? null,
         estimatedArrivalAt: value.estimatedArrivalAt?.toISOString() ?? null,
-      });
-      await saved();
-      close();
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Modal
-      title="登记货拉拉预约"
-      open={open}
-      onCancel={close}
-      footer={null}
-      destroyOnHidden
-    >
-      <Form layout="vertical" onFinish={save}>
-        <Form.Item label="配送平台" name="logisticsPlatform" initialValue="货拉拉" rules={[{ required: true, min: 2 }]}><Input /></Form.Item>
-        <Form.Item
-          label="运单号 / 约车凭证"
-          name="vehicleOrderNo"
-          rules={[{ required: true, min: 2 }]}
-        >
-          <Input />
-        </Form.Item>
-        <div className="form-grid">
-          <Form.Item label="司机姓名" name="driverName">
-            <Input />
-          </Form.Item>
-          <Form.Item label="司机电话" name="driverPhone" rules={[{ pattern: /^1[3-9]\d{9}$/, message: "请输入11位中国大陆手机号" }]}>
-            <Input inputMode="numeric" maxLength={11} />
-          </Form.Item>
-        </div>
-        <Form.Item label="车牌号" name="vehiclePlate">
-          <Input />
-        </Form.Item>
-        <Form.Item label="预计到达时间" name="estimatedArrivalAt"><DatePicker showTime style={{width:'100%'}} /></Form.Item>
-        <div className="modal-note">
-          司机信息只保留在履约侧，不会展示给消费者。
-        </div>
-        <Button type="primary" htmlType="submit" block loading={busy}>
-          保存运单并确认预约
-        </Button>
-      </Form>
-    </Modal>
-  );
-}
-
-function AreaModal({
-  open,
-  close,
-  saved,
-  directory,
-  areas,
-}: {
-  open: boolean;
-  close: () => void;
-  saved: () => Promise<unknown>;
-  directory: RegionDirectoryEntry[];
-  areas: ServiceArea[];
-}) {
-  const [form] = Form.useForm<{ regionCode: string }>();
-  const [busy, setBusy] = useState(false);
-  const openedCodes = new Set(areas.map((area) => area.regionCode));
-  const save = async (value: { regionCode: string }) => {
-    setBusy(true);
-    try {
-      await api.openServiceArea(value);
-      await saved();
-      form.resetFields();
-      close();
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Modal
-      title="开通收货区域"
-      open={open}
-      onCancel={close}
-      footer={null}
-      destroyOnHidden
-    >
-      <p className="modal-note">
-        区域名称与行政归属由系统维护；选择区县后即可开放收单。
-      </p>
-      <Form form={form} layout="vertical" onFinish={save}>
-        <Form.Item
-          label="搜索并选择区县"
-          name="regionCode"
-          rules={[{ required: true, message: "请选择要开通的区县" }]}
-        >
-          <Select
-            showSearch
-            optionFilterProp="label"
-            placeholder="输入省、市或区县名称，例如：保定 莲池区"
-            options={directory.map((entry) => ({
-              value: entry.regionCode,
-              label: entry.path,
-              disabled: openedCodes.has(entry.regionCode),
-            }))}
-            filterOption={(input, option) =>
-              String(option?.label ?? "").includes(input.trim())
-            }
-            notFoundContent="未找到匹配的区县"
-          />
-        </Form.Item>
-        <Button type="primary" htmlType="submit" block loading={busy}>
-          开通并允许下单
-        </Button>
-      </Form>
-    </Modal>
-  );
-}
-function MerchantModal({
-  open,
-  close,
-  saved,
-}: {
-  open: boolean;
-  close: () => void;
-  saved: () => Promise<unknown>;
-}) {
-  const [busy, setBusy] = useState(false);
-  const save = async (value: { name: string; commission: number }) => {
-    setBusy(true);
-    try {
-      await api.createMerchant({
-        name: value.name,
-        defaultCommissionBps: Math.round(value.commission * 100),
-        wechatSubMchid: null,
-      });
-      await saved();
-      close();
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Modal
-      title="新增供货商"
-      open={open}
-      onCancel={close}
-      footer={null}
-      destroyOnHidden
-    >
-      <Form layout="vertical" initialValues={{ commission: 8 }} onFinish={save}>
-        <Form.Item
-          label="供货商名称"
-          name="name"
-          rules={[{ required: true, min: 2 }]}
-        >
-          <Input />
-        </Form.Item>
-        <Form.Item label="平台服务费比例" name="commission">
-          <InputNumber min={0} max={100} precision={2} suffix="%" />
-        </Form.Item>
-        <Button type="primary" htmlType="submit" block loading={busy}>
-          保存供货商
-        </Button>
-      </Form>
-    </Modal>
-  );
-}
-function ProductModal({
-  open,
-  close,
-  saved,
-  merchants,
-}: {
-  open: boolean;
-  close: () => void;
-  saved: () => Promise<unknown>;
-  merchants: Merchant[];
-}) {
-  const [busy, setBusy] = useState(false);
-  const save = async (value: {
-    merchantId: string;
-    title: string;
-    category: string;
-    origin: string;
-    imageUrl: string;
-    skuName: string;
-    price: number;
-    stock: number;
-  }) => {
-    setBusy(true);
-    try {
-      await api.createProduct({
-        merchantId: value.merchantId,
-        title: value.title,
-        category: value.category,
-        origin: value.origin,
-        imageUrl: value.imageUrl?.trim() || null,
-        skuName: value.skuName,
-        priceCents: Math.round(value.price * 100),
-        stock: value.stock,
-      });
-      await saved();
-      close();
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Modal
-      title="新增商品草稿"
-      open={open}
-      onCancel={close}
-      footer={null}
-      destroyOnHidden
-    >
-      <Form
-        layout="vertical"
-        initialValues={{ category: "地方特产" }}
-        onFinish={save}
-      >
-        <Form.Item
-          label="供货商"
-          name="merchantId"
-          rules={[{ required: true }]}
-        >
-          <Select
-            options={merchants
-              .filter((item) => item.status === "ACTIVE")
-              .map((item) => ({ value: item.id, label: item.name }))}
-          />
-        </Form.Item>
-        <Form.Item
-          label="商品名称"
-          name="title"
-          rules={[{ required: true, min: 2 }]}
-        >
-          <Input />
-        </Form.Item>
-        <div className="form-grid">
-          <Form.Item label="分类" name="category" rules={[{ required: true }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item label="产地" name="origin" rules={[{ required: true }]}>
-            <Input />
-          </Form.Item>
-        </div>
-        <Form.Item label="商品主图 URL" name="imageUrl">
-          <Input placeholder="https:// 或 /assets/..." />
-        </Form.Item>
-        <Form.Item label="规格" name="skuName" rules={[{ required: true }]}>
-          <Input placeholder="例：500g/袋" />
-        </Form.Item>
-        <div className="form-grid">
-          <Form.Item label="售价" name="price" rules={[{ required: true }]}>
-            <InputNumber min={0.01} precision={2} prefix="¥" />
-          </Form.Item>
-          <Form.Item label="可售库存" name="stock" rules={[{ required: true }]}>
-            <InputNumber min={0} precision={0} />
-          </Form.Item>
-        </div>
-        <Button type="primary" htmlType="submit" block loading={busy}>
-          保存商品草稿
-        </Button>
-      </Form>
-    </Modal>
-  );
-}
-
-function MerchantEditModal({
-  open,
-  close,
-  saved,
-  merchant,
-}: {
-  open: boolean;
-  close: () => void;
-  saved: () => Promise<unknown>;
-  merchant: Merchant | null;
-}) {
-  const [form] = Form.useForm<{ name: string; commission: number }>();
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    if (open && merchant)
-      form.setFieldsValue({
-        name: merchant.name,
-        commission: merchant.defaultCommissionBps / 100,
-      });
-  }, [open, merchant, form]);
-  const save = async (value: { name: string; commission: number }) => {
-    if (!merchant) return;
-    setBusy(true);
-    try {
-      await api.updateMerchant(merchant.id, {
-        name: value.name,
-        defaultCommissionBps: Math.round(value.commission * 100),
-        wechatSubMchid: merchant.wechatSubMchid,
-      });
-      await saved();
-      close();
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Modal
-      title="编辑供货商"
-      open={open}
-      onCancel={close}
-      footer={null}
-      destroyOnHidden
-    >
-      <Form form={form} layout="vertical" onFinish={save}>
-        <Form.Item
-          label="供货商名称"
-          name="name"
-          rules={[{ required: true, min: 2 }]}
-        >
-          <Input />
-        </Form.Item>
-        <Form.Item
-          label="平台服务费比例"
-          name="commission"
-          rules={[{ required: true }]}
-        >
-          <InputNumber min={0} max={100} precision={2} suffix="%" />
-        </Form.Item>
-        <Button type="primary" htmlType="submit" block loading={busy}>
-          保存修改
-        </Button>
-      </Form>
-    </Modal>
-  );
-}
-
-function ProductEditModal({
-  open,
-  close,
-  saved,
-  product,
-  merchants,
-}: {
-  open: boolean;
-  close: () => void;
-  saved: () => Promise<unknown>;
-  product: Product | null;
-  merchants: Merchant[];
-}) {
-  const [form] = Form.useForm<{
-    merchantId: string;
-    title: string;
-    category: string;
-    origin: string;
-    imageUrl: string;
-    skuName: string;
-    price: number;
-    stock: number;
-  }>();
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    if (open && product)
-      form.setFieldsValue({
-        merchantId: product.merchantId,
-        title: product.title,
-        category: product.category,
-        origin: product.origin,
-        imageUrl: product.imageUrl ?? "",
-        skuName: product.sku.name,
-        price: product.sku.unitPriceCents / 100,
-        stock: product.sku.stock,
-      });
-  }, [open, product, form]);
-  const save = async (value: {
-    merchantId: string;
-    title: string;
-    category: string;
-    origin: string;
-    imageUrl: string;
-    skuName: string;
-    price: number;
-    stock: number;
-  }) => {
-    if (!product) return;
-    setBusy(true);
-    try {
-      await api.updateProduct(product.id, {
-        ...value,
-        imageUrl: value.imageUrl?.trim() || null,
-        priceCents: Math.round(value.price * 100),
-      });
-      await saved();
-      close();
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Modal
-      title="编辑商品"
-      open={open}
-      onCancel={close}
-      footer={null}
-      destroyOnHidden
-    >
-      <Form form={form} layout="vertical" onFinish={save}>
-        <Form.Item
-          label="供货商"
-          name="merchantId"
-          rules={[{ required: true }]}
-        >
-          <Select
-            options={merchants
-              .filter(
-                (item) =>
-                  item.status === "ACTIVE" || item.id === product?.merchantId,
-              )
-              .map((item) => ({ value: item.id, label: item.name }))}
-          />
-        </Form.Item>
-        <Form.Item
-          label="商品名称"
-          name="title"
-          rules={[{ required: true, min: 2 }]}
-        >
-          <Input />
-        </Form.Item>
-        <div className="form-grid">
-          <Form.Item label="分类" name="category" rules={[{ required: true }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item label="产地" name="origin" rules={[{ required: true }]}>
-            <Input />
-          </Form.Item>
-        </div>
-        <Form.Item label="商品主图 URL" name="imageUrl">
-          <Input placeholder="https:// 或 /assets/..." />
-        </Form.Item>
-        <Form.Item label="规格" name="skuName" rules={[{ required: true }]}>
-          <Input />
-        </Form.Item>
-        <div className="form-grid">
-          <Form.Item label="售价" name="price" rules={[{ required: true }]}>
-            <InputNumber min={0.01} precision={2} prefix="¥" />
-          </Form.Item>
-          <Form.Item label="可售库存" name="stock" rules={[{ required: true }]}>
-            <InputNumber min={0} precision={0} />
-          </Form.Item>
-        </div>
-        <div className="modal-note">
-          已上架商品修改后会回到草稿，需重新审核；已在收单团期中的商品不可修改。
-        </div>
-        <Button type="primary" htmlType="submit" block loading={busy}>
-          保存商品修改
-        </Button>
-      </Form>
-    </Modal>
-  );
-}
-
-function CampaignEditModal({
-  open,
-  close,
-  saved,
-  campaign,
-  areas,
-  products,
-}: {
-  open: boolean;
-  close: () => void;
-  saved: () => Promise<unknown>;
-  campaign: Campaign | null;
-  areas: ServiceArea[];
-  products: Product[];
-}) {
-  const [form] = Form.useForm<CampaignValues>();
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    if (open && campaign)
-      form.setFieldsValue({
-        ...campaign,
-        cutoffAt: dayjs(campaign.cutoffAt),
-        dispatchAt: dayjs(campaign.dispatchAt),
-      });
-  }, [open, campaign, form]);
-  const save = async (value: CampaignValues) => {
-    if (!campaign) return;
-    setBusy(true);
-    try {
-      await api.updateCampaign(campaign.id, {
-        ...value,
-        cutoffAt: value.cutoffAt.toISOString(),
-        dispatchAt: value.dispatchAt.toISOString(),
-      });
-      await saved();
-      close();
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Modal
-      title="编辑团期草稿"
-      open={open}
-      onCancel={close}
-      footer={null}
-      destroyOnHidden
-    >
-      <Form form={form} layout="vertical" onFinish={save}>
-        <Form.Item
-          label="团期名称"
-          name="title"
-          rules={[{ required: true, min: 2 }]}
-        >
-          <Input />
-        </Form.Item>
-        <Form.Item
-          label="收货区域"
-          name="serviceAreaId"
-          rules={[{ required: true }]}
-        >
-          <Select
-            options={areas
-              .filter((area) => area.orderEnabled)
-              .map((area) => ({ value: area.id, label: area.name }))}
-          />
-        </Form.Item>
-        <div className="form-grid">
-          <Form.Item
-            label="截单时间"
-            name="cutoffAt"
-            rules={[{ required: true }]}
-          >
-            <DatePicker showTime format="YYYY-MM-DD HH:mm" />
-          </Form.Item>
-          <Form.Item
-            label="计划发车"
-            name="dispatchAt"
-            rules={[{ required: true }]}
-          >
-            <DatePicker showTime format="YYYY-MM-DD HH:mm" />
-          </Form.Item>
-        </div>
-        <Form.Item label="参团商品" name="skuIds" rules={[{ required: true }]}>
-          <Select
-            mode="multiple"
-            options={products
-              .filter((item) => item.status === "APPROVED")
-              .map((item) => ({
-                value: item.sku.id,
-                label: `${item.title} · ${money(item.sku.unitPriceCents)}`,
-              }))}
-          />
-        </Form.Item>
-        <Form.Item label="最低成团件数" name="minTotalQuantity">
-          <InputNumber min={1} precision={0} suffix="件" />
-        </Form.Item>
-        <Button type="primary" htmlType="submit" block loading={busy}>
-          保存草稿
-        </Button>
-      </Form>
-    </Modal>
-  );
-}
-
-function PostponeCampaignModal({
-  open,
-  close,
-  saved,
-  campaign,
-}: {
-  open: boolean;
-  close: () => void;
-  saved: () => Promise<unknown>;
-  campaign: Campaign | null;
-}) {
-  const [form] = Form.useForm<{ cutoffAt: Dayjs; dispatchAt: Dayjs }>();
-  const [busy, setBusy] = useState(false);
-  const save = async (value: { cutoffAt: Dayjs; dispatchAt: Dayjs }) => {
-    if (!campaign) return;
-    setBusy(true);
-    try {
-      await api.postponeCampaign(campaign.id, {
-        cutoffAt: value.cutoffAt.toISOString(),
-        dispatchAt: value.dispatchAt.toISOString(),
-      });
-      await saved();
-      close();
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Modal
-      title="设置顺延时间"
-      open={open}
-      onCancel={close}
-      footer={null}
-      destroyOnHidden
-    >
-      <p className="modal-note">
-        顺延会恢复收单。请先确认新的截单和发车时间，再通知已付款用户。
-      </p>
-      <Form form={form} layout="vertical" onFinish={save}>
-        <Form.Item
-          label="新截单时间"
-          name="cutoffAt"
-          rules={[{ required: true }]}
-        >
-          <DatePicker showTime format="YYYY-MM-DD HH:mm" />
-        </Form.Item>
-        <Form.Item
-          label="新发车时间"
-          name="dispatchAt"
-          rules={[{ required: true }]}
-        >
-          <DatePicker showTime format="YYYY-MM-DD HH:mm" />
-        </Form.Item>
-        <Button type="primary" htmlType="submit" block loading={busy}>
-          确认顺延并恢复收单
-        </Button>
-      </Form>
-    </Modal>
-  );
-}
-
-function VerifyPickupModal({
-  open,
-  close,
-  saved,
-  plan,
-}: {
-  open: boolean;
-  close: () => void;
-  saved: () => Promise<unknown>;
-  plan: DeliveryPlan | null;
-}) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [order, setOrder] = useState<PickupOrderLookup | null>(null);
-  const [form] = Form.useForm<{orderNo:string;code:string;items:Array<{platformSkuId:string;quantity:number}>}>();
-  useEffect(() => {
-    setError("");
-    setOrder(null);
-    form.resetFields();
-  }, [open, plan?.id, form]);
-  const lookup = async () => {
-    if (!plan) return;
-    setBusy(true);setError("");
-    try {
-      const value=await form.validateFields(['orderNo']);
-      const found=await api.lookupPickupOrder(plan.id,value.orderNo.trim());
-      setOrder(found);
-      const pending=getPendingPickupRequest(localStorage,{orderId:found.id,deliveryPlanId:plan.id});
-      if (pending?.state==='PENDING') {
-        form.setFieldsValue({items:mapPickupRequestItemsToOrder(found.items,pending.items)});
-        setError('上次领取结果未确认，请重新输入取货码并按原数量重试；请勿修改本次商品数量。');
-      } else {
-        if (pending?.state==='CONFIRMED') clearPickupRequest(localStorage,pending);
-        form.setFieldsValue({items:found.items.map((item)=>({platformSkuId:item.skuId,quantity:item.remainingPickupQuantity}))});
-      }
-    } catch (reason) { setError(reason instanceof Error?reason.message:'订单查询失败'); } finally { setBusy(false); }
-  };
-  const save = async (value: { orderNo: string; code: string; items?:Array<{platformSkuId:string;quantity:number}> }) => {
-    if (!plan) return;
-    if (!order) { setError('请先查询并核对订单商品'); return; }
-    setBusy(true);
-    setError("");
-    let requestInput: { orderId:string; deliveryPlanId:string; items:Array<{platformSkuId:string;quantity:number}> } | null = null;
-    let pendingRequest: ReturnType<typeof beginPickupRequest> | null = null;
-    try {
-      try {
-        const selectedItems=(value.items??[]).filter((item):item is {platformSkuId:string;quantity:number}=>!!item&&typeof item.platformSkuId==='string'&&Number.isSafeInteger(item.quantity)&&item.quantity>0);
-        if (!selectedItems.length) { setError('请至少填写一项本次领取数量'); return; }
-        requestInput={orderId:order.id,deliveryPlanId:plan.id,items:selectedItems};
-        pendingRequest=beginPickupRequest(localStorage,requestInput);
-        await api.verifyPickup({
-          orderId: order.id,
-          deliveryPlanId: plan.id,
-          code: value.code,
-          pickupRequestId: pendingRequest.pickupRequestId,
-          items:selectedItems,
+      };
+      if (vehicleEmergency)
+        await api.correctVehicle(vehicle.id, {
+          ...body,
+          reason: value.reason?.trim() ?? "",
         });
-        markPickupRequestConfirmed(localStorage,pendingRequest);
-      } catch (reason) {
-        const apiError = reason as Error & { code?: string; statusCode?: number };
-        const selectedItems=(value.items??[]).filter((item):item is {platformSkuId:string;quantity:number}=>!!item&&typeof item.platformSkuId==='string'&&Number.isSafeInteger(item.quantity)&&item.quantity>0);
-        if (selectedItems.length && isTerminalPickupError(apiError)) {
-          clearPickupRequest(localStorage,{orderId:order.id,deliveryPlanId:plan.id});
-          form.setFieldValue('code','');
-          try { await saved(); } catch { /* terminal API result remains authoritative even if a list refresh fails */ }
-        }
-        const detail = apiError instanceof Error ? apiError.message : "核销失败，请稍后重试";
-        setError(
-          apiError.code === "FORBIDDEN"
-            ? `${detail}。请联系平台负责人在“自提点管理”的负责人账号中核对当前员工与点位范围。`
-            : detail,
-        );
-        return;
-      }
-      await saved();
-      if (requestInput) clearPickupRequest(localStorage,requestInput);
-      close();
-    } catch {
-      setError('领取已确认，页面刷新失败，请重新查询订单后再继续操作。');
-    } finally {
-      setBusy(false);
+      else await api.bookVehicle(vehicle.id, body);
+      setVehicle(null);
+      await reload();
+    } catch (error) {
+      void message.error((error as Error).message);
     }
   };
   return (
-    <Modal
-      title="现场核销"
-      open={open}
-      onCancel={close}
-      footer={null}
-      destroyOnHidden
-    >
-      <p className="modal-note">仅核验当前到货点订单。先查询商品明细，再按实际领取数量确认全提或部分提货。</p>
-      {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 16 }} />}
-      <Form form={form} layout="vertical" onFinish={save}>
-        <Form.Item label="订单号" name="orderNo" rules={[{ required: true }]}>
-          <Input />
-        </Form.Item>
-        <Button onClick={()=>void lookup()} loading={busy} block style={{marginBottom:16}}>查询订单商品</Button>
-        {order&&<section className="panel" style={{padding:12,marginBottom:16}}><b>{order.orderNo} · <StatusTag value={order.status}/></b>{order.items.map((item,index)=><div key={item.skuId} className="pickup-line"><Form.Item hidden name={['items',index,'platformSkuId']}><Input/></Form.Item><span>{item.name}</span><span>待领 {item.remainingPickupQuantity} / 已领 {item.alreadyPickedQuantity} / 异常 {item.exceptionQuantity}</span>{item.remainingPickupQuantity>0&&<Form.Item label="本次领取数量" name={['items',index,'quantity']} rules={[{required:true}]}><InputNumber min={0} max={item.remainingPickupQuantity} precision={0} style={{width:'100%'}}/></Form.Item>}</div>)}</section>}
-        <Form.Item
-          label="六码取货码"
-          name="code"
-          rules={[{ required: true, pattern: /^\d{6}$/ }]}
+    <>
+      <PageTitle
+        title="配送与到货"
+        subtitle="运营登记车辆，点位负责人逐商品确认实到；差异先生成草案"
+      />
+      {viewState === "error" ? (
+        <Alert
+          type="error"
+          showIcon
+          message="配送数据加载失败"
+          description={error}
+          action={
+            <Button aria-label="重试" onClick={() => void reload()}>
+              重试
+            </Button>
+          }
+        />
+      ) : viewState === "empty" ? (
+        <Card title="可配送团期">
+          <Empty description="暂无可配送团期，请先创建商品和团期">
+            <Typography.Paragraph type="secondary">
+              创建团期并绑定自提点后，运营可在此登记运输信息；登记后仍可在发车前编辑。
+            </Typography.Paragraph>
+            <Button type="primary" onClick={() => onNavigate("campaigns")}>
+              去创建团期
+            </Button>
+          </Empty>
+        </Card>
+      ) : (
+        <Table
+          rowKey="id"
+          loading={loading}
+          dataSource={plans}
+          columns={[
+          {
+            title: "团期",
+            render: (_, v) =>
+              campaigns.find((c) => c.id === v.campaignId)?.title ??
+              v.campaignId,
+          },
+          { title: "自提点", dataIndex: "siteName" },
+          { title: "车辆", render: (_, v) => v.vehicleOrderNo ?? "未登记" },
+          { title: "状态", render: (_, v) => <Status value={v.status} /> },
+          {
+            title: "操作",
+            render: (_, v) => {
+              const batch = batches.find(
+                (value) => value.campaignId === v.campaignId,
+              );
+              const actionLabels = getDeliveryActionLabels({
+                status: v.status,
+                canOperate,
+                emergencyProxy,
+                ...(batch ? { batchStatus: batch.status } : {}),
+              });
+              const overdue =
+                v.status === "IN_TRANSIT" &&
+                Boolean(v.estimatedArrivalAt) &&
+                dayjs(v.estimatedArrivalAt).isBefore(dayjs());
+              return (
+                <Space wrap>
+                  {actionLabels.includes("登记运输信息") && (
+                    <Button onClick={() => openVehicle(v)}>
+                      登记运输信息
+                    </Button>
+                  )}
+                  {actionLabels.includes("编辑运输信息") && (
+                    <>
+                      <Button onClick={() => openVehicle(v)}>
+                        编辑运输信息
+                      </Button>
+                      {actionLabels.includes("确认发车") ||
+                      actionLabels.includes("创建批次并发车") ? (
+                        <Button
+                          type="primary"
+                          onClick={() => setDispatchReview(v)}
+                        >
+                          {actionLabels.includes("确认发车")
+                            ? "确认发车"
+                            : "创建批次并发车"}
+                        </Button>
+                      ) : (
+                        <Tag color="green">已发车</Tag>
+                      )}
+                    </>
+                  )}
+                  {actionLabels.includes("紧急纠正运输信息") && (
+                      <Button danger onClick={() => openVehicle(v, true)}>
+                        紧急纠正运输信息
+                      </Button>
+                  )}
+                  <Typography.Text type="secondary">
+                    {v.status === "SITE_CONFIRMED"
+                      ? "等待运营登记运输信息"
+                      : v.status === "VEHICLE_BOOKED"
+                        ? "等待运营发车"
+                        : v.status === "IN_TRANSIT"
+                          ? "等待点位负责人确认到货"
+                          : "运输已到达"}
+                  </Typography.Text>
+                  {batch?.status === "DRAFT" && !canOperate && (
+                    <Typography.Text type="secondary">
+                      批次已创建，等待运营确认发车
+                    </Typography.Text>
+                  )}
+                  {overdue && (
+                    <Tag color="red">已超过预计到达时间，请跟进</Tag>
+                  )}
+                </Space>
+              );
+            },
+          },
+        ]}
+        />
+      )}
+      <Typography.Title level={4}>点位到货</Typography.Title>
+      {viewState === "error" ? null : deliveries.length === 0 && !loading ? (
+        <Card title="点位到货">
+          <Empty description="暂无点位到货记录">
+            <Typography.Paragraph type="secondary">
+              团期发车并到达后，授权点位负责人负责逐商品确认到货；如有差异，再由运营确认分配草案。
+            </Typography.Paragraph>
+          </Empty>
+        </Card>
+      ) : (
+        <Table
+          rowKey="id"
+          loading={loading}
+          dataSource={deliveries}
+          columns={[
+          { title: "团期", dataIndex: "campaignTitle" },
+          { title: "自提点", dataIndex: "siteName" },
+          { title: "状态", render: (_, v) => <Status value={v.status} /> },
+          {
+            title: "差异草案",
+            render: (_, v) =>
+              v.allocationDraftStatus
+                ? displayLabel(v.allocationDraftStatus)
+                : "—",
+          },
+          {
+            title: "操作",
+            render: (_, v) => (
+              <Space wrap>
+                {emergencyProxy && v.dispatchBatchId && !v.arrivalConfirmed && (
+                  <Button danger onClick={() => setArrival(v)}>
+                    紧急代办到货
+                  </Button>
+                )}
+                {canOperate &&
+                  v.communityDeliveryId &&
+                  v.allocationDraftStatus ===
+                    "PENDING_OPERATOR_CONFIRMATION" && (
+                    <Button
+                      type="primary"
+                      onClick={() =>
+                        void api
+                          .confirmAllocation(v.communityDeliveryId!)
+                          .then(reload)
+                      }
+                    >
+                      确认差异分配
+                    </Button>
+                  )}
+                {!v.arrivalConfirmed && !v.dispatchBatchId && (
+                  <Typography.Text type="secondary">
+                    等待运营发车
+                  </Typography.Text>
+                )}
+                {!v.arrivalConfirmed &&
+                  v.dispatchBatchId &&
+                  v.status === "IN_TRANSIT" &&
+                  !emergencyProxy && (
+                    <Typography.Text type="secondary">
+                      等待点位负责人确认到货
+                    </Typography.Text>
+                  )}
+                {v.arrivalConfirmed &&
+                  v.allocationDraftStatus ===
+                    "PENDING_OPERATOR_CONFIRMATION" && (
+                    <Typography.Text type="warning">
+                      待运营确认差异分配
+                    </Typography.Text>
+                  )}
+                {v.arrivalConfirmed &&
+                  v.allocationDraftStatus !==
+                    "PENDING_OPERATOR_CONFIRMATION" && (
+                    <Typography.Text type="secondary">
+                      到货已确认
+                    </Typography.Text>
+                  )}
+              </Space>
+            ),
+          },
+        ]}
+        />
+      )}
+      <Modal
+        open={!!vehicle}
+        title={
+          vehicleEmergency
+            ? "紧急纠正运输信息"
+            : vehicle?.status === "SITE_CONFIRMED"
+              ? "登记运输信息"
+              : "编辑运输信息"
+        }
+        footer={null}
+        onCancel={() => {
+          setVehicle(null);
+          setVehicleEmergency(false);
+          vehicleForm.resetFields();
+        }}
+      >
+        {vehicleEmergency && (
+          <Alert
+            type="warning"
+            showIcon
+            message="发车后普通编辑已锁定，仅超级管理员可紧急纠正；操作会写入审计。"
+            style={{ marginBottom: 16 }}
+          />
+        )}
+        <Form
+          form={vehicleForm}
+          layout="vertical"
+          onFinish={(v) => void saveVehicle(v)}
         >
-          <Input inputMode="numeric" maxLength={6} />
-        </Form.Item>
-        <Button type="primary" htmlType="submit" block loading={busy} disabled={!order}>
-          核验并确认本次领取
-        </Button>
-      </Form>
-    </Modal>
+          <Form.Item
+            name="logisticsPlatform"
+            label="承运方"
+            rules={[{ required: true }]}
+          >
+            <Input />
+          </Form.Item>
+          <Form.Item
+            name="vehicleOrderNo"
+            label="运输单号"
+            rules={[{ required: true }]}
+          >
+            <Input />
+          </Form.Item>
+          <div className="form-grid">
+            <Form.Item name="driverName" label="司机">
+              <Input />
+            </Form.Item>
+            <Form.Item name="driverPhone" label="电话">
+              <Input />
+            </Form.Item>
+          </div>
+          <Form.Item name="vehiclePlate" label="车牌">
+            <Input />
+          </Form.Item>
+          <Form.Item name="estimatedArrivalAt" label="预计到达">
+            <DatePicker showTime />
+          </Form.Item>
+          {vehicleEmergency && (
+            <Form.Item
+              name="reason"
+              label="紧急纠正原因"
+              rules={[{ required: true, min: 2, message: "请填写纠正原因" }]}
+            >
+              <Input.TextArea rows={3} />
+            </Form.Item>
+          )}
+          <Button type="primary" htmlType="submit">
+            保存
+          </Button>
+        </Form>
+      </Modal>
+      <Modal
+        open={!!dispatchReview}
+        title="发车前复核"
+        confirmLoading={dispatchSubmitting}
+        okText="确认发车"
+        cancelText="返回修改"
+        onCancel={() => setDispatchReview(null)}
+        onOk={() => void dispatch()}
+      >
+        {dispatchReview && (
+          <Descriptions column={1} bordered size="small">
+            <Descriptions.Item label="团期">
+              {campaigns.find((value) => value.id === dispatchReview.campaignId)?.title ??
+                dispatchReview.campaignId}
+            </Descriptions.Item>
+            <Descriptions.Item label="自提点">
+              {dispatchReview.siteName}
+            </Descriptions.Item>
+            <Descriptions.Item label="承运方">
+              {dispatchReview.logisticsPlatform ?? "—"}
+            </Descriptions.Item>
+            <Descriptions.Item label="运输单号">
+              {dispatchReview.vehicleOrderNo ?? "—"}
+            </Descriptions.Item>
+            <Descriptions.Item label="司机 / 车牌">
+              {[dispatchReview.driverName, dispatchReview.vehiclePlate]
+                .filter(Boolean)
+                .join(" / ") || "—"}
+            </Descriptions.Item>
+            <Descriptions.Item label="预计到达">
+              {dispatchReview.estimatedArrivalAt
+                ? dateTime(dispatchReview.estimatedArrivalAt)
+                : "—"}
+            </Descriptions.Item>
+            <Descriptions.Item label="订单 / 商品数量">
+              {orders.filter((value) => value.campaignId === dispatchReview.campaignId)
+                .length}
+              单 / {orders
+                .filter((value) => value.campaignId === dispatchReview.campaignId)
+                .flatMap((value) => value.items)
+                .reduce((sum, item) => sum + item.quantity, 0)} 件
+            </Descriptions.Item>
+          </Descriptions>
+        )}
+      </Modal>
+      <ArrivalConfirmationModal
+        arrival={arrival}
+        emergencyProxy={emergencyProxy}
+        onClose={() => setArrival(null)}
+        onConfirmed={reload}
+      />
+    </>
   );
 }
 
-function WarehouseExceptionModal({
-  open,
-  close,
-  saved,
-  campaigns,
+function Areas({
+  areas,
+  points,
+  reload,
 }: {
-  open: boolean;
-  close: () => void;
-  saved: () => Promise<unknown>;
-  campaigns: Campaign[];
+  areas: ServiceArea[];
+  points: PickupPoint[];
+  reload: () => Promise<void>;
 }) {
-  const [form] = Form.useForm<{ campaignId: string; platformSkuId: string; reason: 'WAREHOUSE_SHORTAGE'|'WAREHOUSE_DAMAGE'|'MIS_SORTED'; quantity: number; description: string }>();
-  const [busy, setBusy] = useState(false);
-  const campaignId = Form.useWatch('campaignId', form);
-  const current = campaigns.find((item) => item.id === campaignId);
-  useEffect(() => { if (!open) form.resetFields(); }, [open, form]);
-  const save = async (value: { campaignId: string; platformSkuId: string; reason: 'WAREHOUSE_SHORTAGE'|'WAREHOUSE_DAMAGE'|'MIS_SORTED'; quantity: number; description: string }) => {
-    setBusy(true);
-    try {
-      await api.registerWarehouseException(value.campaignId, { items: [{ platformSkuId: value.platformSkuId, reason: value.reason, shortQuantity: value.reason === 'WAREHOUSE_DAMAGE' ? 0 : value.quantity, damagedQuantity: value.reason === 'WAREHOUSE_DAMAGE' ? value.quantity : 0, description: value.description.trim(), evidenceUrl: null }] });
-      await saved(); close();
-    } finally { setBusy(false); }
-  };
-  return <Modal title="登记仓库差异" open={open} onCancel={close} footer={null} destroyOnHidden>
-    <Alert type="info" showIcon message="系统按已付款销售需求核对数量" description="这里只登记事实；运营决定补货、调拨或退款。破损商品会进入隔离，不能恢复成可售库存。" style={{marginBottom:16}} />
-    <Form form={form} layout="vertical" onFinish={save}>
-      <Form.Item label="锁单团期" name="campaignId" rules={[{required:true,message:'请选择锁单团期'}]}><Select options={campaigns.map((item)=>({value:item.id,label:item.title}))} /></Form.Item>
-      <Form.Item label="异常商品" name="platformSkuId" rules={[{required:true,message:'请选择商品'}]}><Select disabled={!current} options={(current?.items??[]).map((item)=>({value:item.skuId,label:`${item.title} · ${item.skuName}`}))} /></Form.Item>
-      <Form.Item label="异常类型" name="reason" initialValue="WAREHOUSE_SHORTAGE" rules={[{required:true}]}><Select options={[{value:'WAREHOUSE_SHORTAGE',label:'仓内短少'},{value:'WAREHOUSE_DAMAGE',label:'仓内破损'},{value:'MIS_SORTED',label:'错分拣'}]} /></Form.Item>
-      <Form.Item label="异常数量" name="quantity" rules={[{required:true,message:'请输入正整数'}]}><InputNumber min={1} precision={0} style={{width:'100%'}} /></Form.Item>
-      <Form.Item label="证据说明" name="description" rules={[{required:true,min:5,message:'请至少说明 5 个字'}]}><Input.TextArea rows={4} maxLength={500} placeholder="例如：批次、清点结果、破损情况和复核人" /></Form.Item>
-      <Button type="primary" htmlType="submit" block loading={busy}>登记事实并进入异常队列</Button>
-    </Form>
-  </Modal>;
-}
-
-function GoodsReceiptModal({
-  open,
-  close,
-  saved,
-  purchaseOrders,
-}: {
-  open: boolean;
-  close: () => void;
-  saved: () => Promise<unknown>;
-  purchaseOrders: PurchaseOrder[];
-}) {
-  type ReceiptForm = { purchaseOrderId: string; items: Array<{ purchaseOrderItemId: string; acceptedQuantity: number; rejectedQuantity: number; batchNo: string; productionDate: string; expiresAt: string; inspectionNote: string; exceptionReason: 'SHORT_RECEIPT'|'QUALITY_REJECTED'|'PACKAGE_DAMAGED'|null; evidenceUrl: string }> };
-  const [form] = Form.useForm<ReceiptForm>();
-  const [busy, setBusy] = useState(false);
-  const purchaseOrderId = Form.useWatch('purchaseOrderId', form);
-  const current = purchaseOrders.find((item) => item.id === purchaseOrderId);
-  useEffect(() => { if (!open) form.resetFields(); }, [open, form]);
+  const { message } = AntApp.useApp();
+  const [areaOpen, setAreaOpen] = useState(false);
+  const [pointOpen, setPointOpen] = useState(false);
+  const [editingPoint, setEditingPoint] = useState<PickupPoint | null>(null);
+  const [regions, setRegions] = useState<RegionDirectoryEntry[]>([]);
+  const [pointForm] = Form.useForm();
+  const pointLatitude = Form.useWatch("latitude", pointForm);
+  const pointLongitude = Form.useWatch("longitude", pointForm);
+  const provinceCode = Form.useWatch("provinceCode", pointForm) as
+    | string
+    | undefined;
+  const cityCode = Form.useWatch("cityCode", pointForm) as string | undefined;
+  const districtCode = Form.useWatch("districtCode", pointForm) as
+    | string
+    | undefined;
+  const provinceOptions = useMemo(() => listProvinces(regions), [regions]);
+  const cityOptions = useMemo(
+    () => listCities(regions, provinceCode),
+    [regions, provinceCode],
+  );
+  const districtOptions = useMemo(
+    () => listDistricts(regions, cityCode),
+    [regions, cityCode],
+  );
+  const searchBias = regionSearchBias(regions, {
+    ...(provinceCode ? { provinceCode } : {}),
+    ...(cityCode ? { cityCode } : {}),
+    ...(districtCode ? { districtCode } : {}),
+  });
   useEffect(() => {
-    if (current) form.setFieldValue('items', current.items.filter((item) => (item.remainingQuantity ?? item.plannedQuantity) > 0).map((item) => ({ purchaseOrderItemId: item.id, acceptedQuantity: item.remainingQuantity ?? item.plannedQuantity, rejectedQuantity: 0, batchNo: '', productionDate: '', expiresAt: '', inspectionNote: '', exceptionReason: null, evidenceUrl: '' })));
-  }, [current, form]);
-  const save = async (value: ReceiptForm) => {
-    if (!current) return;
-    setBusy(true);
-    try {
-      await api.receivePurchaseOrder(current.id, { items: value.items.map((item) => ({ ...item, batchNo: item.batchNo.trim() || null, productionDate: item.productionDate || null, expiresAt: item.expiresAt || null, inspectionNote: item.inspectionNote.trim() || null, evidenceUrl: item.evidenceUrl.trim() || null })) });
-      await saved(); close();
-    } finally { setBusy(false); }
+    void api.regions().then(setRegions).catch(() => undefined);
+  }, []);
+  const startCreatePoint = () => {
+    setEditingPoint(null);
+    pointForm.resetFields();
+    const defaultArea =
+      areas.find((value) => value.regionCode === "000000") ?? areas[0];
+    pointForm.setFieldsValue({
+      ...(defaultArea ? { serviceAreaId: defaultArea.id } : {}),
+      businessHours: "每日 09:00–20:00",
+      pickupInstructions: "到店出示领取码",
+    });
+    setPointOpen(true);
   };
-  const receivingOrders = purchaseOrders.filter((item) => ['ORDERED', 'RECEIVING'].includes(item.status) && item.items.some((line) => (line.remainingQuantity ?? line.plannedQuantity) > 0));
-  return <Modal title="登记供应商收货验收" open={open} onCancel={close} footer={null} destroyOnHidden width={800}>
-    <Alert type="info" showIcon message="每次收货都是独立批次，可继续补货验收" description="短收或拒收不会覆盖此前合格实收。请只登记本次实际到仓数量；合格数量入批次库存并形成供应商应付，拒收数量进入待补货异常。" style={{marginBottom:16}} />
-    <Form form={form} layout="vertical" onFinish={save}>
-      <Form.Item label="采购单" name="purchaseOrderId" rules={[{required:true,message:'请选择待验收采购单'}]}><Select options={receivingOrders.map((item) => ({value:item.id,label:`${item.purchaseNo} · ${item.status==='RECEIVING'?'待补货':'待验收'}`}))} /></Form.Item>
-      <Form.List name="items">{(fields) => <>{fields.map((field, index) => { const line=current?.items.find((item) => item.id === form.getFieldValue(['items', index, 'purchaseOrderItemId'])); const remaining=line?.remainingQuantity ?? line?.plannedQuantity ?? 0; return <div key={field.key} className="panel" style={{padding:12,marginBottom:12}}><b>SKU {line?.platformSkuId.slice(0,8)} · 本次最多 {remaining} 件</b><Form.Item name={[field.name,'purchaseOrderItemId']} hidden><Input /></Form.Item><div className="form-grid"><Form.Item label="合格实收" name={[field.name,'acceptedQuantity']} rules={[{required:true}]}><InputNumber min={0} max={remaining} precision={0} style={{width:'100%'}} /></Form.Item><Form.Item label="拒收/短收" name={[field.name,'rejectedQuantity']} rules={[{required:true}]}><InputNumber min={0} max={remaining} precision={0} style={{width:'100%'}} /></Form.Item></div><Form.Item label="食品批次号（有合格实收时必填）" name={[field.name,'batchNo']}><Input maxLength={100} /></Form.Item><div className="form-grid"><Form.Item label="生产日期" name={[field.name,'productionDate']}><Input type="date" /></Form.Item><Form.Item label="到期日期" name={[field.name,'expiresAt']}><Input type="date" /></Form.Item></div><Form.Item label="证据链接（可选）" name={[field.name,'evidenceUrl']}><Input maxLength={2048} placeholder="https://…" /></Form.Item><Form.Item label="拒收原因（有拒收/短收时必填）" name={[field.name,'exceptionReason']}><Select allowClear options={[{value:'SHORT_RECEIPT',label:'供应商短收'},{value:'QUALITY_REJECTED',label:'质量拒收'},{value:'PACKAGE_DAMAGED',label:'包装破损'}]} /></Form.Item><Form.Item label="验收说明（有拒收/短收时必填）" name={[field.name,'inspectionNote']}><Input.TextArea rows={2} maxLength={500} placeholder="批次、验收依据、数量或质量差异" /></Form.Item></div>;})}</>}</Form.List>
-      <Button type="primary" htmlType="submit" block disabled={!current} loading={busy}>保存本次验收批次</Button>
-    </Form>
-  </Modal>;
+  const editablePointFields = (point: PickupPoint) => ({
+    serviceAreaId: point.serviceAreaId,
+    name: point.name,
+    address: point.address,
+    businessHours: point.businessHours,
+    pickupInstructions: point.pickupInstructions,
+    latitude: point.latitude,
+    longitude: point.longitude,
+    capacityPerDay: point.capacityPerDay,
+    status: point.status,
+    ...matchRegionFromAddress(regions, point.address),
+  });
+  const startEditPoint = (point: PickupPoint) => {
+    setEditingPoint(point);
+    pointForm.setFieldsValue(editablePointFields(point));
+    setPointOpen(true);
+  };
+  return (
+    <>
+      <PageTitle
+        title="区域与自提点"
+        subtitle="先配置真实区域与启用自提点，再建立商品和团期；未覆盖地区仅收集开通意向"
+        action={
+          <Space>
+            <Button onClick={() => setAreaOpen(true)}>开通更多区域</Button>
+            <Button type="primary" onClick={startCreatePoint}>
+              新增自提点
+            </Button>
+          </Space>
+        }
+      />
+      <Typography.Title level={4}>服务区域</Typography.Title>
+      <Table
+        rowKey="id"
+        dataSource={areas}
+        columns={[
+          { title: "区域", dataIndex: "name" },
+          { title: "行政区代码", dataIndex: "regionCode" },
+          {
+            title: "接单",
+            render: (_, v) => (
+              <Button
+                onClick={() =>
+                  void api.setArea(v.id, !v.orderEnabled).then(reload)
+                }
+              >
+                {v.orderEnabled ? "暂停" : "开启"}
+              </Button>
+            ),
+          },
+        ]}
+      />
+      <Typography.Title level={4}>自提点</Typography.Title>
+      <Table
+        rowKey="id"
+        dataSource={points}
+        columns={[
+          { title: "名称", dataIndex: "name" },
+          { title: "地址", dataIndex: "address" },
+          { title: "营业时间", dataIndex: "businessHours" },
+          {
+            title: "联系人",
+            render: (_, v) =>
+              v.contactName || v.contactPhone
+                ? `${v.contactName} ${v.contactPhone}`.trim()
+                : "未关联负责人",
+          },
+          { title: "状态", render: (_, v) => <Status value={v.status} /> },
+          {
+            title: "操作",
+            render: (_, v) => (
+              <Space>
+                <Button onClick={() => startEditPoint(v)}>编辑</Button>
+                <Button
+                  danger={v.status === "ACTIVE"}
+                  onClick={() => {
+                    startEditPoint(v);
+                    pointForm.setFieldsValue({
+                      ...editablePointFields(v),
+                      status: v.status === "ACTIVE" ? "INACTIVE" : "ACTIVE",
+                    });
+                  }}
+                >
+                  {v.status === "ACTIVE" ? "停用" : "启用"}
+                </Button>
+              </Space>
+            ),
+          },
+        ]}
+      />
+      <Modal
+        open={areaOpen}
+        title="开通服务区域"
+        footer={null}
+        onCancel={() => setAreaOpen(false)}
+      >
+        <Form
+          layout="vertical"
+          onFinish={(v) =>
+            void api
+              .openArea(v.regionCode)
+              .then(() => {
+                setAreaOpen(false);
+                return reload();
+              })
+              .catch((e) => message.error(mutationErrorText(e)))
+          }
+        >
+          <Form.Item
+            name="regionCode"
+            label="行政区代码"
+            rules={[{ required: true, pattern: /^\d{6,12}$/ }]}
+          >
+            <Input placeholder="从行政区目录选择或输入代码" />
+          </Form.Item>
+          <Button type="primary" htmlType="submit">
+            开通
+          </Button>
+        </Form>
+      </Modal>
+      <Modal
+        width={760}
+        open={pointOpen}
+        title={editingPoint ? "编辑自提点" : "新增自提点"}
+        footer={null}
+        destroyOnHidden
+        onCancel={() => {
+          setPointOpen(false);
+          setEditingPoint(null);
+        }}
+      >
+        <Typography.Paragraph type="secondary" className="modal-note">
+          选省市区、填详细地址后地图会自动定位；拖动图钉确认位置即可保存。联系人不用在这里填，在「系统设置」创建点位负责人并授权自提点后会同步过来。
+        </Typography.Paragraph>
+        <Form
+          form={pointForm}
+          layout="vertical"
+          onFinish={(v) => {
+            const {
+              serviceAreaId,
+              status,
+              name,
+              provinceCode: selectedProvince,
+              cityCode: selectedCity,
+              districtCode: selectedDistrict,
+              ...details
+            } = v;
+            const region = findRegionEntry(regions, {
+              ...(selectedProvince ? { provinceCode: selectedProvince } : {}),
+              ...(selectedCity ? { cityCode: selectedCity } : {}),
+              ...(selectedDistrict ? { districtCode: selectedDistrict } : {}),
+            });
+            const payload = {
+              ...details,
+              name: (name?.trim() || details.address.trim()).slice(0, 120),
+              address: composePickupAddress(
+                regionAddressPrefix(region),
+                details.address,
+              ),
+              capacityPerDay: details.capacityPerDay ?? null,
+              pickupInstructions:
+                details.pickupInstructions?.trim() || "到店出示领取码",
+              businessHours: details.businessHours?.trim() || "每日 09:00–20:00",
+              ...(editingPoint ? {} : { contactName: "", contactPhone: "" }),
+            };
+            const request = editingPoint
+              ? api.updatePoint(editingPoint.id, {
+                  ...payload,
+                  ...(status ? { status } : {}),
+                })
+              : api.createPoint({
+                  ...payload,
+                  serviceAreaId,
+                });
+            void request
+              .then(() => {
+                setPointOpen(false);
+                setEditingPoint(null);
+                pointForm.resetFields();
+                return reload();
+              })
+              .catch((error) => message.error(mutationErrorText(error)));
+          }}
+        >
+          {areas.length > 1 ? (
+            <Form.Item
+              name="serviceAreaId"
+              label="服务区域"
+              rules={[{ required: true }]}
+            >
+              <Select
+                options={areas.map((v) => ({ value: v.id, label: v.name }))}
+                disabled={!!editingPoint}
+              />
+            </Form.Item>
+          ) : (
+            <Form.Item name="serviceAreaId" hidden>
+              <Input />
+            </Form.Item>
+          )}
+          <Form.Item name="name" label="自提点名称" rules={[{ required: true, min: 2 }]}>
+            <Input placeholder="如：朝阳大悦城提货点" />
+          </Form.Item>
+          <div className="pickup-region-row">
+            <Form.Item
+              name="provinceCode"
+              label="省"
+              rules={
+                editingPoint
+                  ? []
+                  : [{ required: true, message: "请选择省" }]
+              }
+            >
+              <Select
+                showSearch
+                optionFilterProp="label"
+                placeholder="省"
+                options={provinceOptions}
+                getPopupContainer={() => document.body}
+                onChange={() => {
+                  void pointForm.resetFields(["cityCode", "districtCode"]);
+                }}
+              />
+            </Form.Item>
+            <Form.Item
+              name="cityCode"
+              label="市"
+              rules={
+                editingPoint
+                  ? []
+                  : [{ required: true, message: "请选择市" }]
+              }
+            >
+              <Select
+                showSearch
+                optionFilterProp="label"
+                placeholder="市"
+                options={cityOptions}
+                disabled={!provinceCode}
+                getPopupContainer={() => document.body}
+                onChange={() => {
+                  void pointForm.resetFields(["districtCode"]);
+                }}
+              />
+            </Form.Item>
+            <Form.Item
+              name="districtCode"
+              label="区"
+              rules={
+                districtOptions.length
+                  ? [{ required: true, message: "请选择区" }]
+                  : []
+              }
+            >
+              <Select
+                showSearch
+                optionFilterProp="label"
+                placeholder="区"
+                options={districtOptions}
+                disabled={!cityCode || districtOptions.length === 0}
+                getPopupContainer={() => document.body}
+              />
+            </Form.Item>
+          </div>
+          <Form.Item
+            name="address"
+            label="详细地址"
+            extra="输入后会在地图上定位"
+            rules={[
+              { required: true, min: 5, message: "请填写详细地址，或在地图上点选" },
+              {
+                validator: async () => {
+                  if (pointLatitude == null || pointLongitude == null)
+                    throw new Error("请等待地图定位，或拖动图钉确认位置");
+                },
+              },
+            ]}
+          >
+            <PickupLocationPicker
+              active={pointOpen}
+              latitude={pointLatitude}
+              longitude={pointLongitude}
+              searchBias={searchBias}
+              onLocated={(place) => {
+                const region = matchRegionFromPlace(regions, place);
+                pointForm.setFieldsValue({
+                  latitude: place.latitude,
+                  longitude: place.longitude,
+                  ...(place.title && !pointForm.getFieldValue("name")
+                    ? { name: place.title }
+                    : {}),
+                  ...(region.provinceCode ? region : {}),
+                });
+                void pointForm.validateFields(["address"]).catch(() => undefined);
+              }}
+            />
+          </Form.Item>
+          <div className="pickup-coord-fields">
+            <Form.Item
+              name="longitude"
+              label="地图经度"
+              rules={[{ required: true }]}
+            >
+              <InputNumber min={-180} max={180} precision={6} />
+            </Form.Item>
+            <Form.Item
+              name="latitude"
+              label="地图纬度"
+              rules={[{ required: true }]}
+            >
+              <InputNumber min={-90} max={90} precision={6} />
+            </Form.Item>
+          </div>
+          <div className="form-grid">
+            <Form.Item name="businessHours" label="营业时间">
+              <Input placeholder="每日 09:00–20:00" />
+            </Form.Item>
+            <Form.Item name="pickupInstructions" label="领取提示">
+              <Input placeholder="到店出示领取码" />
+            </Form.Item>
+          </div>
+          {editingPoint && (
+            <Form.Item name="capacityPerDay" label="日容量（可选）">
+              <InputNumber min={1} />
+            </Form.Item>
+          )}
+          {editingPoint && (
+            <Form.Item name="status" label="点位状态" rules={[{ required: true }]}>
+              <Select
+                options={[
+                  { value: "ACTIVE", label: "启用" },
+                  { value: "INACTIVE", label: "停用" },
+                ]}
+              />
+            </Form.Item>
+          )}
+          <Button type="primary" htmlType="submit">
+            {editingPoint ? "保存修改" : "保存"}
+          </Button>
+        </Form>
+      </Modal>
+    </>
+  );
 }
 
-function OutboundDispatchModal({
-  open,
-  close,
-  saved,
-  campaign,
+function PointWorkbench({
+  deliveries,
+  roles,
+  loading,
+  error,
+  reload,
 }: {
-  open: boolean;
-  close: () => void;
-  saved: () => Promise<unknown>;
-  campaign: Campaign | null;
+  deliveries: CommunityDelivery[];
+  roles: string[];
+  loading: boolean;
+  error: string | null;
+  reload: () => Promise<void>;
 }) {
-  const [form] = Form.useForm<{ carrierReference: string }>();
-  const [busy, setBusy] = useState(false);
-  useEffect(() => { if (!open) form.resetFields(); }, [open, form]);
-  const save = async (value: { carrierReference: string }) => {
-    if (!campaign) return;
-    setBusy(true);
-    try {
-      await api.createPlatformOutbound(campaign.id, value.carrierReference.trim() || null);
-      await saved();
-      close();
-    } finally { setBusy(false); }
-  };
-  return <Modal title="创建出库配送" open={open} onCancel={close} footer={null} destroyOnHidden>
-    <Alert type="info" showIcon message="仅限已完成分拣且已预约固定自提点的团期" description="确认后库存从已分拣转为已出库，配送计划进入运输中；点位交接完成前不会开放领取。" style={{ marginBottom: 16 }} />
-    <Form form={form} layout="vertical" onFinish={save}>
-      <Form.Item label="锁单团期"><Input value={campaign?.title ?? ''} disabled /></Form.Item>
-      <Form.Item label="配送/承运参考号" name="carrierReference"><Input maxLength={100} placeholder="例如：司机单号、物流单号或班次号" /></Form.Item>
-      <Button type="primary" htmlType="submit" block disabled={!campaign} loading={busy}>确认出库配送</Button>
-    </Form>
-  </Modal>;
-}
-
-function PickupHandoverModal({
-  open,
-  close,
-  saved,
-  outboundOrders,
-}: {
-  open: boolean;
-  close: () => void;
-  saved: () => Promise<unknown>;
-  outboundOrders: OutboundOrder[];
-}) {
-  const [form] = Form.useForm<{ outboundId: string; receivedBy: string; exceptionNote: string; items: Array<{ platformSkuId: string; receivedQuantity: number; rejectedQuantity: number; shortQuantity: number; damagedQuantity: number; reason: string | null; evidenceNote: string | null }> }>();
-  const [busy, setBusy] = useState(false);
-  const outboundId = Form.useWatch('outboundId', form);
-  const current = outboundOrders.find((item) => item.id === outboundId);
-  useEffect(() => { if (!open) form.resetFields(); }, [open, form]);
+  const { message } = AntApp.useApp();
+  const [plans, setPlans] = useState<DeliveryPlan[]>([]);
+  const [order, setOrder] = useState<PickupLookup | null>(null);
+  const [planId, setPlanId] = useState("");
+  const [orderNo, setOrderNo] = useState("");
+  const [code, setCode] = useState("");
+  const [pickupQuantities, setPickupQuantities] = useState<
+    Record<string, number>
+  >({});
+  const [pickupReview, setPickupReview] = useState<PendingPickupRequest | null>(
+    null,
+  );
+  const [submittingPickup, setSubmittingPickup] = useState(false);
+  const [arrival, setArrival] = useState<CommunityDelivery | null>(null);
+  const [pickupLoading, setPickupLoading] = useState(true);
+  const [pickupError, setPickupError] = useState<string | null>(null);
   useEffect(() => {
-    if (current) form.setFieldValue('items', current.items.map((item) => ({ platformSkuId: item.platformSkuId, receivedQuantity: item.quantity, rejectedQuantity: 0, shortQuantity: 0, damagedQuantity: 0, reason: null, evidenceNote: null })));
-  }, [current, form]);
-  const save = async (value: { outboundId: string; receivedBy: string; exceptionNote: string; items: Array<{ platformSkuId: string; receivedQuantity: number; rejectedQuantity: number; shortQuantity: number; damagedQuantity: number; reason: string | null; evidenceNote: string | null }> }) => {
-    if (!current) return;
-    setBusy(true);
+    let active = true;
+    const loadPlans = async () => {
+      setPickupLoading(true);
+      setPickupError(null);
+      try {
+        const values = await api.pickupPlans();
+        if (active) setPlans(values);
+      } catch (caught) {
+        if (active)
+          setPickupError(adminLoadErrorText(caught));
+      } finally {
+        if (active) setPickupLoading(false);
+      }
+    };
+    void loadPlans();
+    return () => {
+      active = false;
+    };
+  }, []);
+  const refreshAfterArrival = async () => {
+    await reload();
+    setPlans(await api.pickupPlans());
+  };
+  const pendingArrivals = deliveries.filter(
+    (delivery) => delivery.dispatchBatchId && !delivery.arrivalConfirmed,
+  );
+  const setLookupOrder = (nextOrder: PickupLookup) => {
+    setOrder(nextOrder);
+    setPickupQuantities(
+      Object.fromEntries(nextOrder.items.map((item) => [item.skuId, 0])),
+    );
+  };
+  const lookup = async () => {
     try {
-      await api.completePickupHandover(current.id, {
-        receivedBy: value.receivedBy.trim(),
-        exceptionNote: value.exceptionNote.trim() || null,
-        items: value.items,
+      setLookupOrder(await api.lookupPickup(planId, orderNo.trim()));
+    } catch (error) {
+      void message.error((error as Error).message);
+    }
+  };
+  const openPickupReview = () => {
+    if (!order) return;
+    const items = order.items
+      .map((item) => ({
+        catalogSkuId: item.skuId,
+        quantity: pickupQuantities[item.skuId] ?? 0,
+      }))
+      .filter((item) => item.quantity > 0);
+    if (items.length === 0) {
+      void message.error("请至少填写一项大于 0 的本次领取数量");
+      return;
+    }
+    try {
+      setPickupReview(
+        beginPickupRequest(localStorage, {
+          orderId: order.id,
+          deliveryPlanId: order.deliveryPlanId,
+          items,
+        }),
+      );
+    } catch (error) {
+      void message.error(error instanceof Error ? error.message : "无法创建领取请求");
+    }
+  };
+  const verify = async () => {
+    if (!order || !pickupReview) return;
+    setSubmittingPickup(true);
+    try {
+      await api.verifyPickup({
+        orderId: order.id,
+        deliveryPlanId: order.deliveryPlanId,
+        code,
+        pickupRequestId: pickupReview.pickupRequestId,
+        items: pickupReview.items,
       });
-      await saved(); close();
-    } finally { setBusy(false); }
+      markPickupRequestConfirmed(localStorage, pickupReview);
+      const refreshed = await api.lookupPickup(planId, orderNo.trim());
+      clearPickupRequest(localStorage, pickupReview);
+      setLookupOrder(refreshed);
+      setPickupReview(null);
+      void message.success("本次领取已核销");
+    } catch (error) {
+      if (isTerminalPickupError(error as { statusCode?: number; code?: string })) {
+        clearPickupRequest(localStorage, pickupReview);
+        setPickupReview(null);
+      }
+      void message.error(error instanceof Error ? error.message : "领取核销失败");
+    } finally {
+      setSubmittingPickup(false);
+    }
   };
-  return <Modal title="登记点位交接与差异" open={open} onCancel={close} footer={null} destroyOnHidden width={760}>
-    <Alert type="info" showIcon message="先登记实际交接，再开放领取" description="逐商品填写实到、拒收、短少或破损数量；异常时必须选原因并提供证据说明。点位人员只能登记事实，运营再决定调拨或退款。" style={{marginBottom:16}} />
-    <Form form={form} layout="vertical" onFinish={save}>
-      <Form.Item label="待交接出库单" name="outboundId" rules={[{required:true,message:'请选择已发车出库单'}]}><Select options={outboundOrders.map((item)=>({value:item.id,label:`${item.outboundNo} · ${item.items.length} 个商品`}))} /></Form.Item>
-      <Form.Item label="点位接货人" name="receivedBy" rules={[{required:true,min:2,message:'请填写实际接货人'}]}><Input maxLength={100} /></Form.Item>
-      <Form.Item label="交接说明" name="exceptionNote"><Input.TextArea rows={3} maxLength={500} placeholder="可记录整体交接情况；异常证据请在对应商品填写。" /></Form.Item>
-      <Form.List name="items">{(fields)=><>{fields.map((field,index)=>{const outboundItem=current?.items[index];return <div key={field.key} className="panel" style={{padding:12,marginBottom:12}}><b>{outboundItem?.platformSkuId.slice(0,8)} · 应交 {outboundItem?.quantity ?? 0} 件</b><Form.Item name={[field.name,'platformSkuId']} hidden><Input /></Form.Item><div className="form-grid"><Form.Item label="实到" name={[field.name,'receivedQuantity']} rules={[{required:true}]}><InputNumber min={0} precision={0} style={{width:'100%'}} /></Form.Item><Form.Item label="拒收" name={[field.name,'rejectedQuantity']} rules={[{required:true}]}><InputNumber min={0} precision={0} style={{width:'100%'}} /></Form.Item><Form.Item label="短少" name={[field.name,'shortQuantity']} rules={[{required:true}]}><InputNumber min={0} precision={0} style={{width:'100%'}} /></Form.Item><Form.Item label="破损" name={[field.name,'damagedQuantity']} rules={[{required:true}]}><InputNumber min={0} precision={0} style={{width:'100%'}} /></Form.Item></div><Form.Item label="差异原因（有差异时必填）" name={[field.name,'reason']}><Select allowClear options={[{value:'TRANSIT_SHORTAGE',label:'运输短少'},{value:'TRANSIT_DAMAGE',label:'运输破损'},{value:'WRONG_POINT',label:'错点'},{value:'PICKUP_POINT_REJECTED',label:'点位拒收'}]} /></Form.Item><Form.Item label="差异证据说明（有差异时必填）" name={[field.name,'evidenceNote']}><Input.TextArea rows={2} maxLength={500} /></Form.Item></div>;})}</>}</Form.List>
-      <Button type="primary" htmlType="submit" block disabled={!current} loading={busy}>提交交接事实</Button>
-    </Form>
-  </Modal>;
+  return (
+    <>
+      <PageTitle
+        title="我的点位工作台"
+        subtitle="仅处理已授权点位的到货与领取，不提供消费者小程序工作入口"
+      />
+      {!roles.includes("PICKUP_MANAGER") ? (
+        <Alert
+          type="warning"
+          showIcon
+          message="当前账号无点位到货确认权限"
+          description="请使用已分配自提点的负责人账号登录。"
+        />
+      ) : loading ? (
+        <Card loading title="待确认到货" />
+      ) : error ? (
+        <Alert
+          type="error"
+          showIcon
+          message="待确认到货加载失败"
+          description={error}
+          action={<Button onClick={() => void reload()}>重新加载</Button>}
+        />
+      ) : pendingArrivals.length === 0 ? (
+        <Card title="待确认到货">
+          <Empty description="暂无已发车、待确认的授权点位配送" />
+        </Card>
+      ) : (
+        <Card title="待确认到货">
+          <Table
+            rowKey="id"
+            pagination={false}
+            dataSource={pendingArrivals}
+            columns={[
+              { title: "团期", dataIndex: "campaignTitle" },
+              { title: "自提点", dataIndex: "siteName" },
+              {
+                title: "操作",
+                render: (_, delivery) => (
+                  <Button
+                    type="primary"
+                    disabled={!delivery.dispatchBatchId}
+                    onClick={() => setArrival(delivery)}
+                  >
+                    逐商品确认到货
+                  </Button>
+                ),
+              },
+            ]}
+          />
+        </Card>
+      )}
+      <Card>
+        {pickupError && (
+          <Alert
+            type="error"
+            showIcon
+            message="可领取点位加载失败"
+            description={pickupError}
+            style={{ marginBottom: 16 }}
+          />
+        )}
+        <Space wrap>
+          <Select
+            style={{ width: 260 }}
+            placeholder="选择已到货点位"
+            value={planId || null}
+            onChange={setPlanId}
+            loading={pickupLoading}
+            disabled={pickupLoading || !!pickupError || plans.length === 0}
+            options={plans.map((v) => ({
+              value: v.id,
+              label: `${v.siteName} · ${v.address}`,
+            }))}
+          />
+          <Input
+            style={{ width: 220 }}
+            placeholder="订单号"
+            value={orderNo}
+            onChange={(e) => setOrderNo(e.target.value)}
+          />
+          <Button
+            type="primary"
+            disabled={!planId || !orderNo.trim() || pickupLoading}
+            onClick={() => void lookup()}
+          >
+            查询订单
+          </Button>
+        </Space>
+      </Card>
+      {order && (
+        <Card title={`订单 ${order.orderNo}`} style={{ marginTop: 16 }}>
+          <Table
+            pagination={false}
+            rowKey="skuId"
+            dataSource={order.items}
+            columns={[
+              { title: "商品", dataIndex: "name" },
+              { title: "可领取", dataIndex: "readyQuantity" },
+              { title: "已领取", dataIndex: "alreadyPickedQuantity" },
+              { title: "本次最多领取", dataIndex: "remainingPickupQuantity" },
+              {
+                title: "本次领取数量",
+                render: (_, item) => (
+                  <InputNumber
+                    aria-label={`${item.name} 本次领取数量`}
+                    min={0}
+                    max={item.remainingPickupQuantity}
+                    precision={0}
+                    value={pickupQuantities[item.skuId] ?? 0}
+                    disabled={submittingPickup || item.remainingPickupQuantity === 0}
+                    onChange={(value) =>
+                      setPickupQuantities((current) => ({
+                        ...current,
+                        [item.skuId]: Math.max(
+                          0,
+                          Math.min(item.remainingPickupQuantity, Number(value ?? 0)),
+                        ),
+                      }))
+                    }
+                    onBlur={(event) =>
+                      setPickupQuantities((current) => ({
+                        ...current,
+                        [item.skuId]: Math.max(
+                          0,
+                          Math.min(
+                            item.remainingPickupQuantity,
+                            Number(event.target.value || 0),
+                          ),
+                        ),
+                      }))
+                    }
+                  />
+                ),
+              },
+            ]}
+          />
+          <Space style={{ marginTop: 16 }}>
+            <Button
+              disabled={submittingPickup}
+              onClick={() =>
+                setPickupQuantities(
+                  Object.fromEntries(
+                    order.items.map((item) => [
+                      item.skuId,
+                      item.remainingPickupQuantity,
+                    ]),
+                  ),
+                )
+              }
+            >
+              填满剩余
+            </Button>
+            <Button
+              disabled={submittingPickup}
+              onClick={() =>
+                setPickupQuantities(
+                  Object.fromEntries(order.items.map((item) => [item.skuId, 0])),
+                )
+              }
+            >
+              清零
+            </Button>
+            <Input
+              placeholder="6 位取货码"
+              maxLength={6}
+              value={code}
+              disabled={submittingPickup}
+              onChange={(e) => setCode(e.target.value)}
+            />
+            <Button
+              type="primary"
+              disabled={!/^\d{6}$/.test(code) || submittingPickup}
+              onClick={openPickupReview}
+            >
+              确认本次领取
+            </Button>
+          </Space>
+        </Card>
+      )}
+      <Modal
+        open={!!pickupReview}
+        title="本次领取复核"
+        okText="确认提交核销"
+        cancelText="返回修改"
+        confirmLoading={submittingPickup}
+        okButtonProps={{ disabled: !/^\d{6}$/.test(code) || submittingPickup }}
+        onOk={() => void verify()}
+        onCancel={() => !submittingPickup && setPickupReview(null)}
+      >
+        <Typography.Paragraph>
+          请复核本次领取数量和取货码；提交后将按该请求号幂等执行。
+        </Typography.Paragraph>
+        <Table
+          rowKey="catalogSkuId"
+          pagination={false}
+          dataSource={pickupReview?.items ?? []}
+          columns={[
+            {
+              title: "商品",
+              render: (_, item) =>
+                order?.items.find((value) => value.skuId === item.catalogSkuId)
+                  ?.name ?? item.catalogSkuId,
+            },
+            { title: "本次数量", dataIndex: "quantity" },
+          ]}
+        />
+      </Modal>
+      <ArrivalConfirmationModal
+        arrival={arrival}
+        emergencyProxy={false}
+        onClose={() => setArrival(null)}
+        onConfirmed={refreshAfterArrival}
+      />
+    </>
+  );
 }
 
-function CommunityProductModal({open,close,onSaved,sku,showCommercialDetails}:{open:boolean;close:()=>void;onSaved:()=>void;sku:PlatformSku|null;showCommercialDetails:boolean}){
-  const [form]=Form.useForm<{title:string;category:string;origin:string;imageUrl:string|null;skuName:string;retailPriceCents:number;defaultSellableQuantity:number;referencePurchaseCostCents:number|null;supplierNote:string|null}>();
-  const [saving,setSaving]=useState(false);
-  const save=async(value:{title:string;category:string;origin:string;imageUrl:string|null;skuName:string;retailPriceCents:number;defaultSellableQuantity:number;referencePurchaseCostCents:number|null;supplierNote:string|null})=>{setSaving(true);try{const payload={...value,referencePurchaseCostCents:value.referencePurchaseCostCents??null,supplierNote:value.supplierNote??null,status:sku?.status??'ACTIVE'} as const;await api.savePlatformSku(sku?{...payload,id:sku.id,productId:sku.productId}:payload);message.success('平台商品已保存，可加入新团期');form.resetFields();onSaved();close();}catch(error){message.error(error instanceof Error?error.message:'保存失败');}finally{setSaving(false);}};
-  const initialValues=sku?{title:sku.product.title,category:sku.product.category,origin:sku.product.origin,imageUrl:sku.product.imageUrl,skuName:sku.name,retailPriceCents:sku.retailPriceCents,defaultSellableQuantity:sku.defaultSellableQuantity??0,referencePurchaseCostCents:sku.referencePurchaseCostCents??null,supplierNote:sku.supplierNote??null}:{category:'地方特产',origin:'保定',imageUrl:null,defaultSellableQuantity:0,referencePurchaseCostCents:null,supplierNote:null};
-  return <Modal open={open} onCancel={close} footer={null} destroyOnHidden title={sku?'编辑平台商品':'新增平台商品'}><Alert type="info" showIcon message="商品是长期资料" description="采购成本和供应商备注仅作内部参考，不会进入消费者订单、退款或点位人员视图。" style={{marginBottom:16}}/><Form key={sku?.id??'new'} form={form} layout="vertical" initialValues={initialValues} onFinish={(value)=>void save(value)}><div className="form-grid"><Form.Item label="商品名称" name="title" rules={[{required:true,min:2}]}><Input /></Form.Item><Form.Item label="规格" name="skuName" rules={[{required:true,min:1}]}><Input /></Form.Item></div><div className="form-grid"><Form.Item label="分类" name="category" rules={[{required:true}]}><Input /></Form.Item><Form.Item label="产地" name="origin" rules={[{required:true}]}><Input /></Form.Item></div><div className="form-grid"><Form.Item label="默认零售价（分）" name="retailPriceCents" rules={[{required:true}]}><InputNumber min={1} precision={0} style={{width:'100%'}} /></Form.Item><Form.Item label="默认可售数量" name="defaultSellableQuantity" rules={[{required:true}]}><InputNumber min={0} precision={0} style={{width:'100%'}} /></Form.Item></div><Form.Item label="图片 URL（可选）" name="imageUrl"><Input /></Form.Item>{showCommercialDetails&&<><Form.Item label="采购成本（分，可选）" name="referencePurchaseCostCents"><InputNumber min={1} precision={0} style={{width:'100%'}} /></Form.Item><Form.Item label="供应商备注（可选）" name="supplierNote"><Input.TextArea rows={2} maxLength={500} /></Form.Item></>}<Button htmlType="submit" type="primary" loading={saving}>保存平台商品</Button></Form></Modal>;
+function PickupWindowQueue({
+  values,
+  roles,
+  reload,
+}: {
+  values: PickupWindow[];
+  roles: string[];
+  reload: () => Promise<void>;
+}) {
+  const { message } = AntApp.useApp();
+  const [action, setAction] = useState<{
+    window: PickupWindow;
+    type: "extend" | "refund" | "loss";
+  } | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [form] = Form.useForm<{
+    deadlineAt?: dayjs.Dayjs;
+    note: string;
+  }>();
+  const canOperate = roles.includes("OPERATOR") || roles.includes("SUPER_ADMIN");
+  if (!canOperate) return null;
+  const submit = async (value: { deadlineAt?: dayjs.Dayjs; note: string }) => {
+    if (!action) return;
+    setSubmitting(true);
+    try {
+      if (action.type === "extend") {
+        if (!value.deadlineAt) return;
+        await api.extendPickup(action.window.orderId, {
+          deadlineAt: value.deadlineAt.toISOString(),
+          note: value.note.trim(),
+        });
+      } else {
+        await api.disposePickup(action.window.orderId, {
+          action: action.type === "refund" ? "REFUND" : "LOSS",
+          note: value.note.trim(),
+        });
+      }
+      setAction(null);
+      form.resetFields();
+      await reload();
+      void message.success("领取窗口已更新");
+    } catch (caught) {
+      void message.error(caught instanceof Error ? caught.message : "领取窗口处理失败");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  return (
+    <>
+      <Typography.Title level={4}>逾期领取处理</Typography.Title>
+      <Table
+        rowKey="orderId"
+        dataSource={values}
+        locale={{ emptyText: "暂无需要运营处理的领取窗口" }}
+        columns={[
+          { title: "订单", render: (_, value) => value.orderNo ?? value.orderId },
+          {
+            title: "自提点",
+            render: (_, value) => value.pickupPointName ?? value.pickupPointId ?? "—",
+          },
+          { title: "截止时间", render: (_, value) => dateTime(value.deadlineAt) },
+          { title: "状态", render: (_, value) => <Status value={value.status} /> },
+          {
+            title: "下一责任",
+            render: (_, value) =>
+              value.nextResponsibility
+                ? displayLabel(value.nextResponsibility)
+                : "—",
+          },
+          {
+            title: "操作",
+            render: (_, value) =>
+              value.status === "EXPIRED_PENDING" ? (
+                <Space wrap>
+                  <Button onClick={() => setAction({ window: value, type: "extend" })}>
+                    一次延期
+                  </Button>
+                  <Button onClick={() => setAction({ window: value, type: "refund" })}>
+                    登记退款
+                  </Button>
+                  <Button danger onClick={() => setAction({ window: value, type: "loss" })}>
+                    登记报损
+                  </Button>
+                </Space>
+              ) : (
+                "当前无需运营处理"
+              ),
+          },
+        ]}
+      />
+      <Modal
+        open={!!action}
+        title={
+          action?.type === "extend"
+            ? "确认一次延期领取"
+            : action?.type === "refund"
+              ? "确认登记逾期退款"
+              : "确认登记逾期报损"
+        }
+        footer={null}
+        onCancel={() => !submitting && setAction(null)}
+        destroyOnHidden
+      >
+        <Form form={form} layout="vertical" onFinish={(value) => void submit(value)}>
+          {action?.type === "extend" && (
+            <Form.Item
+              name="deadlineAt"
+              label="新的领取截止时间"
+              rules={[{ required: true, message: "请选择新的领取截止时间" }]}
+            >
+              <DatePicker showTime disabled={submitting} />
+            </Form.Item>
+          )}
+          <Form.Item
+            name="note"
+            label="处理原因"
+            rules={[{ required: true, min: 2, message: "请填写处理原因" }]}
+          >
+            <Input.TextArea rows={3} disabled={submitting} />
+          </Form.Item>
+          <Button type="primary" danger={action?.type === "loss"} htmlType="submit" loading={submitting}>
+            二次确认并提交
+          </Button>
+        </Form>
+      </Modal>
+    </>
+  );
 }
 
-function CommunityCampaignModal({open,close,skus,areas,points,onSaved}:{open:boolean;close:()=>void;skus:PlatformSku[];areas:ServiceArea[];points:PickupPoint[];onSaved:()=>void}){
-  const [form]=Form.useForm<{title:string;serviceAreaId:string;pickupPointId:string;cutoffAt:Dayjs;dispatchAt:Dayjs;minTotalQuantity:number;items:Array<{platformSkuId:string;retailPriceCents:number;sellableQuantity:number}>}>();const [saving,setSaving]=useState(false);const areaId=Form.useWatch('serviceAreaId',form);
-  const save=async(value:{title:string;serviceAreaId:string;pickupPointId:string;cutoffAt:Dayjs;dispatchAt:Dayjs;minTotalQuantity:number;items:Array<{platformSkuId:string;retailPriceCents:number;sellableQuantity:number}>})=>{setSaving(true);try{await api.createCommunityCampaign({title:value.title,serviceAreaId:value.serviceAreaId,pickupPointId:value.pickupPointId,cutoffAt:value.cutoffAt.toISOString(),dispatchAt:value.dispatchAt.toISOString(),minTotalQuantity:value.minTotalQuantity,failureAction:'CANCEL_AND_REFUND',items:value.items});message.success('社区团期已创建，请确认后开售');form.resetFields();onSaved();close();}catch(error){message.error(error instanceof Error?error.message:'创建失败');}finally{setSaving(false);}};
-  return <Modal open={open} onCancel={close} footer={null} width={760} title="创建社区团期"><Alert type="info" showIcon message="一团一个固定自提点" description="创建后商品、团期售价和可售量会成为快照；不要求采购单、中心仓或批次库存。" style={{marginBottom:16}}/><Form form={form} layout="vertical" initialValues={{minTotalQuantity:1,items:[]}} onFinish={(value)=>void save(value)}><Form.Item label="团期名称" name="title" rules={[{required:true,min:2}]}><Input /></Form.Item><div className="form-grid"><Form.Item label="收货区域" name="serviceAreaId" rules={[{required:true}]}><Select options={areas.filter((area)=>area.status==='ENABLED'&&area.orderEnabled).map((area)=>({value:area.id,label:area.name}))} /></Form.Item><Form.Item label="固定自提点" name="pickupPointId" rules={[{required:true}]}><Select options={points.filter((point)=>point.status==='ACTIVE'&&(!areaId||point.serviceAreaId===areaId)).map((point)=>({value:point.id,label:point.name}))} /></Form.Item></div><div className="form-grid"><Form.Item label="截单时间" name="cutoffAt" rules={[{required:true}]}><DatePicker showTime style={{width:'100%'}} /></Form.Item><Form.Item label="预计提货/发车时间" name="dispatchAt" rules={[{required:true}]}><DatePicker showTime style={{width:'100%'}} /></Form.Item></div><Form.Item label="最小成团件数" name="minTotalQuantity" rules={[{required:true}]}><InputNumber min={1} precision={0} /></Form.Item><Form.List name="items">{(fields,{add,remove})=><><Button type="dashed" onClick={()=>add()} style={{marginBottom:12}}>添加团期商品</Button>{fields.map((field)=><div key={field.key} className="panel" style={{padding:12,marginBottom:12}}><Button type="link" danger onClick={()=>remove(field.name)}>移除</Button><Form.Item label="平台商品" name={[field.name,'platformSkuId']} rules={[{required:true}]}><Select options={skus.filter((sku)=>sku.status==='ACTIVE').map((sku)=>({value:sku.id,label:`${sku.product.title} · ${sku.name}`}))} /></Form.Item><div className="form-grid"><Form.Item label="本团售价（分）" name={[field.name,'retailPriceCents']} rules={[{required:true}]}><InputNumber min={1} precision={0} style={{width:'100%'}} /></Form.Item><Form.Item label="本团可售数量" name={[field.name,'sellableQuantity']} rules={[{required:true}]}><InputNumber min={1} precision={0} style={{width:'100%'}} /></Form.Item></div></div>)}</>}</Form.List><Button htmlType="submit" type="primary" loading={saving}>创建团期</Button></Form></Modal>;
+function Service({
+  quality,
+  cancellations,
+  exceptions,
+  pickupWindows,
+  roles,
+  reload,
+  loading,
+  error,
+}: {
+  quality: Awaited<ReturnType<typeof api.quality>>;
+  cancellations: Awaited<ReturnType<typeof api.cancellations>>;
+  exceptions: FulfillmentException[];
+  pickupWindows: PickupWindow[];
+  roles: string[];
+  reload: () => Promise<void>;
+  loading: boolean;
+  error: string | null;
+}) {
+  const { message } = AntApp.useApp();
+  const canAcceptQuality =
+    roles.includes("CUSTOMER_SERVICE") || roles.includes("SUPER_ADMIN");
+  const canDecideQuality =
+    roles.includes("OPERATOR") || roles.includes("SUPER_ADMIN");
+  const canReviewCancellation =
+    roles.includes("OPERATOR") || roles.includes("SUPER_ADMIN");
+  const [qualityAction, setQualityAction] = useState<{
+    value: Awaited<ReturnType<typeof api.quality>>[number];
+    type: "accept" | "approve" | "reject";
+    note?: string;
+  } | null>(null);
+  const [cancellationAction, setCancellationAction] = useState<{
+    value: Awaited<ReturnType<typeof api.cancellations>>[number];
+    approved: boolean;
+    note?: string;
+  } | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const submitQuality = async () => {
+    if (!qualityAction?.note) return;
+    setSubmitting(true);
+    try {
+      if (qualityAction.type === "accept")
+        await api.acceptQuality(qualityAction.value.id, qualityAction.note);
+      else
+        await api.decideQuality(
+          qualityAction.value.id,
+          qualityAction.type === "approve",
+          qualityAction.note,
+        );
+      setQualityAction(null);
+      await reload();
+      void message.success("品质售后已更新");
+    } catch (caught) {
+      void message.error(caught instanceof Error ? caught.message : "品质售后处理失败");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  const submitCancellation = async () => {
+    if (!cancellationAction?.note) return;
+    setSubmitting(true);
+    try {
+      await api.reviewCancellation(
+        cancellationAction.value.orderId,
+        cancellationAction.approved,
+        cancellationAction.note,
+      );
+      setCancellationAction(null);
+      await reload();
+      void message.success("取消申请已更新");
+    } catch (caught) {
+      void message.error(caught instanceof Error ? caught.message : "取消申请处理失败");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  const qualityActionLabel = (type: NonNullable<typeof qualityAction>["type"]) =>
+    type === "accept" ? "受理" : type === "approve" ? "批准退款" : "拒绝申请";
+  return (
+    <>
+      <PageTitle
+        title="售后与异常"
+        subtitle="客服受理、运营决定、财务退款，职责分离"
+      />
+      {loading && <Alert type="info" showIcon message="正在刷新售后队列" />}
+      {error && (
+        <Alert
+          type="error"
+          showIcon
+          message="售后队列加载失败"
+          description={error}
+          action={<Button size="small" onClick={() => void reload()}>重试</Button>}
+        />
+      )}
+      <Typography.Title level={4}>品质售后</Typography.Title>
+      <Table
+        rowKey="id"
+        dataSource={quality}
+        columns={[
+          { title: "订单", render: (_, value) => value.orderNo ?? value.orderId },
+          {
+            title: "商品/数量/问题",
+            render: (_, value) =>
+              value.items
+                .map(
+                  (item) =>
+                    `${item.name} × ${item.quantity}：${item.description}`,
+                )
+                .join("；"),
+          },
+          { title: "申报时间", dataIndex: "registeredAt" },
+          { title: "受理说明", render: (_, value) => value.acceptanceNote ?? "—" },
+          { title: "决定说明", render: (_, value) => value.decisionNote ?? "—" },
+          { title: "状态", render: (_, v) => <Status value={v.status} /> },
+          {
+            title: "操作",
+            render: (_, v) => (
+              <Space>
+                {canAcceptQuality && v.status === "REGISTERED" && (
+                  <Button
+                    onClick={() => setQualityAction({ value: v, type: "accept" })}
+                  >
+                    受理
+                  </Button>
+                )}
+                {canDecideQuality && v.status === "ACCEPTED" && (
+                  <>
+                    <Button
+                      type="primary"
+                      onClick={() => setQualityAction({ value: v, type: "approve" })}
+                    >
+                      批准退款
+                    </Button>
+                    <Button
+                      danger
+                      onClick={() => setQualityAction({ value: v, type: "reject" })}
+                    >
+                      拒绝
+                    </Button>
+                  </>
+                )}
+              </Space>
+            ),
+          },
+        ]}
+      />
+      <Typography.Title level={4}>取消申请</Typography.Title>
+      <Table
+        rowKey="id"
+        dataSource={cancellations}
+        columns={[
+          { title: "订单", render: (_, value) => value.orderNo ?? value.orderId },
+          { title: "原因", dataIndex: "reason" },
+          { title: "状态", render: (_, v) => <Status value={v.status} /> },
+          {
+            title: "操作",
+            render: (_, v) => (
+              <Space>
+                {canReviewCancellation && v.status === "PENDING_REVIEW" && (
+                  <>
+                    <Button
+                      type="primary"
+                      onClick={() => setCancellationAction({ value: v, approved: true })}
+                    >
+                      批准
+                    </Button>
+                    <Button
+                      danger
+                      onClick={() => setCancellationAction({ value: v, approved: false })}
+                    >
+                      拒绝
+                    </Button>
+                  </>
+                )}
+              </Space>
+            ),
+          },
+        ]}
+      />
+      <Typography.Title level={4}>履约差异</Typography.Title>
+      <Table
+        rowKey="id"
+        dataSource={exceptions}
+        columns={[
+          { title: "订单", render: (_, value) => value.orderNo ?? value.orderId ?? "—" },
+          { title: "自提点", render: (_, value) => value.pickupPointName ?? value.pickupPointId ?? "—" },
+          { title: "异常类型", render: (_, value) => value.items.map((item) => displayLabel(item.reason)).join("、") },
+          {
+            title: "逐商品数量",
+            render: (_, value) =>
+              value.items
+                .map((item) => `${item.name} × ${item.affectedQuantity}`)
+                .join("；"),
+          },
+          { title: "可复算金额", render: (_, value) => money(value.refundAmountCents) },
+          { title: "状态", render: (_, v) => <Status value={v.status} /> },
+          { title: "运营确认说明", dataIndex: "resolutionNote" },
+        ]}
+      />
+      <PickupWindowQueue values={pickupWindows} roles={roles} reload={reload} />
+      <Modal
+        open={Boolean(qualityAction && !qualityAction.note)}
+        title={qualityAction ? `填写${qualityActionLabel(qualityAction.type)}说明` : ""}
+        footer={null}
+        destroyOnHidden
+        onCancel={() => !submitting && setQualityAction(null)}
+      >
+        <Form
+          layout="vertical"
+          onFinish={(value: { note: string }) =>
+            qualityAction &&
+            setQualityAction({ ...qualityAction, note: value.note.trim() })
+          }
+        >
+          <Form.Item name="note" label="处理说明" rules={[{ required: true, min: 2, message: "必须填写处理说明" }]}>
+            <Input.TextArea rows={3} disabled={submitting} />
+          </Form.Item>
+          <Button type="primary" htmlType="submit">继续复核</Button>
+        </Form>
+      </Modal>
+      <Modal
+        open={Boolean(qualityAction?.note)}
+        title="二次确认品质售后处理"
+        okText="确认提交"
+        cancelText="返回修改"
+        confirmLoading={submitting}
+        onOk={() => void submitQuality()}
+        onCancel={() => !submitting && setQualityAction(null)}
+      >
+        确认{qualityAction ? qualityActionLabel(qualityAction.type) : ""}该品质售后？
+      </Modal>
+      <Modal
+        open={Boolean(cancellationAction && !cancellationAction.note)}
+        title={cancellationAction?.approved ? "填写取消批准理由" : "填写取消拒绝理由"}
+        footer={null}
+        destroyOnHidden
+        onCancel={() => !submitting && setCancellationAction(null)}
+      >
+        <Form
+          layout="vertical"
+          onFinish={(value: { note: string }) =>
+            cancellationAction &&
+            setCancellationAction({ ...cancellationAction, note: value.note.trim() })
+          }
+        >
+          <Form.Item name="note" label="审核理由" rules={[{ required: true, min: 2, message: "必须填写审核理由" }]}>
+            <Input.TextArea rows={3} disabled={submitting} />
+          </Form.Item>
+          <Button type="primary" htmlType="submit">继续复核</Button>
+        </Form>
+      </Modal>
+      <Modal
+        open={Boolean(cancellationAction?.note)}
+        title="二次确认取消申请审核"
+        okText="确认提交"
+        cancelText="返回修改"
+        confirmLoading={submitting}
+        onOk={() => void submitCancellation()}
+        onCancel={() => !submitting && setCancellationAction(null)}
+      >
+        确认{cancellationAction?.approved ? "批准" : "拒绝"}该截单后取消申请？
+      </Modal>
+    </>
+  );
 }
 
-function CommunityArrivalModal({open,close,saved,delivery,emergencyProxy=false}:{open:boolean;close:()=>void;saved:()=>Promise<unknown>;delivery:CommunityDelivery|null;emergencyProxy?:boolean}){
-  const [form]=Form.useForm<{receivedBy:string;confirmationNote:string|null;emergencyReason:string|null;items:Array<{platformSkuId:string;receivedQuantity:number;rejectedQuantity:number;shortQuantity:number;damagedQuantity:number;reason:string|null;evidenceNote:string|null}>}>();const [saving,setSaving]=useState(false);
-  useEffect(()=>{if(delivery)form.setFieldsValue({receivedBy:'',confirmationNote:null,emergencyReason:null,items:delivery.expectedItems.map((item)=>({platformSkuId:item.platformSkuId,receivedQuantity:item.expectedQuantity,rejectedQuantity:0,shortQuantity:0,damagedQuantity:0,reason:null,evidenceNote:null}))});},[delivery,form]);
-  const save=async(value:{receivedBy:string;confirmationNote:string|null;emergencyReason:string|null;items:Array<{platformSkuId:string;receivedQuantity:number;rejectedQuantity:number;shortQuantity:number;damagedQuantity:number;reason:string|null;evidenceNote:string|null}>})=>{if(!delivery?.dispatchBatchId)return;setSaving(true);try{const hasDifference=value.items.some((item)=>item.rejectedQuantity+item.shortQuantity+item.damagedQuantity>0);await api.confirmCommunityArrival(delivery.dispatchBatchId,{...value,confirmationNote:value.confirmationNote||null,emergencyReason:emergencyProxy?value.emergencyReason?.trim()||null:null,items:value.items.map((item)=>({platformSkuId:item.platformSkuId,receivedQuantity:item.receivedQuantity,rejectedQuantity:item.rejectedQuantity,shortQuantity:item.shortQuantity,damagedQuantity:item.damagedQuantity,reason:item.reason||null,evidenceNote:item.evidenceNote||null}))});message.success(hasDifference?'已登记到货差异，正常商品已开放领取':'已确认全部商品到货，取货码已开放');await saved();close();}catch(error){message.error(error instanceof Error?error.message:'到货确认失败');}finally{setSaving(false);}};
-  return <Modal open={open} onCancel={close} footer={null} width={760} destroyOnHidden title={emergencyProxy?'紧急代办：点位逐商品确认到货':'点位逐商品确认到货'}>{emergencyProxy&&<Alert showIcon type="warning" message="平台负责人紧急代办" description="必须说明代办原因。原因、平台负责人身份、时间与逐商品交接事实会一起写入不可变审计记录。" style={{marginBottom:16}}/>}<Alert showIcon type="info" message="只登记现场事实" description="实到、拒收、短少、破损之和必须等于应到数。差异商品须填写原因和文字证据；只有正常实到数量开放领取。" style={{marginBottom:16}}/><Form form={form} layout="vertical" onFinish={(value)=>void save(value)}><Form.Item label="接货人" name="receivedBy" rules={[{required:true,min:2}]}><Input /></Form.Item>{emergencyProxy&&<Form.Item label="紧急代办原因" name="emergencyReason" rules={[{required:true,min:2,message:'请填写至少两个字的紧急代办原因'}]}><Input.TextArea rows={2} maxLength={500}/></Form.Item>}<Form.Item label="交接说明（可选）" name="confirmationNote"><Input.TextArea rows={2} maxLength={500}/></Form.Item>{delivery?.expectedItems.map((item,index)=><section className="panel" key={item.platformSkuId} style={{padding:12,marginBottom:12}}><b>{item.title} · {item.skuName}</b><span className="cell-note">应到 {item.expectedQuantity} 件</span><Form.Item hidden name={['items',index,'platformSkuId']}><Input /></Form.Item><div className="form-grid"><Form.Item label="实到" name={['items',index,'receivedQuantity']} rules={[{required:true}]}><InputNumber min={0} precision={0} style={{width:'100%'}}/></Form.Item><Form.Item label="拒收" name={['items',index,'rejectedQuantity']} rules={[{required:true}]}><InputNumber min={0} precision={0} style={{width:'100%'}}/></Form.Item><Form.Item label="短少" name={['items',index,'shortQuantity']} rules={[{required:true}]}><InputNumber min={0} precision={0} style={{width:'100%'}}/></Form.Item><Form.Item label="破损" name={['items',index,'damagedQuantity']} rules={[{required:true}]}><InputNumber min={0} precision={0} style={{width:'100%'}}/></Form.Item></div><div className="form-grid"><Form.Item label="差异原因（有差异时必填）" name={['items',index,'reason']}><Select allowClear options={[{value:'TRANSIT_SHORTAGE',label:'运输短少'},{value:'TRANSIT_DAMAGE',label:'运输破损'},{value:'WRONG_POINT',label:'错发点位'},{value:'PICKUP_POINT_REJECTED',label:'点位拒收'},{value:'PACKAGE_DAMAGED',label:'包装破损'}]}/></Form.Item><Form.Item label="文字证据（有差异时必填）" name={['items',index,'evidenceNote']}><Input maxLength={500}/></Form.Item></div></section>)}<Button htmlType="submit" type="primary" loading={saving}>确认到货与差异</Button></Form></Modal>;
+function Finance({
+  refunds,
+  ledger,
+  quality,
+  cancellations,
+  exceptions,
+  pickupWindows,
+  roles,
+  reload,
+  onQualityRefunded,
+  onCancellationRefunded,
+  loading,
+  error,
+}: {
+  refunds: Awaited<ReturnType<typeof api.finance>> | null;
+  ledger: Awaited<ReturnType<typeof api.ledger>>;
+  quality: Awaited<ReturnType<typeof api.quality>>;
+  cancellations: Awaited<ReturnType<typeof api.cancellations>>;
+  exceptions: FulfillmentException[];
+  pickupWindows: PickupWindow[];
+  roles: string[];
+  reload: () => Promise<void>;
+  onQualityRefunded: (
+    result: Pick<
+      Awaited<ReturnType<typeof api.quality>>[number],
+      "id" | "status" | "financeRefundStatus"
+    >,
+  ) => void;
+  onCancellationRefunded: (
+    result: Pick<
+      Awaited<ReturnType<typeof api.cancellations>>[number],
+      "id" | "orderId" | "status"
+    >,
+  ) => void;
+  loading: boolean;
+  error: string | null;
+}) {
+  const { message } = AntApp.useApp();
+  const canExecuteRefund =
+    roles.includes("FINANCE") || roles.includes("SUPER_ADMIN");
+  const [refundTarget, setRefundTarget] = useState<FulfillmentException | null>(null);
+  const [refundDraft, setRefundDraft] = useState<{
+    exception: FulfillmentException;
+    note: string;
+  } | null>(null);
+  const [pickupRefundTarget, setPickupRefundTarget] = useState<PickupWindow | null>(null);
+  const [qualityRefundTarget, setQualityRefundTarget] = useState<
+    Awaited<ReturnType<typeof api.quality>>[number] | null
+  >(null);
+  const [cancellationRefundTarget, setCancellationRefundTarget] = useState<
+    Awaited<ReturnType<typeof api.cancellations>>[number] | null
+  >(null);
+  const [submitting, setSubmitting] = useState(false);
+  const qualityRefundExecutionLabel = (status: string) => {
+    if (status === "SUCCEEDED") return "退款已完成";
+    if (status === "MANUAL_HOLD") return "退款已挂起，等待人工处理";
+    if (status === "RETRYABLE_FAILURE") return "退款恢复中";
+    if (status === "SUBMISSION_UNKNOWN") return "退款结果核验中";
+    return "退款处理中";
+  };
+  const executeExceptionRefund = async () => {
+    if (!refundDraft) return;
+    setSubmitting(true);
+    try {
+      await api.refundException(refundDraft.exception.id, refundDraft.note);
+      setRefundDraft(null);
+      setRefundTarget(null);
+      await reload();
+      void message.success("差异退款已提交，已刷新退款与账本状态");
+    } catch (caught) {
+      void message.error(caught instanceof Error ? caught.message : "差异退款提交失败");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  const executePickupRefund = async () => {
+    if (!pickupRefundTarget) return;
+    setSubmitting(true);
+    try {
+      await api.executePickupRefund(pickupRefundTarget.orderId);
+      setPickupRefundTarget(null);
+      await reload();
+      void message.success("逾期领取退款已提交，已刷新退款与账本状态");
+    } catch (caught) {
+      void message.error(caught instanceof Error ? caught.message : "逾期退款提交失败");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  const executeQualityRefund = async () => {
+    if (!qualityRefundTarget) return;
+    setSubmitting(true);
+    try {
+      const result = await api.refundQuality(qualityRefundTarget.id);
+      // The mutation is authoritative.  Keep its terminal fact in the visible
+      // queue before the follow-up read starts, so a transient or delayed read
+      // cannot leave a stale financial action available for the same case.
+      onQualityRefunded(result);
+      setQualityRefundTarget(null);
+      await reload();
+      void message.success(
+        result.status === "RESOLVED"
+          ? "品质退款已完成，退款与账本状态已收敛"
+          : "品质退款已提交，系统正在同步退款与账本状态",
+      );
+    } catch (caught) {
+      void message.error(caught instanceof Error ? caught.message : "品质退款提交失败");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  const executeCancellationRefund = async () => {
+    if (!cancellationRefundTarget) return;
+    setSubmitting(true);
+    try {
+      const result = await api.refundCancellation(
+        cancellationRefundTarget.orderId,
+      );
+      onCancellationRefunded(result);
+      setCancellationRefundTarget(null);
+      await reload();
+      void message.success(
+        result.status === "REFUNDED"
+          ? "取消退款已完成，退款与账本状态已收敛"
+          : "取消退款已提交，系统正在同步退款与账本状态",
+      );
+    } catch (caught) {
+      void message.error(caught instanceof Error ? caught.message : "取消退款提交失败");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  return (
+    <>
+      <PageTitle title="财务管理" subtitle="查看全额/部分退款和双向平衡账本" />
+      {loading && <Alert type="info" showIcon message="正在刷新财务数据" />}
+      {error && (
+        <Alert
+          type="error"
+          showIcon
+          message="财务数据加载失败"
+          description={error}
+          action={<Button size="small" onClick={() => void reload()}>重试</Button>}
+        />
+      )}
+      <Table
+        rowKey="id"
+        dataSource={[...(refunds?.full ?? []), ...(refunds?.partial ?? [])]}
+        columns={[
+          { title: "退款单", dataIndex: "providerRefundNo" },
+          { title: "订单", dataIndex: "orderId" },
+          { title: "金额", render: (_, v) => money(v.amountCents) },
+          { title: "状态", render: (_, v) => <Status value={v.status} /> },
+        ]}
+      />
+      <section aria-label="品质售后退款">
+        <Typography.Title level={4}>品质售后退款</Typography.Title>
+        <Table
+          rowKey="id"
+          dataSource={quality.filter((value) => value.status === "REFUNDING")}
+          locale={{ emptyText: "暂无待执行的品质退款" }}
+          columns={[
+            { title: "订单", render: (_, value) => value.orderNo ?? value.orderId },
+            {
+              title: "商品/数量",
+              render: (_, value) =>
+                value.items.map((item) => `${item.name} × ${item.quantity}`).join("；"),
+            },
+            { title: "决定说明", render: (_, value) => value.decisionNote ?? "—" },
+            {
+              title: "操作",
+              render: (_, value) =>
+                !canExecuteRefund ? (
+                  "当前账号无财务执行权限"
+                ) : value.financeRefundStatus ? (
+                  <Typography.Text type="secondary">
+                    {qualityRefundExecutionLabel(value.financeRefundStatus)}
+                  </Typography.Text>
+                ) : (
+                  <Button type="primary" onClick={() => setQualityRefundTarget(value)}>
+                    执行退款
+                  </Button>
+                ),
+            },
+          ]}
+        />
+      </section>
+      <section aria-label="截单后取消退款">
+        <Typography.Title level={4}>截单后取消退款</Typography.Title>
+        <Table
+          rowKey="id"
+          dataSource={cancellations.filter((value) => value.status === "APPROVED_WAITING_FINANCE")}
+          locale={{ emptyText: "暂无待执行的截单后取消退款" }}
+          columns={[
+            { title: "订单", render: (_, value) => value.orderNo ?? value.orderId },
+            { title: "取消原因", dataIndex: "reason" },
+            { title: "运营审核理由", render: (_, value) => value.reviewNote ?? "—" },
+            {
+              title: "操作",
+              render: (_, value) =>
+                canExecuteRefund ? (
+                  <Button type="primary" onClick={() => setCancellationRefundTarget(value)}>
+                    执行退款
+                  </Button>
+                ) : (
+                  "当前账号无财务执行权限"
+                ),
+            },
+          ]}
+        />
+      </section>
+      <section aria-label="到货差异退款">
+        <Typography.Title level={4}>到货差异退款</Typography.Title>
+        <Table
+          rowKey="id"
+          dataSource={exceptions}
+          locale={{ emptyText: "暂无履约差异退款" }}
+          columns={[
+          { title: "订单", render: (_, value) => value.orderNo ?? value.orderId ?? "—" },
+          { title: "自提点", render: (_, value) => value.pickupPointName ?? value.pickupPointId ?? "—" },
+          { title: "异常类型", render: (_, value) => value.items.map((item) => displayLabel(item.reason)).join("、") },
+          { title: "逐商品数量", render: (_, value) => value.items.map((item) => `${item.name} × ${item.affectedQuantity}`).join("；") },
+          { title: "退款金额", render: (_, value) => money(value.refundAmountCents) },
+          { title: "运营确认说明", dataIndex: "resolutionNote" },
+          { title: "状态", render: (_, value) => <Status value={value.status} /> },
+          {
+            title: "操作",
+            render: (_, value) =>
+              canExecuteRefund && value.status === "REFUND_CONFIRMED" ? (
+                <Button type="primary" onClick={() => setRefundTarget(value)}>
+                  执行退款
+                </Button>
+              ) : (
+                "等待可执行状态"
+              ),
+          },
+          ]}
+        />
+      </section>
+      <section aria-label="逾期领取退款">
+        <Typography.Title level={4}>逾期领取退款</Typography.Title>
+        <Table
+          rowKey="orderId"
+          dataSource={pickupWindows.filter((window) => window.status === "REFUND_PENDING")}
+          locale={{ emptyText: "暂无待执行的逾期领取退款" }}
+          columns={[
+          { title: "订单", render: (_, value) => value.orderNo ?? value.orderId },
+          { title: "自提点", render: (_, value) => value.pickupPointName ?? value.pickupPointId ?? "—" },
+          { title: "截止时间", render: (_, value) => dateTime(value.deadlineAt) },
+          { title: "状态", render: (_, value) => <Status value={value.status} /> },
+          { title: "下一责任", render: (_, value) => value.nextResponsibility ? displayLabel(value.nextResponsibility) : "—" },
+          {
+            title: "操作",
+            render: (_, value) => canExecuteRefund ? (
+              <Button type="primary" onClick={() => setPickupRefundTarget(value)}>
+                执行退款
+              </Button>
+            ) : "当前账号无财务执行权限",
+          },
+          ]}
+        />
+      </section>
+      <section aria-label="财务流水">
+        <Typography.Title level={4}>财务流水</Typography.Title>
+        <Table
+          rowKey="id"
+          dataSource={ledger}
+          columns={[
+          { title: "事件", render: (_, value) => displayLabel(value.eventType) },
+          { title: "关联单据", dataIndex: "referenceId" },
+          {
+            title: "借/贷明细",
+            render: (_, value) =>
+              value.lines.map((line) => `${line.direction === "DEBIT" ? "借" : "贷"} ${line.accountCode} ${money(line.amountCents)}`).join("；"),
+          },
+          { title: "借方合计", render: (_, value) => money(value.debitCents) },
+          { title: "贷方合计", render: (_, value) => money(value.creditCents) },
+          {
+            title: "平衡",
+            render: (_, value) =>
+              value.isBalanced ? (
+                <Tag color="green">已平衡</Tag>
+              ) : (
+                <Alert type="error" showIcon message="借贷不平衡" />
+              ),
+          },
+          { title: "时间", dataIndex: "createdAt" },
+          ]}
+        />
+      </section>
+      <Modal
+        open={!!refundTarget && !refundDraft}
+        title="填写差异退款确认说明"
+        footer={null}
+        onCancel={() => setRefundTarget(null)}
+        destroyOnHidden
+      >
+        <Form
+          layout="vertical"
+          onFinish={(value: { confirmationNote: string }) =>
+            refundTarget &&
+            setRefundDraft({ exception: refundTarget, note: value.confirmationNote.trim() })
+          }
+        >
+          <Form.Item
+            name="confirmationNote"
+            label="退款确认说明"
+            rules={[{ required: true, min: 2, message: "必须填写退款确认说明" }]}
+          >
+            <Input.TextArea rows={3} />
+          </Form.Item>
+          <Button type="primary" htmlType="submit">继续复核</Button>
+        </Form>
+      </Modal>
+      <Modal
+        open={!!refundDraft}
+        title="二次确认执行差异退款"
+        okText="确认执行退款"
+        cancelText="返回修改"
+        confirmLoading={submitting}
+        onOk={() => void executeExceptionRefund()}
+        onCancel={() => !submitting && setRefundDraft(null)}
+      >
+        <Typography.Paragraph>
+          将对订单 {refundDraft?.exception.orderNo ?? refundDraft?.exception.orderId} 执行
+          {money(refundDraft?.exception.refundAmountCents ?? 0)} 的差异退款。
+        </Typography.Paragraph>
+        <Typography.Paragraph>确认说明：{refundDraft?.note}</Typography.Paragraph>
+      </Modal>
+      <Modal
+        open={!!pickupRefundTarget}
+        title="二次确认执行逾期领取退款"
+        okText="确认执行退款"
+        cancelText="取消"
+        confirmLoading={submitting}
+        onOk={() => void executePickupRefund()}
+        onCancel={() => !submitting && setPickupRefundTarget(null)}
+      >
+        确认对订单 {pickupRefundTarget?.orderNo ?? pickupRefundTarget?.orderId} 执行已登记的逾期退款？
+      </Modal>
+      <Modal
+        open={Boolean(qualityRefundTarget)}
+        title="二次确认执行品质退款"
+        okText="确认执行退款"
+        cancelText="取消"
+        confirmLoading={submitting}
+        onOk={() => void executeQualityRefund()}
+        onCancel={() => !submitting && setQualityRefundTarget(null)}
+      >
+        确认对订单 {qualityRefundTarget?.orderNo ?? qualityRefundTarget?.orderId} 执行已批准的品质退款？
+      </Modal>
+      <Modal
+        open={Boolean(cancellationRefundTarget)}
+        title="二次确认执行取消退款"
+        okText="确认执行退款"
+        cancelText="取消"
+        confirmLoading={submitting}
+        onOk={() => void executeCancellationRefund()}
+        onCancel={() => !submitting && setCancellationRefundTarget(null)}
+      >
+        确认对订单 {cancellationRefundTarget?.orderNo ?? cancellationRefundTarget?.orderId} 执行运营已批准的取消退款？
+      </Modal>
+    </>
+  );
 }
 
-
-function PickupPointCreateModal({open,close,areas,saved}:{open:boolean;close:()=>void;areas:ServiceArea[];saved:()=>Promise<unknown>}){
-  const [form]=Form.useForm<{serviceAreaId:string;name:string;address:string;capacityPerDay:number|null}>();
-  const [saving,setSaving]=useState(false);
-  const submit=async(value:{serviceAreaId:string;name:string;address:string;capacityPerDay:number|null})=>{setSaving(true);try{await api.createPickupPoint({...value,name:value.name.trim(),address:value.address.trim()});await saved();message.success('自提点已创建');form.resetFields();close();}catch(error){message.error(error instanceof Error?error.message:'创建自提点失败');}finally{setSaving(false);}};
-  return <Modal open={open} onCancel={close} footer={null} destroyOnHidden title="新增自提点"><Alert type="info" showIcon message="先开通服务区域，再创建固定自提点" description="自提点创建后可绑定负责人；负责人只能看到自己绑定点位的配送和待领取订单。" style={{marginBottom:16}}/><Form form={form} layout="vertical" onFinish={(value)=>void submit(value)}><Form.Item label="服务区域" name="serviceAreaId" rules={[{required:true}]}><Select options={areas.filter((item)=>item.orderEnabled).map((item)=>({value:item.id,label:item.name}))}/></Form.Item><Form.Item label="自提点名称" name="name" rules={[{required:true,min:2}]}><Input maxLength={100}/></Form.Item><Form.Item label="详细地址" name="address" rules={[{required:true,min:5}]}><Input.TextArea rows={3} maxLength={500}/></Form.Item><Form.Item label="预计日容量（可选）" name="capacityPerDay"><InputNumber min={1} precision={0} style={{width:'100%'}}/></Form.Item><Button type="primary" htmlType="submit" loading={saving}>创建自提点</Button></Form></Modal>;
+function Settings({
+  staff,
+  points,
+  reload,
+}: {
+  staff: InternalStaff[];
+  points: PickupPoint[];
+  reload: () => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<InternalStaff | null>(null);
+  const [sensitive, setSensitive] = useState<{
+    staff: InternalStaff;
+    kind: "suspend" | "restore" | "reset";
+  } | null>(null);
+  const [credential, setCredential] = useState("");
+  const create = async (value: {
+    displayName: string;
+    username: string;
+    phone: string;
+    role: InternalStaff["role"];
+    pickupPointIds?: string[];
+  }) => {
+    const result = await api.createStaff({
+      ...value,
+      pickupPointIds: value.pickupPointIds ?? [],
+    });
+    setOpen(false);
+    await reload();
+    // The credential is shown only after the staff list has the new employee,
+    // so closing this one-time dialog never leaves the administrator on stale
+    // lifecycle data.
+    setCredential(result.initialCredential);
+  };
+  const update = async (value: {
+    displayName: string;
+    phone?: string;
+    role: InternalStaff["role"];
+    pickupPointIds?: string[];
+    reason?: string;
+  }) => {
+    if (!editing) return;
+    const currentPointIds = [...editing.pickupPointIds].sort();
+    const nextPointIds = [
+      ...(value.role === "PICKUP_MANAGER" ? value.pickupPointIds ?? [] : []),
+    ].sort();
+    const scopeChanged =
+      JSON.stringify(currentPointIds) !== JSON.stringify(nextPointIds);
+    const patch: {
+      displayName?: string;
+      phone?: string;
+      role?: InternalStaff["role"];
+      pickupPointIds?: string[];
+      reason?: string;
+    } = {};
+    if (value.displayName.trim() !== editing.displayName) {
+      patch.displayName = value.displayName.trim();
+    }
+    if (value.phone?.trim() && value.phone.trim() !== editing.phone) {
+      patch.phone = value.phone.trim();
+    }
+    if (value.role !== editing.role) patch.role = value.role;
+    if (scopeChanged) patch.pickupPointIds = nextPointIds;
+    if ((patch.role || patch.pickupPointIds) && value.reason?.trim()) {
+      patch.reason = value.reason.trim();
+    }
+    if (!Object.keys(patch).length) {
+      setEditing(null);
+      return;
+    }
+    await api.updateStaff(editing.userId, patch);
+    setEditing(null);
+    await reload();
+  };
+  const runSensitive = async (value: { reason: string }) => {
+    if (!sensitive) return;
+    if (sensitive.kind === "reset") {
+      const result = await api.resetStaffCredential(
+        sensitive.staff.userId,
+        value.reason,
+      );
+      setCredential(result.initialCredential);
+    } else {
+      await api.updateStaff(sensitive.staff.userId, {
+        status: sensitive.kind === "suspend" ? "SUSPENDED" : "ACTIVE",
+        reason: value.reason,
+      });
+    }
+    setSensitive(null);
+    await reload();
+  };
+  const pointOptions = points
+    .filter((v) => v.status === "ACTIVE")
+    .map((v) => ({ value: v.id, label: v.name }));
+  return (
+    <>
+      <PageTitle
+        title="系统设置"
+        subtitle="后台开通员工账号、角色与点位权限；停用或变更后会话立即失效"
+        action={
+          <Button type="primary" onClick={() => setOpen(true)}>
+            新增员工
+          </Button>
+        }
+      />
+      <Table
+        rowKey="userId"
+        dataSource={staff}
+        columns={[
+          {
+            title: "员工",
+            render: (_, v) => (
+              <>
+                <b>{v.displayName}</b>
+                <div>{v.staffNo}</div>
+              </>
+            ),
+          },
+          { title: "电话", dataIndex: "phone" },
+          { title: "角色", render: (_, v) => displayLabel(v.role) },
+          { title: "点位数", render: (_, v) => v.pickupPointIds.length },
+          { title: "状态", render: (_, v) => <Status value={v.status} /> },
+          {
+            title: "操作",
+            render: (_, value: InternalStaff) => (
+              <Space wrap>
+                <Button type="link" onClick={() => setEditing(value)}>
+                  编辑
+                </Button>
+                {value.status === "SUSPENDED" ? (
+                  <Button
+                    type="link"
+                    onClick={() => setSensitive({ staff: value, kind: "restore" })}
+                  >
+                    恢复
+                  </Button>
+                ) : (
+                  <Button
+                    danger
+                    type="link"
+                    onClick={() => setSensitive({ staff: value, kind: "suspend" })}
+                  >
+                    停用
+                  </Button>
+                )}
+                <Button
+                  type="link"
+                  onClick={() => setSensitive({ staff: value, kind: "reset" })}
+                >
+                  重置凭据
+                </Button>
+              </Space>
+            ),
+          },
+        ]}
+      />
+      <Modal
+        open={open}
+        title="新增内部员工"
+        footer={null}
+        onCancel={() => setOpen(false)}
+      >
+        <Form layout="vertical" onFinish={(v) => void create(v)}>
+          <Form.Item
+            name="displayName"
+            label="姓名"
+            rules={[{ required: true }]}
+          >
+            <Input />
+          </Form.Item>
+          <Form.Item
+            name="username"
+            label="登录账号"
+            rules={[{ required: true }]}
+          >
+            <Input />
+          </Form.Item>
+          <Form.Item
+            name="phone"
+            label="手机号"
+            rules={[{ required: true, pattern: /^1[3-9]\d{9}$/ }]}
+          >
+            <Input />
+          </Form.Item>
+          <Form.Item name="role" label="角色" rules={[{ required: true }]}>
+            <Select
+              getPopupContainer={(node) => node.parentElement ?? document.body}
+              options={[...STAFF_ROLE_OPTIONS]}
+            />
+          </Form.Item>
+          <Form.Item noStyle shouldUpdate>
+            {({ getFieldValue }) =>
+              getFieldValue("role") === "PICKUP_MANAGER" ? (
+                <Form.Item
+                  name="pickupPointIds"
+                  label="授权自提点"
+                  extra="授权后，该负责人的姓名和手机号会作为自提点联系方式，供消费者拨打"
+                  rules={[{ required: true }]}
+                >
+                  <Select
+                    mode="multiple"
+                    getPopupContainer={(node) => node.parentElement ?? document.body}
+                    options={pointOptions}
+                  />
+                </Form.Item>
+              ) : null
+            }
+          </Form.Item>
+          <Button type="primary" htmlType="submit">
+            创建账号
+          </Button>
+        </Form>
+      </Modal>
+      <Modal
+        open={Boolean(editing)}
+        title="编辑员工权限"
+        footer={null}
+        onCancel={() => setEditing(null)}
+        destroyOnHidden
+      >
+        <Alert
+          type="warning"
+          showIcon
+          message="角色或授权点位变更会立即使该员工旧会话失效"
+          description="涉及角色、点位的变更必须填写原因；新的权限在员工重新登录后生效。"
+        />
+        <Form
+          layout="vertical"
+          initialValues={editing ? { ...editing, phone: "" } : {}}
+          onFinish={(value) => void update(value)}
+        >
+          <Form.Item name="displayName" label="姓名" rules={[{ required: true }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="phone" label="更新手机号（留空不变）" rules={[{ pattern: /^$|^1[3-9]\d{9}$/ }]}>
+            <Input placeholder="输入新的大陆手机号" />
+          </Form.Item>
+          <Form.Item name="role" label="角色" rules={[{ required: true }]}>
+            <Select
+              getPopupContainer={(node) => node.parentElement ?? document.body}
+              options={[...STAFF_ROLE_OPTIONS]}
+            />
+          </Form.Item>
+          <Form.Item noStyle shouldUpdate>
+            {({ getFieldValue }) => getFieldValue("role") === "PICKUP_MANAGER" ? (
+              <Form.Item
+                name="pickupPointIds"
+                label="授权自提点"
+                extra="授权后，该负责人的姓名和手机号会作为自提点联系方式，供消费者拨打"
+                rules={[{ required: true }]}
+              >
+                <Select
+                  mode="multiple"
+                  getPopupContainer={(node) => node.parentElement ?? document.body}
+                  options={pointOptions}
+                />
+              </Form.Item>
+            ) : null}
+          </Form.Item>
+          <Form.Item name="reason" label="变更原因">
+            <Input.TextArea rows={2} placeholder="角色或点位变更时必填" />
+          </Form.Item>
+          <Button type="primary" htmlType="submit">保存并使旧会话失效</Button>
+        </Form>
+      </Modal>
+      <Modal
+        open={Boolean(sensitive)}
+        title={sensitive?.kind === "reset" ? "重置一次性凭据" : sensitive?.kind === "suspend" ? "确认停用员工" : "确认恢复员工"}
+        footer={null}
+        onCancel={() => setSensitive(null)}
+        destroyOnHidden
+      >
+        <Alert
+          type="warning"
+          showIcon
+          message="这是敏感操作"
+          description="请填写原因后确认。操作执行时将再次核验当前管理员权限，并立即撤销目标员工的旧会话。"
+        />
+        <Form layout="vertical" onFinish={(value) => void runSensitive(value)}>
+          <Form.Item name="reason" label="操作原因" rules={[{ required: true, min: 2 }]}>
+            <Input.TextArea rows={3} />
+          </Form.Item>
+          <Button danger={sensitive?.kind === "suspend"} type="primary" htmlType="submit">
+            确认执行
+          </Button>
+        </Form>
+      </Modal>
+      <Modal
+        open={Boolean(credential)}
+        title="一次性初始凭据（仅显示一次）"
+        footer={<Button type="primary" onClick={() => setCredential("")}>我已安全保存</Button>}
+        closable={false}
+        maskClosable={false}
+      >
+        <Alert type="warning" showIcon message="关闭后无法再次查看，请使用“重置凭据”重新生成。" />
+        <Typography.Paragraph>
+          <Typography.Text copyable code>{credential}</Typography.Text>
+        </Typography.Paragraph>
+      </Modal>
+    </>
+  );
 }
 
 export function App() {
-  const [loggedIn, setLoggedIn] = useState(
-    !requiresLogin || Boolean(auth.token()),
+  // Every login/logout receives a new epoch.  Responses started for a former
+  // identity are ignored, so a new account cannot briefly render the former
+  // employee's cached point, order, finance, or service facts.
+  const identityEpoch = useRef(0);
+  // Requests within one identity can still finish out of order. Every reload
+  // therefore receives a strictly newer generation; only its own response may
+  // commit page data, loading, or an error state.
+  const reloadGeneration = useRef(0);
+  const [authenticated, setAuthenticated] = useState(
+    !requiresLogin || !!auth.token(),
   );
-  const [page, setPage] = useState<Page>("dashboard");
-  const [modal, setModal] = useState<string | null>(null);
-  const [selectedPlan, setSelectedPlan] = useState<DeliveryPlan | null>(null);
-  const [selectedCommunityDelivery, setSelectedCommunityDelivery] = useState<CommunityDelivery | null>(null);
-  const [selectedCommunitySku, setSelectedCommunitySku] = useState<PlatformSku | null>(null);
-  const [selectedStaff,setSelectedStaff]=useState<InternalStaff|null>(null);
-  const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(
-    null,
+  const roles = auth.roles().length ? auth.roles() : ["SUPER_ADMIN"];
+  const defaultPage = getDefaultAdminPage(roles);
+  const [page, setPage] = useState<AdminPage>(
+    () => defaultPage ?? "settings",
   );
-  const [selectedOutboundCampaign, setSelectedOutboundCampaign] = useState<Campaign | null>(null);
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-  const [selectedMerchant, setSelectedMerchant] = useState<Merchant | null>(
-    null,
-  );
-  const [busy, setBusy] = useState("");
-  const [messageApi, holder] = message.useMessage();
-  const queryClient = useQueryClient();
-  const roles = requiresLogin ? auth.roles() : ["SUPER_ADMIN"];
-  const can = (...allowedRoles: string[]) => roles.includes("SUPER_ADMIN") || allowedRoles.some((role) => roles.includes(role));
-  useEffect(() => {
-    const expired = () => setLoggedIn(false);
-    window.addEventListener("admin-auth-expired", expired);
-    return () => window.removeEventListener("admin-auth-expired", expired);
-  }, []);
-  const enabled = loggedIn;
-  const isPointWorkbenchUserForCurrentRoles=isPointWorkbenchUser(roles);
-  const canReadCampaigns = can("OPERATOR", "FULFILLMENT");
-  const canReadOperations = can("OPERATOR", "FULFILLMENT");
-  const canUsePickupVerifier = isPointWorkbenchUserForCurrentRoles;
-  const canReadOrders = can("OPERATOR", "FULFILLMENT", "FINANCE", "CUSTOMER_SERVICE");
-  const campaignsQ = useQuery({
-    queryKey: ["campaigns"],
-    queryFn: api.listCampaigns,
-    enabled: enabled && canReadCampaigns,
-  });
-  const lockedPlatformCampaignsQ=useQuery({queryKey:['locked-platform-campaigns'],queryFn:api.listLockedPlatformCampaigns,enabled:enabled&&can('PROCUREMENT','WAREHOUSE_RECEIVER','QUALITY_INSPECTOR','WAREHOUSE_OPERATOR','FULFILLMENT','OPERATOR')});
-  const merchantsQ = useQuery({
-    queryKey: ["merchants"],
-    queryFn: api.listMerchants,
-    enabled: enabled && can("OPERATOR"),
-  });
-  const productsQ = useQuery({
-    queryKey: ["products"],
-    queryFn: api.listProducts,
-    enabled: enabled && can("OPERATOR", "REVIEWER"),
-  });
-  const areasQ = useQuery({
-    queryKey: ["areas"],
-    queryFn: api.listServiceAreas,
-    enabled: enabled && can("OPERATOR"),
-  });
-  const pickupPointsQ = useQuery({ queryKey:["pickup-points"],queryFn:api.listPickupPoints,enabled: enabled && can("OPERATOR") });
-  const staffQ=useQuery({queryKey:['internal-staff'],queryFn:()=>api.listInternalStaff(),enabled:enabled&&can('SUPER_ADMIN')});
-  const directoryQ = useQuery({
-    queryKey: ["region-directory"],
-    queryFn: api.listRegionDirectory,
-    enabled: enabled && can("OPERATOR"),
-  });
-  const plansQ = useQuery({
-    queryKey: ["delivery-plans", canUsePickupVerifier ? "assigned" : "operations"],
-    queryFn: canUsePickupVerifier ? api.listPickupDeliveryPlans : api.listDeliveryPlans,
-    enabled: enabled && (canReadOperations || canUsePickupVerifier),
-  });
-  const ordersQ = useQuery({
-    queryKey: ["orders"],
-    queryFn: () => api.listOrders(),
-    enabled: enabled && canReadOrders,
-  });
-  const batchesQ = useQuery({
-    queryKey: ["batches"],
-    queryFn: api.listBatches,
-    enabled: enabled && canReadOperations,
-  });
-  const settlementsQ = useQuery({
-    queryKey: ["settlements"],
-    queryFn: api.listSettlements,
-    enabled: enabled && can("FINANCE"),
-  });
-  const refundsQ = useQuery({
-    queryKey: ["refunds"],
-    queryFn: api.listRefunds,
-    enabled: enabled && can("FINANCE"),
-  });
-  const auditQ = useQuery({
-    queryKey: ["audit"],
-    queryFn: api.listAuditLogs,
-    enabled: enabled && can("SUPER_ADMIN"),
-  });
-  const interestsQ = useQuery({
-    queryKey: ["service-area-interests"],
-    queryFn: api.listServiceAreaInterests,
-    enabled: enabled && can("OPERATOR", "CUSTOMER_SERVICE", "FINANCE"),
-  });
-  const afterSalesQ = useQuery({
-    queryKey: ["after-sales"],
-    queryFn: api.listAfterSales,
-    enabled: enabled && can("OPERATOR", "CUSTOMER_SERVICE", "FINANCE"),
-  });
-  const communityQualityCasesQ = useQuery({
-    queryKey: ["community-quality-cases"],
-    queryFn: api.listCommunityQualityCases,
-    enabled: enabled && can("OPERATOR", "CUSTOMER_SERVICE", "FINANCE"),
-  });
-  const communityCancellationRequestsQ=useQuery({queryKey:['community-cancellation-requests'],queryFn:api.listCommunityCancellationRequests,enabled:enabled&&can('OPERATOR','FINANCE','CUSTOMER_SERVICE')});
-  const communityPickupWindowsQ=useQuery({queryKey:['community-pickup-windows'],queryFn:api.listCommunityPickupWindows,enabled:enabled&&can('OPERATOR','FINANCE')});
-  const platformSkusQ=useQuery({queryKey:['platform-skus'],queryFn:api.listPlatformSkus,enabled:enabled&&can('PROCUREMENT','OPERATOR')});
-  const communityCampaignsQ=useQuery({queryKey:['community-campaigns'],queryFn:api.listCommunityCampaigns,enabled:enabled&&can('OPERATOR','FULFILLMENT')});
-  const communityDeliveriesQ=useQuery({queryKey:['community-deliveries'],queryFn:api.listCommunityDeliveries,enabled:enabled&&(can('OPERATOR','FULFILLMENT')||canUsePickupVerifier)});
-  const purchaseOrdersQ=useQuery({queryKey:['purchase-orders'],queryFn:api.listPurchaseOrders,enabled:enabled&&can('PROCUREMENT','WAREHOUSE_RECEIVER','QUALITY_INSPECTOR','WAREHOUSE_OPERATOR','FINANCE','OPERATOR')});
-  const fulfillmentExceptionsQ=useQuery({queryKey:['fulfillment-exceptions'],queryFn:api.listFulfillmentExceptions,enabled:enabled&&can('OPERATOR','PROCUREMENT','WAREHOUSE_RECEIVER','QUALITY_INSPECTOR','WAREHOUSE_OPERATOR','FULFILLMENT','FINANCE')});
-  const platformOutboundOrdersQ=useQuery({queryKey:['platform-outbound-orders'],queryFn:api.listPlatformOutboundOrders,enabled:enabled&&can('WAREHOUSE_RECEIVER','QUALITY_INSPECTOR','WAREHOUSE_OPERATOR','FULFILLMENT','OPERATOR')});
-  const manualNotificationsQ = useQuery({
-    queryKey: ["manual-notifications"],
-    queryFn: api.listManualNotifications,
-    enabled: enabled && can("OPERATOR", "CUSTOMER_SERVICE"),
-  });
-  const refresh = () => queryClient.invalidateQueries();
-  const act = async (
-    key: string,
-    work: () => Promise<unknown>,
-    success: string,
-  ) => {
-    setBusy(key);
-    try {
-      await work();
-      await refresh();
-      messageApi.success(success);
-    } catch (reason) {
-      messageApi.error(reason instanceof Error ? reason.message : "操作失败");
-    } finally {
-      setBusy("");
-    }
-  };
-  const resolutionNote = (title: string) => {
-    const value = window.prompt(title)?.trim() ?? "";
-    if (value.length < 2) {
-      messageApi.warning("请输入至少 2 个字的处理说明");
-      return null;
-    }
-    return value;
-  };
-  const campaigns = campaignsQ.data ?? [];
-  const merchants = merchantsQ.data ?? [];
-  const products = productsQ.data ?? [];
-  const areas = areasQ.data ?? [];
-  const pickupPoints = pickupPointsQ.data ?? [];
-  const staffMembers=staffQ.data??[];
-  const directory = directoryQ.data ?? [];
-  const plans = plansQ.data ?? [];
-  const orders = ordersQ.data ?? [];
-  const batches = batchesQ.data ?? [];
-  const loading = [campaignsQ, areasQ, plansQ, ordersQ, batchesQ].some(
-    (query) => query.isLoading,
-  );
-  const pageQueries: Record<Page, Array<{ isError: boolean; refetch: () => Promise<unknown> }>> = {
-    dashboard: isPointWorkbenchUserForCurrentRoles ? [communityDeliveriesQ] : [communityCampaignsQ, communityDeliveriesQ, ordersQ, fulfillmentExceptionsQ],
-    products: [platformSkusQ],
-    campaigns: [communityCampaignsQ, areasQ, pickupPointsQ],
-    orders: [ordersQ],
-    logistics: [communityDeliveriesQ, batchesQ],
-    "pickup-points": [areasQ, directoryQ, pickupPointsQ, staffQ],
-    service: [afterSalesQ, communityQualityCasesQ, communityCancellationRequestsQ, communityPickupWindowsQ, fulfillmentExceptionsQ, manualNotificationsQ],
-    finance: [refundsQ, settlementsQ],
-    settings: [staffQ, auditQ, manualNotificationsQ],
-    "point-workbench": [communityDeliveriesQ, plansQ],
-  };
-  const failedPageQueries = pageQueries[page].filter((query) => query.isError);
-  const retryPageQueries = () => {
-    void Promise.all(pageQueries[page].map((query) => query.refetch()));
-  };
-  const areaName = (id: string) =>
-    areas.find((item) => item.id === id)?.name ?? id;
-  const campaignName = (id: string) =>
-    campaigns.find((item) => item.id === id)?.title ?? id;
-  const planByCampaign = useMemo(
-    () => new Map(plans.map((item) => [item.campaignId, item])),
-    [plans],
-  );
-  const regionPathByCode = useMemo(
-    () => new Map(directory.map((item) => [item.regionCode, item.path])),
-    [directory],
-  );
-  useEffect(()=>{
-    if(isPointWorkbenchUserForCurrentRoles&&page!=='point-workbench')setPage('point-workbench');
-    else if(!isPointWorkbenchUserForCurrentRoles&&!can('OPERATOR')&&can('FINANCE')&&page==='dashboard')setPage('finance');
-    else if(!isPointWorkbenchUserForCurrentRoles&&!can('OPERATOR')&&!can('FINANCE')&&can('CUSTOMER_SERVICE')&&page==='dashboard')setPage('orders');
-  },[isPointWorkbenchUserForCurrentRoles,page,roles.join(',')]);
-  const openVerifier = (plan: DeliveryPlan) => {
-    setSelectedPlan(plan);
-    setModal("verify");
-  };
-  if (!loggedIn)
-    return (
-      <Login
-        onSuccess={() => {
-          setLoggedIn(true);
-          void refresh();
-        }}
-      />
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [areas, setAreas] = useState<ServiceArea[]>([]),
+    [points, setPoints] = useState<PickupPoint[]>([]),
+    [skus, setSkus] = useState<CatalogSku[]>([]),
+    [campaigns, setCampaigns] = useState<Campaign[]>([]),
+    [orders, setOrders] = useState<Order[]>([]),
+    [plans, setPlans] = useState<DeliveryPlan[]>([]),
+    [batches, setBatches] = useState<
+      Array<{ id: string; campaignId: string; status: string }>
+    >([]),
+    [deliveries, setDeliveries] = useState<CommunityDelivery[]>([]),
+    [staff, setStaff] = useState<InternalStaff[]>([]),
+    [quality, setQuality] = useState<Awaited<ReturnType<typeof api.quality>>>(
+      [],
+    ),
+    [cancellations, setCancellations] = useState<
+      Awaited<ReturnType<typeof api.cancellations>>
+    >([]),
+    [exceptions, setExceptions] = useState<
+      Awaited<ReturnType<typeof api.exceptions>>
+    >([]),
+    [pickupWindows, setPickupWindows] = useState<
+      Awaited<ReturnType<typeof api.pickupWindows>>
+    >([]),
+    [refunds, setRefunds] = useState<
+      Awaited<ReturnType<typeof api.finance>> | null
+    >(null),
+    [ledger, setLedger] = useState<Awaited<ReturnType<typeof api.ledger>>>(
+      [],
+    ),
+    [notifications, setNotifications] = useState<
+      Awaited<ReturnType<typeof api.manualNotifications>>
+    >([]),
+    [interests, setInterests] = useState<
+      Awaited<ReturnType<typeof api.serviceAreaInterests>>
+    >([]),
+    [audits, setAudits] = useState<Awaited<ReturnType<typeof api.audits>>>(
+      [],
     );
-  const dashboard = (
-    <>
-      <header className="workspace-header">
-        <div>
-          <h1>工作台</h1>
-          <p>只保留今天需要人工处理的收单与履约任务。</p>
-        </div>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => setModal("campaign")}
-        >
-          新建团期
-        </Button>
-      </header>
-      <section className="task-section">
-        <PanelTitle eyebrow="需要处理" title="履约待办" />
-        <div className="attention-grid">
-          <button onClick={() => setPage("logistics")}>
-            <span>待确认到货地点</span>
-            <b>
-              {plans.filter((item) => item.status === "PENDING_SITE").length}
-            </b>
-          </button>
-          <button onClick={() => setPage("logistics")}>
-            <span>待登记约车</span>
-            <b>
-              {plans.filter((item) => item.status === "SITE_CONFIRMED").length}
-            </b>
-          </button>
-          <button onClick={() => setPage("logistics")}>
-            <span>可创建发车批次</span>
-            <b>
-              {
-                campaigns.filter(
-                  (item) =>
-                    item.status === "LOCKED" &&
-                    planByCampaign.get(item.id)?.status === "VEHICLE_BOOKED",
-                ).length
-              }
-            </b>
-          </button>
-          <button onClick={() => setPage("logistics")}>
-            <span>运输中待确认到货</span>
-            <b>{plans.filter((item) => item.status === "IN_TRANSIT").length}</b>
-          </button>
-        </div>
-      </section>
-      <section className="dashboard-grid">
-        <article className="panel">
-          <PanelTitle eyebrow="本期进度" title="下一班配送" />
-          {loading ? (
-            <Skeleton active paragraph={{ rows: 2 }} />
-          ) : plans.find((item) =>
-              ["VEHICLE_BOOKED", "IN_TRANSIT"].includes(item.status),
-            ) ? (
-            <div className="next-dispatch">
-              <div>
-                <small>收货区域</small>
-                <b>
-                  {areaName(
-                    plans.find((item) =>
-                      ["VEHICLE_BOOKED", "IN_TRANSIT"].includes(item.status),
-                    )!.serviceAreaId,
-                  )}
-                </b>
-                <StatusTag
-                  value={
-                    plans.find((item) =>
-                      ["VEHICLE_BOOKED", "IN_TRANSIT"].includes(item.status),
-                    )!.status
-                  }
-                />
-              </div>
-              <div className="dispatch-divider">
-                <span />
-              </div>
-              <div>
-                <small>对应团期</small>
-                <b>
-                  {campaignName(
-                    plans.find((item) =>
-                      ["VEHICLE_BOOKED", "IN_TRANSIT"].includes(item.status),
-                    )!.campaignId,
-                  )}
-                </b>
-                <span>地点与车辆信息已由履约侧登记</span>
-              </div>
-            </div>
-          ) : (
-            <Empty
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description="暂无待发车配送"
-            />
-          )}
-        </article>
-        <article className="panel">
-          <PanelTitle eyebrow="实时概览" title="业务数据" />
-          <div className="metric-grid">
-            <StatCard
-              label="收单中"
-              value={String(
-                campaigns.filter((item) => item.status === "OPEN").length,
-              )}
-              note="个团期"
-              tone="red"
-            />
-            <StatCard
-              label="已开放区域"
-              value={String(areas.filter((item) => item.orderEnabled).length)}
-              note="个区县"
-              tone="green"
-            />
-            <StatCard
-              label="待履约订单"
-              value={String(
-                orders.filter((item) =>
-                  ["ALLOCATING", "IN_TRANSIT", "READY_FOR_PICKUP"].includes(
-                    item.status,
-                  ),
-                ).length,
-              )}
-              note="笔订单"
-              tone="ink"
-            />
-            <StatCard
-              label="已到货团期"
-              value={String(
-                plans.filter((item) => item.status === "ARRIVED").length,
-              )}
-              note="等待领取"
-              tone="amber"
-            />
-          </div>
-        </article>
-      </section>
-    </>
+  const navigation = useMemo(
+    () => getAdminNavigation(roles),
+    [roles.join(",")],
   );
-  const settlements = settlementsQ.data ?? [];
-  const refunds = refundsQ.data ?? [];
-  const financePage = <FinancePage refunds={refunds} settlements={settlements} loading={refundsQ.isLoading} money={money} dateTime={dateTime} StatusTag={StatusTag} />;
-  const servicePage = (
-    <>
-      <header className="section-header">
-        <div>
-          <h1>客服与售后</h1>
-          <p>统一处理用户提交的区域开通意向和订单售后，所有状态变化均写入操作记录。</p>
-        </div>
-      </header>
-      <section className="panel">
-        <PanelTitle eyebrow="区域拓展" title="开通意向" />
-        <Table<ServiceAreaInterest>
-          rowKey="id"
-          dataSource={interestsQ.data ?? []}
-          pagination={{ pageSize: 8 }}
-          columns={[
-            { title: "提交时间", dataIndex: "createdAt", render: (value: string) => dateTime.format(new Date(value)) },
-            { title: "所在地区", dataIndex: "regionText" },
-            { title: "联系人", dataIndex: "contactName" },
-            { title: "联系电话", dataIndex: "contactPhone", render: (value: string) => value.replace(/^(\d{3})\d+(\d{4})$/, "$1****$2") },
-            { title: "隐私同意", render: (_, record) => record.privacyVersion && record.privacyConsentedAt ? <div><b>{record.privacyVersion}</b><small className="cell-note">{dateTime.format(new Date(record.privacyConsentedAt))}</small></div> : <span className="muted">历史记录未留痕</span> },
-            { title: "状态", dataIndex: "status", render: (value: string) => <StatusTag value={value} /> },
-            {
-              title: "操作",
-              render: (_, record) => record.status === "NEW" ? (
-                <Button type="link" loading={busy === `interest-${record.id}`} onClick={() => void act(`interest-${record.id}`, () => api.updateServiceAreaInterestStatus(record.id, "CONTACTED"), "已标记为已联系")}>标记已联系</Button>
-              ) : record.status === "CONTACTED" ? (
-                <Button type="link" loading={busy === `interest-${record.id}`} onClick={() => void act(`interest-${record.id}`, () => api.updateServiceAreaInterestStatus(record.id, "CLOSED"), "开通意向已关闭")}>关闭意向</Button>
-              ) : <span className="muted">已完成</span>,
+  const currentPage: AdminPage = isAllowedAdminPage(roles, page)
+    ? page
+    : defaultPage ?? "settings";
+  const clearWorkspace = useCallback((nextPage: AdminPage = "settings") => {
+    identityEpoch.current += 1;
+    reloadGeneration.current += 1;
+    setAreas([]);
+    setPoints([]);
+    setSkus([]);
+    setCampaigns([]);
+    setOrders([]);
+    setPlans([]);
+    setBatches([]);
+    setDeliveries([]);
+    setStaff([]);
+    setQuality([]);
+    setCancellations([]);
+    setExceptions([]);
+    setPickupWindows([]);
+    setRefunds(null);
+    setLedger([]);
+    setNotifications([]);
+    setInterests([]);
+    setAudits([]);
+    setLoadError(null);
+    setLoading(false);
+    setPage(nextPage);
+  }, []);
+  const establishSession = useCallback(() => {
+    const nextDefault = getDefaultAdminPage(auth.roles());
+    clearWorkspace(nextDefault ?? "settings");
+    setAuthenticated(true);
+  }, [clearWorkspace]);
+  const reload = async () => {
+    const epoch = identityEpoch.current;
+    const generation = ++reloadGeneration.current;
+    const isCurrentReload = () =>
+      identityEpoch.current === epoch && reloadGeneration.current === generation;
+    const commit = <T,>(setter: (value: T) => void) => (value: T) => {
+      if (isCurrentReload()) setter(value);
+    };
+    if (isCurrentReload()) {
+      setLoading(true);
+      setLoadError(null);
+    }
+    try {
+      const work: Array<Promise<unknown>> = [];
+      if (currentPage === "dashboard")
+        work.push(
+          api.areas().then(commit(setAreas)),
+          api.points().then(commit(setPoints)),
+          api.campaigns().then(commit(setCampaigns)),
+          api.orders().then(commit(setOrders)),
+        );
+      if (currentPage === "products") work.push(api.skus().then(commit(setSkus)));
+      if (currentPage === "campaigns")
+        work.push(
+          api.areas().then(commit(setAreas)),
+          api.points().then(commit(setPoints)),
+          api.skus().then(commit(setSkus)),
+          api.campaigns().then(commit(setCampaigns)),
+        );
+      if (currentPage === "orders")
+        work.push(
+          api.orders().then(commit(setOrders)),
+          api.campaigns().then(commit(setCampaigns)),
+        );
+      if (currentPage === "logistics")
+        work.push(
+          api.plans().then(commit(setPlans)),
+          api.batches().then(commit(setBatches)),
+          api.deliveries().then(commit(setDeliveries)),
+          api.campaigns().then(commit(setCampaigns)),
+          api.orders().then(commit(setOrders)),
+        );
+      if (currentPage === "pickup-points")
+        work.push(api.areas().then(commit(setAreas)), api.points().then(commit(setPoints)));
+      if (currentPage === "point-workbench")
+        work.push(api.deliveries().then(commit(setDeliveries)));
+      if (currentPage === "settings")
+        work.push(api.staff().then(commit(setStaff)), api.points().then(commit(setPoints)));
+      if (currentPage === "service")
+        work.push(
+          Promise.all([api.quality(), api.cancellations(), api.exceptions()]).then(
+            ([nextQuality, nextCancellations, nextExceptions]) => {
+              commit(setQuality)(nextQuality);
+              commit(setCancellations)(nextCancellations);
+              commit(setExceptions)(nextExceptions);
             },
-          ]}
-        />
-      </section>
-      <section className="panel panel--spaced">
-        <PanelTitle eyebrow="订单触达" title="待人工通知" />
-        <Alert type="info" showIcon message="未开启订单提醒的用户会进入这里。联系完成后请勾销，避免临时领取地点无人知晓。" style={{ marginBottom: 16 }} />
-        <Table<OrderNotification>
-          rowKey="id"
-          dataSource={manualNotificationsQ.data ?? []}
-          pagination={{ pageSize: 8 }}
-          columns={[
-            { title: "触发时间", dataIndex: "createdAt", render: (value: string) => dateTime.format(new Date(value)) },
-            { title: "订单", dataIndex: "orderId", render: (value: string) => <span className="mono">{value}</span> },
-            { title: "通知", dataIndex: "title" },
-            { title: "内容", dataIndex: "content", ellipsis: true },
-            { title: "状态", dataIndex: "status", render: (value: string) => <StatusTag value={value} /> },
-            { title: "操作", render: (_, record) => record.status === "PENDING_DELIVERY" ? <Button type="link" loading={busy === `manual-notification-${record.id}`} onClick={() => void act(`manual-notification-${record.id}`, () => api.retryPendingNotification(record.id), "已重试微信通知")}>重试微信通知</Button> : <Button type="link" loading={busy === `manual-notification-${record.id}`} onClick={() => void act(`manual-notification-${record.id}`, () => api.completeManualNotification(record.id), "已记录人工通知")}>标记已通知</Button> },
-          ]}
-        />
-      </section>
-      <CommunityCaseQueues pickupWindows={communityPickupWindowsQ.data ?? []} cancellations={communityCancellationRequestsQ.data ?? []} qualityCases={communityQualityCasesQ.data ?? []} exceptions={fulfillmentExceptionsQ.data ?? []} loading={communityPickupWindowsQ.isLoading || communityCancellationRequestsQ.isLoading || communityQualityCasesQ.isLoading || fulfillmentExceptionsQ.isLoading} can={can} act={act} note={resolutionNote} dateTime={dateTime} StatusTag={StatusTag} api={api} />
-      <section className="panel panel--spaced">
-        <PanelTitle eyebrow="订单保障" title="售后申请" />
-        <Table<AfterSale>
-          rowKey="id"
-          dataSource={afterSalesQ.data ?? []}
-          pagination={{ pageSize: 8 }}
-          columns={[
-            { title: "提交时间", dataIndex: "createdAt", render: (value: string) => dateTime.format(new Date(value)) },
-            { title: "订单", dataIndex: "orderId", render: (value: string) => <span className="mono">{value}</span> },
-            { title: "问题类型", dataIndex: "reason" },
-            { title: "用户说明", dataIndex: "description", ellipsis: true },
-            { title: "状态", dataIndex: "status", render: (value: string) => <StatusTag value={value} /> },
-            {
-              title: "操作",
-              render: (_, record) => record.status === "SUBMITTED" ? (
-                can("OPERATOR", "CUSTOMER_SERVICE") ? <Button type="link" loading={busy === `after-sale-${record.id}`} onClick={() => void act(`after-sale-${record.id}`, () => api.updateAfterSaleStatus(record.id, "PROCESSING"), "售后已受理")}>受理</Button> : <span className="muted">待客服受理</span>
-              ) : record.status === "PROCESSING" ? (
-                <div className="table-actions">
-                  {can("FINANCE") && <Button type="link" loading={busy === `after-sale-${record.id}`} onClick={() => { const note=resolutionNote("请输入批准全额原路退款的处理说明"); if(note)void act(`after-sale-${record.id}`, () => api.refundAfterSale(record.id,note), "退款已完成并关联售后单"); }}>批准全额退款</Button>}
-                  {can("OPERATOR", "CUSTOMER_SERVICE") && <Button danger type="link" loading={busy === `after-sale-${record.id}`} onClick={() => { const note=resolutionNote("请输入驳回原因"); if(note)void act(`after-sale-${record.id}`, () => api.updateAfterSaleStatus(record.id,"REJECTED",note), "售后已驳回"); }}>驳回</Button>}
-                </div>
-              ) : <span className="muted">{record.resolutionType === "FULL_REFUND" && record.refundAmountCents !== null ? `已退款 ${money(record.refundAmountCents)}` : record.resolutionNote ?? "已结束"}</span>,
-            },
-          ]}
-        />
-      </section>
-    </>
-  );
-  const productManagementPage = (
-    <>
-      <header className="section-header">
-        <div><span className="eyebrow">长期资料</span><h1>商品管理</h1><p>维护平台商品的展示、规格、默认售价与默认可售数量；商品加入并发布团期后才会对消费者可见。</p></div>
-        {can('OPERATOR') && <Button type="primary" icon={<PlusOutlined />} onClick={()=>{setSelectedCommunitySku(null);setModal('community-product');}}>新增商品</Button>}
-      </header>
-      <section className="panel">
-        <Table<PlatformSku> rowKey="id" loading={platformSkusQ.isLoading} dataSource={platformSkusQ.data??[]} pagination={{pageSize:10}} scroll={{x:760}} columns={[
-          {title:'商品',render:(_,item)=><div><b>{item.product.title}</b><small className="cell-note">{item.product.category} · {item.name}</small></div>},
-          {title:'默认零售价',dataIndex:'retailPriceCents',render:(value:number)=>money(value)},
-          {title:'默认可售数量',dataIndex:'defaultSellableQuantity'},
-          {title:'状态',dataIndex:'status',render:(value:string)=><StatusTag value={value}/>},
-          {title:'操作',render:(_,item)=>can('OPERATOR')?<div className="table-actions"><Button type="link" onClick={()=>{setSelectedCommunitySku(item);setModal('community-product');}}>编辑</Button>{item.status==='ACTIVE'&&<Popconfirm title="停用商品？已发布团期不受影响。" onConfirm={()=>void act(`community-sku-off-${item.id}`,()=>api.savePlatformSku({id:item.id,productId:item.productId,title:item.product.title,category:item.product.category,origin:item.product.origin,imageUrl:item.product.imageUrl,skuName:item.name,retailPriceCents:item.retailPriceCents,defaultSellableQuantity:item.defaultSellableQuantity??0,referencePurchaseCostCents:item.referencePurchaseCostCents??null,supplierNote:item.supplierNote??null,status:'INACTIVE'}),'商品已停用')}><Button type="link" danger>停用</Button></Popconfirm>}</div>:<span className="muted">只读</span>},
-        ]}/>
-      </section>
-    </>
-  );
-  const communityCampaignPage = (
-    <>
-      <header className="section-header">
-        <div><span className="eyebrow">上架与收单</span><h1>团期管理</h1><p>选择已启用商品，设置本团售价、数量、时间、区域和固定自提点；发布后才进入消费者可见范围。</p></div>
-        {can('OPERATOR') && <Button type="primary" icon={<PlusOutlined />} onClick={()=>setModal('community-campaign')}>创建团期</Button>}
-      </header>
-      <section className="panel">
-        <Table<Campaign> rowKey="id" loading={communityCampaignsQ.isLoading} dataSource={communityCampaignsQ.data??[]} pagination={{pageSize:10}} scroll={{x:760}} columns={[
-          {title:'团期',dataIndex:'title',render:(value:string,item)=><div><b>{value}</b><small className="cell-note">{areaName(item.serviceAreaId)} · {item.items?.length??0} 个商品</small></div>},
-          {title:'固定自提点',render:(_,item)=>plans.find((plan)=>plan.campaignId===item.id)?.siteName??'已在团期创建时绑定'},
-          {title:'状态',dataIndex:'status',render:(value:string)=><StatusTag value={value}/>},
-          {title:'下一步',render:(_,item)=>item.status==='DRAFT'&&can('OPERATOR')?<Button type="link" onClick={()=>void act(`community-open-${item.id}`,()=>api.openCampaign(item.id),'团期已发布开售')}>发布开售</Button>:item.status==='OPEN'?<span className="muted">等待截单</span>:<span className="muted">履约进度请到物流管理查看</span>},
-        ]}/>
-      </section>
-    </>
-  );
-  const orderManagementPage = (
-    <>
-      <header className="section-header"><div><span className="eyebrow">销售订单</span><h1>订单管理</h1><p>按团期与自提点查看订单、支付与售后进度；商品配置、发车和退款执行在各自工作页面完成。</p></div></header>
-      <section className="panel"><Table<Order> rowKey="id" loading={ordersQ.isLoading} dataSource={orders} pagination={{pageSize:12}} scroll={{x:760}} columns={[
-        {title:'订单号',dataIndex:'orderNo'},
-        {title:'团期',dataIndex:'campaignId',render:(value:string)=>campaignName(value)},
-        {title:'自提点',dataIndex:'pickupPointId',render:(value:string)=>pickupPoints.find((item)=>item.id===value)?.name??value},
-        {title:'状态',dataIndex:'status',render:(value:string)=><StatusTag value={value}/>},
-        {title:'实付金额',dataIndex:'totalCents',render:(value:number)=>money(value)},
-        {title:'支付时间',dataIndex:'paidAt',render:(value:string|null)=>value?dateTime.format(new Date(value)):'—'},
-      ]}/></section>
-    </>
-  );
-  const logisticsManagementPage = <CommunityLogisticsPage deliveries={communityDeliveriesQ.data ?? []} plans={plans} batches={batches} loading={communityDeliveriesQ.isLoading} can={can} act={act} dateTime={dateTime} renderStatus={(delivery) => <CommunityDeliveryStatusTag delivery={delivery} />} onEditVehicle={(plan) => { setSelectedPlan(plan); setModal('vehicle'); }} onEmergencyArrival={(delivery) => { setSelectedCommunityDelivery(delivery); setModal('community-arrival'); }} onGoToService={() => setPage('service')} api={api} />;
-  const pickupPointManagementPage = (
-    <>
-      <header className="section-header"><div><span className="eyebrow">场地与现场人员</span><h1>自提点管理</h1><p>维护收货区域、固定自提点和负责人账号范围；负责人只可处理自己绑定点位的到货与领取。</p></div></header>
-      <section className="panel"><PanelTitle eyebrow="服务区域" title="已开通区域" action={can('OPERATOR')?<Button onClick={()=>setModal('area')}>开通区域</Button>:undefined}/><Table<ServiceArea> rowKey="id" loading={areasQ.isLoading} dataSource={areas} pagination={{pageSize:6}} columns={[
-        {title:'区域',render:(_,item)=><div><b>{item.name}</b><small className="cell-note">{regionPathByCode.get(item.regionCode)??item.name}</small></div>},
-        {title:'收单状态',dataIndex:'orderEnabled',render:(value:boolean)=>value?<Tag color="success">收单中</Tag>:<Tag>已暂停</Tag>},
-        {title:'操作',render:(_,item)=>can('OPERATOR')?<Button type="link" onClick={()=>void act(`area-${item.id}`,()=>api.updateServiceAreaOrderStatus(item.id,!item.orderEnabled),item.orderEnabled?'已暂停收单':'已恢复收单')}>{item.orderEnabled?'暂停收单':'恢复收单'}</Button>:<span className="muted">只读</span>},
-      ]}/></section>
-      <section className="panel panel--spaced"><PanelTitle eyebrow="固定场地" title="自提点" action={can('OPERATOR')?<Button type="primary" onClick={()=>setModal('pickup-point')}>新增自提点</Button>:undefined}/><Table<PickupPoint> rowKey="id" loading={pickupPointsQ.isLoading} dataSource={pickupPoints} pagination={{pageSize:8}} columns={[
-        {title:'自提点',render:(_,item)=><div><b>{item.name}</b><small className="cell-note">{item.address}</small></div>},
-        {title:'服务区域',dataIndex:'serviceAreaId',render:(value:string)=>areaName(value)},
-        {title:'状态',dataIndex:'status',render:(value:string)=><StatusTag value={value}/>},
-        {title:'日容量',dataIndex:'capacityPerDay',render:(value:number|null)=>value??'未设置'},
-      ]}/></section>
-      <section className="panel panel--spaced"><PanelTitle eyebrow="负责人账号与权限" title="点位负责人" action={can('SUPER_ADMIN')?<Button type="primary" onClick={()=>setModal('staff-create')}>新增内部员工</Button>:<span className="panel__hint">仅平台负责人可创建、变更或停用员工账号</span>}/>{can('SUPER_ADMIN')?<Table<InternalStaff> rowKey="userId" dataSource={staffMembers.filter((item)=>item.role==='PICKUP_MANAGER')} pagination={{pageSize:8}} columns={[
-        {title:'员工',render:(_,item)=><div><b>{item.displayName}</b><small className="cell-note">{item.staffNo} · {item.phone}</small></div>},
-        {title:'负责点位',render:(_,item)=>item.pickupPointIds.map((id)=>pickupPoints.find((point)=>point.id===id)?.name??id).join('、')||'未绑定'},
-        {title:'状态',dataIndex:'status',render:(value:string)=><StatusTag value={value}/>},
-        {title:'操作',render:(_,item)=><Button type="link" onClick={()=>{setSelectedStaff(item);setModal('staff-scope');}}>变更范围/停用</Button>},
-      ]}/>:<Alert type="info" showIcon message="负责人账号由平台负责人维护" description="运营可以查看自提点，不会接触员工凭据、手机号或跨点位授权信息。"/>}</section>
-    </>
-  );
-  const pointWorkbenchPage = <PickupPointWorkbenchPage deliveries={communityDeliveriesQ.data ?? []} plans={plans} loading={communityDeliveriesQ.isLoading} renderStatus={(delivery) => <CommunityDeliveryStatusTag delivery={delivery} />} onConfirmArrival={(delivery) => { setSelectedCommunityDelivery(delivery); setModal('community-arrival'); }} onVerify={openVerifier} />;
-  const settingsPage = (
-    <>
-      <header className="section-header"><div><span className="eyebrow">账号、权限与记录</span><h1>系统设置</h1><p>平台负责人维护内部员工、角色与点位范围；所有高风险操作都有审计记录，旧撮合数据只读兼容。</p></div>{can('SUPER_ADMIN')&&<Button type="primary" icon={<PlusOutlined/>} onClick={()=>setModal('staff-create')}>新增内部员工</Button>}</header>
-      {can('SUPER_ADMIN')&&<section className="panel"><PanelTitle eyebrow="账号生命周期" title="内部员工目录"/><Table<InternalStaff> rowKey="userId" loading={staffQ.isLoading} dataSource={staffMembers} pagination={{pageSize:10}} scroll={{x:820}} columns={[
-        {title:'员工',render:(_,item)=><div><b>{item.displayName}</b><small className="cell-note">{item.staffNo} · {item.phone}</small></div>},
-        {title:'角色',dataIndex:'role',render:(value:InternalStaffRole)=>staffRoleOptions.find((item)=>item.value===value)?.label??value},
-        {title:'点位范围',render:(_,item)=>item.pickupPointIds.map((id)=>pickupPoints.find((point)=>point.id===id)?.name??id).join('、')||'—'},
-        {title:'状态',dataIndex:'status',render:(value:string)=><StatusTag value={value}/>},
-        {title:'操作',render:(_,item)=><div className="table-actions"><Button type="link" onClick={()=>{setSelectedStaff(item);setModal('staff-scope');}}>变更/停用</Button><Button type="link" danger onClick={()=>{const reason=resolutionNote('请填写重置一次性凭据的原因');if(reason)void act(`staff-reset-${item.userId}`,async()=>{const result=await api.resetInternalStaffCredential(item.userId,reason);Modal.success({title:'新的一次性初始凭据',content:<Input value={result.initialCredential} readOnly onFocus={(event)=>event.currentTarget.select()}/>});},'已重置凭据并回收会话');}}>重置凭据</Button></div>},
-      ]}/></section>}
-      {can('SUPER_ADMIN')&&<section className="panel panel--spaced"><PanelTitle eyebrow="操作记录" title="关键审计"/><Table rowKey="id" dataSource={auditQ.data??[]} pagination={{pageSize:8}} columns={[{title:'时间',dataIndex:'createdAt',render:(value:string)=>dateTime.format(new Date(value))},{title:'操作',dataIndex:'action',render:(value:string)=>value==='COMMUNITY_DELIVERY_EMERGENCY_CONFIRMED'?'紧急代办点位到货确认':value},{title:'对象',render:(_,item)=>`${item.resourceType} · ${item.resourceId}`},{title:'紧急代办原因',render:(_,item)=>item.action==='COMMUNITY_DELIVERY_EMERGENCY_CONFIRMED'?((item.afterData as {emergencyReason?:string}|null)?.emergencyReason??'—'):'—'},{title:'操作人',dataIndex:'actorId'}]}/></section>}
-      <section className="panel panel--spaced"><PanelTitle eyebrow="历史兼容数据" title="旧撮合与通知记录"/><Alert type="info" showIcon message="历史撮合结算、旧核销授权和通知失败记录仅用于兼容与追溯" description="它们不属于日常运营入口；不会用于新社区团购的商品、团期、物流、点位或退款流程。"/></section>
-    </>
-  );
-  const content = {
-    dashboard,
-    products: productManagementPage,
-    campaigns: communityCampaignPage,
-    orders: orderManagementPage,
-    logistics: logisticsManagementPage,
-    "pickup-points": pickupPointManagementPage,
-    service: servicePage,
-    finance: financePage,
-    settings: settingsPage,
-    "point-workbench": pointWorkbenchPage,
-  }[page];
-  const navIcons: Record<Page, React.ReactNode> = {
-    dashboard: <AppstoreOutlined />, products: <AppstoreOutlined />, campaigns: <CarOutlined />, orders: <AuditOutlined />,
-    logistics: <CarOutlined />, "pickup-points": <EnvironmentOutlined />, service: <AuditOutlined />, finance: <WalletOutlined />,
-    settings: <AuditOutlined />, "point-workbench": <EnvironmentOutlined />,
+          ),
+        );
+      if (
+        currentPage === "service" &&
+        (roles.includes("OPERATOR") || roles.includes("SUPER_ADMIN"))
+      )
+        work.push(api.pickupWindows().then(commit(setPickupWindows)));
+      if (currentPage === "governance")
+        work.push(
+          Promise.all([
+            api.manualNotifications(),
+            api.serviceAreaInterests(),
+          ]).then(([nextNotifications, nextInterests]) => {
+            commit(setNotifications)(nextNotifications);
+            commit(setInterests)(nextInterests);
+          }),
+        );
+      if (currentPage === "finance")
+        work.push(
+          Promise.all([
+            api.finance(),
+            api.ledger(),
+            api.exceptions(),
+            api.pickupWindows(),
+            api.quality(),
+            api.cancellations(),
+          ]).then(([
+            nextRefunds,
+            nextLedger,
+            nextExceptions,
+            nextWindows,
+            nextQuality,
+            nextCancellations,
+          ]) => {
+            commit(setRefunds)(nextRefunds);
+            commit(setLedger)(nextLedger);
+            commit(setExceptions)(nextExceptions);
+            commit(setPickupWindows)(nextWindows);
+            commit(setQuality)(nextQuality);
+            commit(setCancellations)(nextCancellations);
+          }),
+        );
+      if (currentPage === "audit") work.push(api.audits().then(commit(setAudits)));
+      await Promise.all(work);
+    } catch (caught) {
+      if (isCurrentReload()) setLoadError(adminLoadErrorText(caught));
+    } finally {
+      if (isCurrentReload()) setLoading(false);
+    }
   };
-  const navGroups = getAdminNavigation(roles).map((group) => ({
-    ...group,
-    items: group.items.map((item) => ({ ...item, icon: navIcons[item.key] })),
-  }));
-  return (
-    <div className="shell">
-      {holder}
-      <aside className="sidebar">
-        <div className="brand">
-          <span className="brand__mark">乡</span>
-          <div>
-            <b>乡味集</b>
-            <small>团购运营平台</small>
-          </div>
-        </div>
-        <nav aria-label="主导航">
-          {navGroups.map((group) => (
-            <div className="nav-group" key={group.label}>
-              <span className="nav-group__label">{group.label}</span>
-              {group.items.map((item) => (
-                <button
-                  key={item.key}
-                  className={`nav-item ${page === item.key ? "nav-item--active" : ""}`}
-                  onClick={() => setPage(item.key)}
-                >
-                  {item.icon}
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          ))}
-        </nav>
-        <div className="sidebar__foot">
-          <span className="environment-dot" />
-          {requiresLogin ? "生产环境" : "演示环境"}
-          <small>人工约车信息仅在履约侧展示</small>
-          <Button
-            type="text"
-            icon={<LogoutOutlined />}
-            onClick={() => {
-              void api.logout().finally(() => {
-                auth.clear();
-                setLoggedIn(false);
-              });
-            }}
-          >
-            退出登录
-          </Button>
-        </div>
-      </aside>
-      <main>
-        {failedPageQueries.length > 0 && (
-          <Alert
-            className="page-load-error"
-            type="error"
-            showIcon
-            message="部分数据未能加载"
-            description="当前显示的零值或空列表可能不完整。请重试后再进行运营判断或操作。"
-            action={
-              <Button type="primary" size="small" onClick={retryPageQueries}>
-                重新加载
-              </Button>
-            }
-          />
-        )}
-        {content}
-      </main>
-      <CampaignModal
-        open={modal === "campaign"}
-        close={() => setModal(null)}
-        saved={refresh}
-        areas={areas}
-        products={products}
-      />
-      <DeliverySiteModal
-        open={modal === "site"}
-        close={() => {
-          setModal(null);
-          setSelectedPlan(null);
-        }}
-        saved={refresh}
-        plan={selectedPlan}
+  useEffect(() => {
+    const expired = () => {
+      auth.clear();
+      clearWorkspace();
+      setAuthenticated(false);
+    };
+    window.addEventListener("admin-auth-expired", expired);
+    if (!authenticated) return () => window.removeEventListener("admin-auth-expired", expired);
+    if (!defaultPage) {
+      auth.clear();
+      clearWorkspace();
+      setAuthenticated(false);
+      return () => window.removeEventListener("admin-auth-expired", expired);
+    }
+    if (!isAllowedAdminPage(roles, page)) {
+      setPage(defaultPage);
+      return () => window.removeEventListener("admin-auth-expired", expired);
+    }
+    void reload();
+    return () => window.removeEventListener("admin-auth-expired", expired);
+  }, [authenticated, page, roles.join(","), clearWorkspace]);
+  if (!authenticated)
+    return (
+      <AntApp>
+        <Login done={establishSession} />
+      </AntApp>
+    );
+  const content =
+    currentPage === "dashboard" ? (
+      <Dashboard {...{ areas, points, campaigns, orders }} />
+    ) : currentPage === "products" ? (
+      <Products values={skus} reload={reload} />
+    ) : currentPage === "campaigns" ? (
+      <Campaigns values={campaigns} {...{ areas, points, skus, reload }} />
+    ) : currentPage === "orders" ? (
+      <Orders
+        values={orders}
         campaigns={campaigns}
-        pickupPoints={pickupPoints}
+        roles={roles}
+        reload={reload}
+        onNavigate={setPage}
       />
-      <VehicleModal
-        open={modal === "vehicle"}
-        close={() => {
-          setModal(null);
-          setSelectedPlan(null);
+    ) : currentPage === "logistics" ? (
+      <Logistics
+        {...{
+          plans,
+          batches,
+          deliveries,
+          campaigns,
+          orders,
+          roles,
+          loading,
+          error: loadError,
+          reload,
+          onNavigate: setPage,
         }}
-        saved={refresh}
-        plan={selectedPlan}
       />
-      <AreaModal
-        open={modal === "area"}
-        close={() => setModal(null)}
-        saved={refresh}
-        directory={directory}
-        areas={areas}
+    ) : currentPage === "pickup-points" ? (
+      <Areas {...{ areas, points, reload }} />
+    ) : currentPage === "point-workbench" ? (
+      <PointWorkbench
+        {...{ deliveries, roles, loading, error: loadError, reload }}
       />
-      <MerchantModal
-        open={modal === "merchant"}
-        close={() => setModal(null)}
-        saved={refresh}
+    ) : currentPage === "service" ? (
+      <Service
+        {...{
+          quality,
+          cancellations,
+          exceptions,
+          pickupWindows,
+          roles,
+          reload,
+          loading,
+          error: loadError,
+        }}
       />
-      <ProductModal
-        open={modal === "product"}
-        close={() => setModal(null)}
-        saved={refresh}
-        merchants={merchants}
+    ) : currentPage === "governance" ? (
+      <GovernancePage
+        {...{
+          notifications,
+          interests,
+          loading,
+          error: loadError,
+          reload,
+        }}
       />
-      <MerchantEditModal
-        open={modal === "merchant-edit"}
-        close={() => { setModal(null); setSelectedMerchant(null); }}
-        saved={refresh}
-        merchant={selectedMerchant}
+    ) : currentPage === "finance" ? (
+      <Finance
+        {...{
+          refunds,
+          ledger,
+          quality,
+          cancellations,
+          exceptions,
+          pickupWindows,
+          roles,
+          reload,
+          onQualityRefunded: (result) =>
+            setQuality((current) =>
+              current.map((value) =>
+                value.id === result.id
+                  ? {
+                      ...value,
+                      status: result.status,
+                      financeRefundStatus: result.financeRefundStatus,
+                    }
+                  : value,
+              ),
+            ),
+          onCancellationRefunded: (result) =>
+            setCancellations((current) =>
+              current.map((value) =>
+                value.id === result.id || value.orderId === result.orderId
+                  ? { ...value, status: result.status }
+                  : value,
+              ),
+            ),
+          loading,
+          error: loadError,
+        }}
       />
-      <ProductEditModal
-        open={modal === "product-edit"}
-        close={() => { setModal(null); setSelectedProduct(null); }}
-        saved={refresh}
-        product={selectedProduct}
-        merchants={merchants}
-      />
-      <CampaignEditModal
-        open={modal === "campaign-edit"}
-        close={() => { setModal(null); setSelectedCampaign(null); }}
-        saved={refresh}
-        campaign={selectedCampaign}
-        areas={areas}
-        products={products}
-      />
-      <PostponeCampaignModal
-        open={modal === "campaign-postpone"}
-        close={() => { setModal(null); setSelectedCampaign(null); }}
-        saved={refresh}
-        campaign={selectedCampaign}
-      />
-      <VerifyPickupModal
-        open={modal === "verify"}
-        close={() => { setModal(null); setSelectedPlan(null); }}
-        saved={refresh}
-        plan={selectedPlan}
-      />
-      <WarehouseExceptionModal
-        open={modal === "warehouse-exception"}
-        close={() => setModal(null)}
-        saved={refresh}
-        campaigns={lockedPlatformCampaignsQ.data ?? []}
-      />
-      <GoodsReceiptModal
-        open={modal === "goods-receipt"}
-        close={() => setModal(null)}
-        saved={refresh}
-        purchaseOrders={purchaseOrdersQ.data ?? []}
-      />
-      <OutboundDispatchModal
-        open={modal === "platform-outbound"}
-        close={() => { setModal(null); setSelectedOutboundCampaign(null); }}
-        saved={refresh}
-        campaign={selectedOutboundCampaign}
-      />
-      <PickupHandoverModal
-        open={modal === "pickup-handover"}
-        close={() => setModal(null)}
-        saved={refresh}
-        outboundOrders={(platformOutboundOrdersQ.data ?? []).filter((item) => item.status === 'DISPATCHED')}
-      />
-      <CommunityProductModal open={modal === 'community-product'} close={()=>{setModal(null);setSelectedCommunitySku(null);}} onSaved={refresh} sku={selectedCommunitySku} showCommercialDetails={can('PROCUREMENT')} />
-      <CommunityCampaignModal open={modal === 'community-campaign'} close={()=>setModal(null)} skus={platformSkusQ.data??[]} areas={areas} points={pickupPoints} onSaved={refresh} />
-      <CommunityArrivalModal open={modal === 'community-arrival'} close={()=>{setModal(null);setSelectedCommunityDelivery(null);}} saved={refresh} delivery={selectedCommunityDelivery} emergencyProxy={can('SUPER_ADMIN')&&!canUsePickupVerifier} />
-      <StaffCreateModal open={modal === 'staff-create'} close={()=>setModal(null)} pickupPoints={pickupPoints} saved={refresh} />
-      <StaffScopeModal open={modal === 'staff-scope'} close={()=>{setModal(null);setSelectedStaff(null);}} staff={selectedStaff} pickupPoints={pickupPoints} saved={refresh} />
-      <PickupPointCreateModal open={modal === 'pickup-point'} close={()=>setModal(null)} areas={areas} saved={refresh} />
-    </div>
+    ) : currentPage === "audit" ? (
+      <AuditPage audits={audits} loading={loading} error={loadError} reload={reload} />
+    ) : (
+      <Settings {...{ staff, points, reload }} />
+    );
+  return (
+    <AntApp>
+      <Layout className="app-shell">
+        <Sider
+          className="app-sider"
+          width={230}
+          theme="light"
+          breakpoint="md"
+          collapsedWidth={0}
+          collapsible
+        >
+          <div className="brand">
+            <strong>社区团购</strong>
+            <span>运营后台</span>
+          </div>
+          <Menu
+            mode="inline"
+            selectedKeys={[currentPage]}
+            onClick={({ key }) => setPage(key as AdminPage)}
+            items={navigation.map((group) => ({
+              type: "group",
+              label: group.label,
+              children: group.items.map((item) => ({
+                key: item.key,
+                label: item.label,
+              })),
+            }))}
+          />
+        </Sider>
+        <Layout>
+          <Header className="topbar">
+            <span>单一社区团购运营系统</span>
+            <Space>
+              <Button
+                icon={<ReloadOutlined />}
+                loading={loading}
+                onClick={() => void reload()}
+              >
+                刷新
+              </Button>
+              {requiresLogin && (
+                <Button
+                  onClick={() =>
+                    void api.logout().finally(() => {
+                      auth.clear();
+                      clearWorkspace();
+                      setAuthenticated(false);
+                    })
+                  }
+                >
+                  退出
+                </Button>
+              )}
+            </Space>
+          </Header>
+          <Content className="content">{content}</Content>
+        </Layout>
+      </Layout>
+    </AntApp>
   );
 }

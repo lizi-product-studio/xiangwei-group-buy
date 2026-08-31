@@ -1,5 +1,8 @@
-import { api, customerAuth } from '../../utils/api';
+import { api, AuthExpiredError, customerAuth } from '../../utils/api';
 import { PRIVACY_NOTICE_VERSION } from '../../config/legal';
+import { navigateToCustomerLogin } from '../../utils/auth-navigation';
+import { PageActionCoordinator, isOwnedAuthExpiry } from '../../utils/page-action-coordinator';
+const actionCoordinator = new PageActionCoordinator();
 
 Page({
   data: {
@@ -10,6 +13,9 @@ Page({
     privacyVersion: PRIVACY_NOTICE_VERSION,
     submitting: false,
   },
+  onShow() { actionCoordinator.activate(); this.setData({ submitting: false }); },
+  onHide() { actionCoordinator.invalidate(); },
+  onUnload() { actionCoordinator.invalidate(); },
 
   inputValue(event: WechatMiniprogram.Input) {
     const field = event.currentTarget.dataset.field as 'regionText' | 'contactName' | 'contactPhone';
@@ -36,18 +42,31 @@ Page({
       return;
     }
     if (!customerAuth.isLoggedIn()) {
-      const result = await wx.showModal({ title: '登录后再登记', content: '登录后可保存你的开通意向，并跟进后续通知。', confirmText: '去登录', confirmColor: '#e04c30' });
-      if (result.confirm) void wx.switchTab({ url: '/pages/profile/index' });
+      navigateToCustomerLogin(
+        'service-area-interest',
+        '/pages/interest/index',
+        'submit-service-area-interest',
+      );
       return;
     }
+    const action = actionCoordinator.begin(customerAuth.captureSessionEpoch());
+    const current = () => actionCoordinator.isCurrent(action, customerAuth.captureSessionEpoch()) && customerAuth.isLoggedIn();
     this.setData({ submitting: true });
     try {
+      if (!current()) return;
       await api.createServiceAreaInterest({ regionText: regionText.trim(), contactName: contactName.trim(), contactPhone: contactPhone.trim(), privacyAccepted: true, privacyVersion: PRIVACY_NOTICE_VERSION });
-      void wx.showModal({ title: '登记成功', content: '我们会结合当地稳定的收单和履约条件安排开通。后续进展将通过小程序服务通知或人工联系告知你。', showCancel: false, confirmText: '知道了', success: () => wx.navigateBack() });
+      if (!current()) return;
+      void wx.showModal({ title: '登记成功', content: '我们会结合当地稳定的收单和履约条件安排开通。后续进展将按照已批准的通知与隐私规则告知你。', showCancel: false, confirmText: '知道了', success: () => { if (current()) wx.navigateBack(); } });
     } catch (error) {
+      if (error instanceof AuthExpiredError) {
+        if (!isOwnedAuthExpiry(error, action, customerAuth.captureSessionEpoch()) || !actionCoordinator.isActive(action)) return;
+        navigateToCustomerLogin('service-area-interest', '/pages/interest/index', 'submit-service-area-interest');
+        return;
+      }
+      if (!current()) return;
       void wx.showModal({ title: '暂时无法提交', content: error instanceof Error ? error.message : '请稍后再试', showCancel: false });
     } finally {
-      this.setData({ submitting: false });
+      if (current()) this.setData({ submitting: false });
     }
   },
 

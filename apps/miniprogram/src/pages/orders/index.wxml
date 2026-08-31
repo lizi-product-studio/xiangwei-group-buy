@@ -9,7 +9,7 @@
     </view>
   </scroll-view>
   <view wx:if="{{loading}}" class="empty-order"><text>正在同步订单…</text></view>
-  <view wx:elif="{{error}}" class="empty-order"><text>暂时没能加载订单</text><text>{{error}}</text></view>
+  <view wx:elif="{{error}}" class="empty-order"><text>{{error === '登录后可查看你的订单与领取进度' ? '登录后查看订单' : '暂时没能加载订单'}}</text><text>{{error}}</text><button wx:if="{{error === '登录后可查看你的订单与领取进度'}}" class="primary-button" bindtap="openLogin">微信快捷登录</button><button wx:else class="ghost-button" bindtap="onShow">重新加载</button></view>
   <view wx:elif="{{!orders.length}}" class="empty-order">
     <view class="empty-order__stamp">单</view>
     <text>{{activeFilter === 'ALL' ? '还没有订单' : '这里还没有相关订单'}}</text>

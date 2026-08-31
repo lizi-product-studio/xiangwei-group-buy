@@ -1,802 +1,1806 @@
-import { moneyCents, type MoneyCents } from '@hometown/domain';
-import type { AdminCredential, AfterSale, AuditLog, AuthSession, Campaign, CampaignItemSnapshot, CommunityAllocationDraft, CommunityCampaignItem, CommunityCancellationRequest, CommunityDeliveryConfirmation, CommunityPickupReceipt, CommunityPickupWindow, CommunityQualityCase, DeliveryPlan, DispatchBatch, FulfillmentAllocation, FulfillmentException, GoodsReceipt, InternalStaff, InventoryBalance, InventoryLot, InventoryMovement, LedgerTransaction, Merchant, NotificationPreference, Order, OrderNotification, OutboundOrder, Payment, PickupCredential, PickupHandover, PickupPoint, PickupVerifierAssignment, PlatformCampaignItem, PlatformPartialRefund, PlatformRefund, PlatformSalesLine, PlatformSku, PrivacyConsent, Product, PurchaseOrder, Refund, Role, ServiceArea, ServiceAreaInterest, Settlement, SortingTask, StaffPickupPointAssignment, Supplier, SupplierPayable, SupplierQualification, SupplierSkuOffer, Sku, User, Warehouse } from './types.js';
-import type { PlatformStore } from '../platform/platform-store.js';
+import type {
+  AdminCredential,
+  AuditLog,
+  AuthSession,
+  Campaign,
+  CampaignItem,
+  CatalogSku,
+  CommunityAllocationDraft,
+  CommunityCancellationRequest,
+  CommunityDeliveryConfirmation,
+  CommunityPickupReceipt,
+  CommunityPickupWindow,
+  CommunityQualityCase,
+  DeliveryPlan,
+  DispatchBatch,
+  FulfillmentAllocation,
+  FulfillmentException,
+  InternalStaff,
+  LedgerTransaction,
+  NotificationPreference,
+  Order,
+  OrderLine,
+  OrderNotification,
+  OrderRefund,
+  PartialRefund,
+  Payment,
+  PickupCredential,
+  PickupPoint,
+  PrivacyConsent,
+  Role,
+  ServiceArea,
+  ServiceAreaInterest,
+  StaffPickupPointAssignment,
+  User,
+} from "./types.js";
+import { BusinessError, moneyCents } from "@hometown/domain";
+
 export interface IdempotencyRecord {
-    fingerprint: string;
-    orderId: string;
+  fingerprint: string;
+  orderId: string;
 }
 export interface OrderDeliveryFacts {
-    afterSales: AfterSale[];
-    partialRefunds: PlatformPartialRefund[];
-    qualityCases: CommunityQualityCase[];
-    cancellations: CommunityCancellationRequest[];
-    pickupWindows: CommunityPickupWindow[];
-    exceptions: FulfillmentException[];
-    allocations: FulfillmentAllocation[];
-    deliveryPlans: DeliveryPlan[];
+  partialRefunds: PartialRefund[];
+  qualityCases: CommunityQualityCase[];
+  pickupReceipts: CommunityPickupReceipt[];
+  cancellations: CommunityCancellationRequest[];
+  pickupWindows: CommunityPickupWindow[];
+  exceptions: FulfillmentException[];
+  allocations: FulfillmentAllocation[];
+  deliveryPlans: DeliveryPlan[];
 }
-/**
- * Composite unit-of-work contract used only at application wiring and route
- * boundaries. Domain services must depend on their narrower capability stores
- * so a service cannot reach unrelated procurement, legacy, or community data.
- */
-export interface CommerceStore extends PlatformStore {
-    transaction<T>(work: (store: CommerceStore) => Promise<T>): Promise<T>;
-    health(): Promise<'ok'>;
-    databaseNow(): Promise<string>;
-    close(): Promise<void>;
-    listCampaigns(): Promise<Campaign[]>;
-    getCampaign(id: string): Promise<Campaign | null>;
-    getCampaignForUpdate(id: string): Promise<Campaign | null>;
-    saveCampaign(campaign: Campaign): Promise<void>;
-    updateCampaign(campaign: Campaign, expectedVersion: number): Promise<boolean>;
-    replaceCampaignItems(campaign: Campaign): Promise<void>;
-    getSku(id: string): Promise<Sku | null>;
-    getSkuForUpdate(id: string): Promise<Sku | null>;
-    getCampaignSku(campaignId: string, skuId: string): Promise<Sku | null>;
-    reserveCampaignSkuStock(campaignId: string, skuId: string, quantity: number): Promise<boolean>;
-    releaseCampaignSkuStock(campaignId: string, skuId: string, quantity: number): Promise<boolean>;
-    releaseReservedCampaignInventory(campaignId: string, skuId: string, quantity: number, businessModelVersion: Campaign['businessModelVersion']): Promise<boolean>;
-    listOrdersByCampaign(campaignId: string): Promise<Order[]>;
-    listOrdersByUser(userId: string): Promise<Order[]>;
-    listOrders(limit: number): Promise<Order[]>;
-    listOrderDeliveryFacts(orderIds: string[]): Promise<OrderDeliveryFacts>;
-    listExpiredPendingOrders(now: string, limit: number): Promise<Order[]>;
-    listSettlementEligibleOrders(now: string, limit: number): Promise<Order[]>;
-    getOrder(id: string): Promise<Order | null>;
-    getOrderForUpdate(id: string): Promise<Order | null>;
-    getOrderByNo(orderNo: string): Promise<Order | null>;
-    getOrderByNoForUpdate(orderNo: string): Promise<Order | null>;
-    saveOrder(order: Order): Promise<void>;
-    saveOrderStatus(order: Order): Promise<void>;
-    transitionOrderStatus(orderId: string, expectedStatuses: Order['status'][], nextStatus: Order['status'], paidAt?: string | null): Promise<boolean>;
-    cancelPendingOrder(orderId: string): Promise<boolean>;
-    markPendingOrderPaid(orderId: string, paidAt: string): Promise<boolean>;
-    getIdempotency(actorId: string, key: string): Promise<IdempotencyRecord | null>;
-    getIdempotencyForUpdate(actorId: string, key: string): Promise<IdempotencyRecord | null>;
-    saveIdempotency(actorId: string, key: string, record: IdempotencyRecord): Promise<void>;
-    listMerchants(): Promise<Merchant[]>;
-    saveMerchant(value: Merchant): Promise<void>;
-    deleteMerchant(id: string): Promise<boolean>;
-    listProducts(): Promise<Product[]>;
-    saveProduct(value: Product): Promise<void>;
-    updateProductStatus(id: string, status: Product['status']): Promise<boolean>;
-    deleteProduct(id: string): Promise<boolean>;
-    listServiceAreas(): Promise<ServiceArea[]>;
-    saveServiceArea(value: ServiceArea): Promise<void>;
-    updateServiceAreaOrderEnabled(id: string, orderEnabled: boolean): Promise<boolean>;
-    listPickupPoints(serviceAreaId?: string): Promise<PickupPoint[]>;
-    savePickupPoint(value: PickupPoint): Promise<void>;
-    getDeliveryPlan(id: string): Promise<DeliveryPlan | null>;
-    getDeliveryPlanByCampaign(campaignId: string): Promise<DeliveryPlan | null>;
-    listDeliveryPlans(): Promise<DeliveryPlan[]>;
-    saveDeliveryPlan(value: DeliveryPlan): Promise<void>;
-    getDispatchBatch(id: string): Promise<DispatchBatch | null>;
-    listDispatchBatches(): Promise<DispatchBatch[]>;
-    saveDispatchBatch(value: DispatchBatch): Promise<void>;
-    getPickupCredential(orderId: string): Promise<PickupCredential | null>;
-    savePickupCredential(value: PickupCredential): Promise<void>;
-    pickupRecordExists(orderId: string): Promise<boolean>;
-    savePickupRecord(orderId: string, deliveryPlanId: string, verifierId: string): Promise<void>;
-    grantPickupVerifier(userId: string, pickupPointId: string): Promise<void>;
-    revokePickupVerifier(userId: string, pickupPointId: string): Promise<void>;
-    hasActivePickupVerifierAssignment(userId: string, pickupPointId: string): Promise<boolean>;
-    listPickupVerifierAssignments(userId?: string): Promise<PickupVerifierAssignment[]>;
-    /** New staff-point authorization. Falls back to legacy verifier events only for non-staff accounts. */
-    hasActivePickupPointAssignment(userId: string, pickupPointId: string): Promise<boolean>;
-    findUserByWechatOpenId(openId: string): Promise<User | null>;
-    saveUser(value: User): Promise<void>;
-    getUser(id: string): Promise<User | null>;
-    savePrivacyConsent(userId: string, documentVersion: string): Promise<void>;
-    getPrivacyConsent(userId: string, documentVersion: string): Promise<PrivacyConsent | null>;
-    findAdminCredential(username: string): Promise<AdminCredential | null>;
-    findAdminCredentialByUserId(userId: string): Promise<AdminCredential | null>;
-    saveAdminCredential(value: AdminCredential): Promise<void>;
-    saveUserRole(userId: string, role: Role): Promise<void>;
-    replaceUserRoles(userId: string, roles: Role[]): Promise<void>;
-    getInternalStaff(userId: string): Promise<InternalStaff | null>;
-    listInternalStaff(query?: string): Promise<InternalStaff[]>;
-    saveInternalStaff(value: InternalStaff): Promise<void>;
-    listStaffPickupPointAssignments(staffUserId?: string): Promise<StaffPickupPointAssignment[]>;
-    replaceStaffPickupPointAssignments(staffUserId: string, assignments: StaffPickupPointAssignment[]): Promise<void>;
-    getAuthSession(tokenHash: string): Promise<AuthSession | null>;
-    saveAuthSession(value: AuthSession): Promise<void>;
-    deleteAuthSession(tokenHash: string): Promise<void>;
-    deleteAuthSessionsByUser(userId: string): Promise<void>;
-    getPaymentByOrder(orderId: string): Promise<Payment | null>;
-    getPaymentByOrderForUpdate(orderId: string): Promise<Payment | null>;
-    savePayment(value: Payment): Promise<void>;
-    savePaymentIfStatus(value: Payment, expectedStatuses: Payment['status'][]): Promise<boolean>;
-    /** Atomically claims a new or expired provider-initiation lease for this payment. */
-    claimPaymentInitiation(value: Payment, leaseUntil: string, now: string, claimToken: string): Promise<boolean>;
-    /** Persists a provider result only for the worker that still owns its lease. */
-    savePaymentIfInitiationClaimed(value: Payment, claimToken: string): Promise<boolean>;
-    /**
-     * Atomically reserves a provider callback event inside the caller's transaction.
-     * A false result means another delivery has already claimed it.
-     */
-    claimPaymentCallback(provider: Payment['provider'], eventId: string, type: string, bodyHash: string): Promise<boolean>;
-    listRefundsByOrder(orderId: string): Promise<Refund[]>;
-    getRefundByProviderNo(providerRefundNo: string): Promise<Refund | null>;
-    saveRefund(value: Refund): Promise<void>;
-    /**
-     * Claims submission or recovery work. The caller's token fences any late
-     * provider response from a previous lease holder.
-     */
-    claimRefundSubmission(refundId: string, leaseUntil: string, now: string, claimToken: string): Promise<boolean>;
-    saveRefundIfClaimed(value: Refund, claimToken: string): Promise<boolean>;
-    /** Saves a query result only while no submitter owns the refund. */
-    saveRefundIfUnclaimed(value: Refund, now: string): Promise<boolean>;
-    saveRefundIfStatus(value: Refund, expectedStatuses: Refund['status'][]): Promise<boolean>;
-    listRefunds(limit: number): Promise<Refund[]>;
-    listPendingRefunds(limit: number): Promise<Refund[]>;
-    listRefundingOrders(limit: number): Promise<Order[]>;
-    appendLedgerTransaction(value: LedgerTransaction): Promise<boolean>;
-    listLedgerTransactions(referenceId?: string): Promise<LedgerTransaction[]>;
-    listSettlements(orderId?: string): Promise<Settlement[]>;
-    listPendingSettlements(limit: number): Promise<Settlement[]>;
-    saveSettlement(value: Settlement): Promise<void>;
-    claimSettlementSubmission(id: string, leaseUntil: string, now: string, claimToken: string): Promise<boolean>;
-    saveSettlementIfClaimed(value: Settlement, claimToken: string): Promise<boolean>;
-    saveSettlementIfUnclaimed(value: Settlement, now: string): Promise<boolean>;
-    saveAuditLog(value: AuditLog): Promise<void>;
-    findLatestAudit(resourceType: string, resourceId: string, action: string): Promise<AuditLog | null>;
-    listAuditLogs(limit: number): Promise<AuditLog[]>;
-    saveServiceAreaInterest(value: ServiceAreaInterest): Promise<void>;
-    getServiceAreaInterest(id: string): Promise<ServiceAreaInterest | null>;
-    listServiceAreaInterests(limit: number): Promise<ServiceAreaInterest[]>;
-    listServiceAreaInterestsByUser(userId: string): Promise<ServiceAreaInterest[]>;
-    saveAfterSale(value: AfterSale): Promise<void>;
-    getAfterSale(id: string): Promise<AfterSale | null>;
-    listAfterSales(limit: number): Promise<AfterSale[]>;
-    listAfterSalesByUser(userId: string): Promise<AfterSale[]>;
-    hasOpenAfterSaleForOrder(orderId: string): Promise<boolean>;
-    createOrderNotificationIfAbsent(value: OrderNotification): Promise<boolean>;
-    saveOrderNotification(value: OrderNotification): Promise<void>;
-    saveOrderNotificationIfClaimed(value: OrderNotification, claimToken: string): Promise<boolean>;
-    getOrderNotification(id: string): Promise<OrderNotification | null>;
-    listOrderNotificationsByUser(userId: string): Promise<OrderNotification[]>;
-    listManualOrderNotifications(limit: number): Promise<OrderNotification[]>;
-    claimPendingOrderNotifications(limit: number, leaseUntil: string, now: string, claimToken: string): Promise<OrderNotification[]>;
-    markOrderNotificationRead(id: string, readAt: string): Promise<void>;
-    requeuePendingOrderNotification(id: string, now: string): Promise<OrderNotification | null>;
-    markOrderNotificationManualCompleted(id: string): Promise<void>;
-    saveNotificationPreference(value: NotificationPreference): Promise<void>;
-    getNotificationPreference(userId: string): Promise<NotificationPreference | null>;
-    getCommunityQualityCaseByOrderRequest(orderId: string, clientRequestId: string): Promise<CommunityQualityCase | null>;
-    getCommunityQualityCaseForUpdate(id: string): Promise<CommunityQualityCase | null>;
-    getCommunityQualityCaseByOrderRequestForUpdate(orderId: string, clientRequestId: string): Promise<CommunityQualityCase | null>;
-    listCommunityQualityCases(limit: number): Promise<CommunityQualityCase[]>;
-    listCommunityQualityCasesByOrder(orderId: string): Promise<CommunityQualityCase[]>;
-    listCommunityQualityCasesByOrderForUpdate(orderId: string): Promise<CommunityQualityCase[]>;
-    saveCommunityQualityCase(value: CommunityQualityCase): Promise<boolean>;
-    getCommunityAllocationDraftByDeliveryForUpdate(communityDeliveryId: string): Promise<CommunityAllocationDraft | null>;
-    saveCommunityAllocationDraft(value: CommunityAllocationDraft): Promise<boolean>;
-    getCommunityPickupWindowForUpdate(orderId: string): Promise<CommunityPickupWindow | null>;
-    saveCommunityPickupWindow(value: CommunityPickupWindow): Promise<void>;
-    listCommunityPickupWindowsPastDeadline(now: string, limit: number): Promise<CommunityPickupWindow[]>;
-    listCommunityPickupWindowsDueBy(from: string, to: string, limit: number): Promise<CommunityPickupWindow[]>;
-    listCommunityPickupWindowsByStatus(statuses: CommunityPickupWindow['status'][], limit: number): Promise<CommunityPickupWindow[]>;
-    getCommunityCancellationRequestByOrderForUpdate(orderId: string): Promise<CommunityCancellationRequest | null>;
-    listCommunityCancellationRequests(limit: number): Promise<CommunityCancellationRequest[]>;
-    listPendingCommunityCancellationRequests(limit: number): Promise<CommunityCancellationRequest[]>;
-    saveCommunityCancellationRequest(value: CommunityCancellationRequest): Promise<boolean>;
+export interface NewOrderLine {
+  id: string;
+  catalogSkuId: string;
+  productId: string;
+  title: string;
+  skuName: string;
+  quantity: number;
+  unitPriceCents: number;
+  amountCents: number;
 }
-/** In-memory composite adapter used by tests and local development. */
+
+/** The complete persistence boundary for the single community group-buy product. */
+export interface CommerceStore {
+  transaction<T>(work: (store: CommerceStore) => Promise<T>): Promise<T>;
+  health(): Promise<"ok">;
+  databaseNow(): Promise<string>;
+  close(): Promise<void>;
+  findUserByWechatOpenId(openId: string): Promise<User | null>;
+  getUser(id: string): Promise<User | null>;
+  saveUser(value: User): Promise<void>;
+  savePrivacyConsent(userId: string, documentVersion: string): Promise<void>;
+  getPrivacyConsent(
+    userId: string,
+    documentVersion: string,
+  ): Promise<PrivacyConsent | null>;
+  getAuthSession(tokenHash: string): Promise<AuthSession | null>;
+  saveAuthSession(value: AuthSession): Promise<void>;
+  deleteAuthSession(tokenHash: string): Promise<void>;
+  deleteAuthSessionsByUser(userId: string): Promise<void>;
+  findAdminCredential(username: string): Promise<AdminCredential | null>;
+  findAdminCredentialByUserId(userId: string): Promise<AdminCredential | null>;
+  saveAdminCredential(value: AdminCredential): Promise<void>;
+  /**
+   * Keep the authorization projection and credential revision in sync.  A
+   * revision is supplied only for a real authorization change; ordinary
+   * profile edits leave both the revision and extant sessions untouched.
+   */
+  replaceUserRoles(
+    userId: string,
+    roles: Role[],
+    authorizationVersion?: number,
+  ): Promise<void>;
+  getInternalStaff(userId: string): Promise<InternalStaff | null>;
+  listInternalStaff(query?: string): Promise<InternalStaff[]>;
+  saveInternalStaff(value: InternalStaff): Promise<void>;
+  listStaffPickupPointAssignments(
+    staffUserId?: string,
+  ): Promise<StaffPickupPointAssignment[]>;
+  replaceStaffPickupPointAssignments(
+    staffUserId: string,
+    values: StaffPickupPointAssignment[],
+  ): Promise<void>;
+  hasActivePickupPointAssignment(
+    userId: string,
+    pickupPointId: string,
+  ): Promise<boolean>;
+  listServiceAreas(): Promise<ServiceArea[]>;
+  saveServiceArea(value: ServiceArea): Promise<void>;
+  updateServiceAreaOrderEnabled(id: string, enabled: boolean): Promise<boolean>;
+  listPickupPoints(serviceAreaId?: string): Promise<PickupPoint[]>;
+  savePickupPoint(value: PickupPoint): Promise<void>;
+  listCatalogSkus(): Promise<CatalogSku[]>;
+  getCatalogSku(id: string): Promise<CatalogSku | null>;
+  saveCatalogSku(value: CatalogSku): Promise<void>;
+  listCampaigns(): Promise<Campaign[]>;
+  getCampaign(id: string): Promise<Campaign | null>;
+  getCampaignForUpdate(id: string): Promise<Campaign | null>;
+  saveCampaign(value: Campaign): Promise<void>;
+  updateCampaign(value: Campaign, expectedVersion: number): Promise<boolean>;
+  replaceCampaignItems(
+    campaignId: string,
+    items: CampaignItem[],
+  ): Promise<void>;
+  getCampaignItem(
+    campaignId: string,
+    catalogSkuId: string,
+  ): Promise<CampaignItem | null>;
+  reserveCampaignInventory(
+    campaignId: string,
+    catalogSkuId: string,
+    quantity: number,
+  ): Promise<boolean>;
+  releaseCampaignInventory(
+    campaignId: string,
+    catalogSkuId: string,
+    quantity: number,
+  ): Promise<boolean>;
+  getIdempotency(
+    actorId: string,
+    key: string,
+  ): Promise<IdempotencyRecord | null>;
+  getIdempotencyForUpdate(
+    actorId: string,
+    key: string,
+  ): Promise<IdempotencyRecord | null>;
+  saveIdempotency(
+    actorId: string,
+    key: string,
+    value: IdempotencyRecord,
+  ): Promise<void>;
+  listOrdersByCampaign(campaignId: string): Promise<Order[]>;
+  listOrdersByUser(userId: string): Promise<Order[]>;
+  listOrders(limit: number): Promise<Order[]>;
+  listExpiredPendingOrders(now: string, limit: number): Promise<Order[]>;
+  getOrder(id: string): Promise<Order | null>;
+  getOrderForUpdate(id: string): Promise<Order | null>;
+  getOrderByNo(orderNo: string): Promise<Order | null>;
+  getOrderByNoForUpdate(orderNo: string): Promise<Order | null>;
+  saveOrder(value: Order): Promise<void>;
+  saveOrderStatus(value: Order): Promise<void>;
+  transitionOrderStatus(
+    id: string,
+    expected: Order["status"][],
+    next: Order["status"],
+    paidAt?: string | null,
+  ): Promise<boolean>;
+  cancelPendingOrder(id: string): Promise<boolean>;
+  markPendingOrderPaid(id: string, paidAt: string): Promise<boolean>;
+  saveOrderLines(orderId: string, values: NewOrderLine[]): Promise<void>;
+  listOrderLinesByCampaign(campaignId: string): Promise<OrderLine[]>;
+  listOrderLinesByCampaignForUpdate(campaignId: string): Promise<OrderLine[]>;
+  listOrderLinesByOrderForUpdate(orderId: string): Promise<OrderLine[]>;
+  updateOrderLine(value: OrderLine): Promise<boolean>;
+  listOrderDeliveryFacts(orderIds: string[]): Promise<OrderDeliveryFacts>;
+  getPaymentByOrder(orderId: string): Promise<Payment | null>;
+  getPaymentByOrderForUpdate(orderId: string): Promise<Payment | null>;
+  savePayment(value: Payment): Promise<void>;
+  savePaymentIfStatus(
+    value: Payment,
+    expected: Payment["status"][],
+  ): Promise<boolean>;
+  savePaymentIfInitiationClaimed(
+    value: Payment,
+    claimToken: string,
+  ): Promise<boolean>;
+  claimPaymentCallback(eventId: string, bodyHash: string): Promise<boolean>;
+  getOrderRefundByOrder(orderId: string): Promise<OrderRefund | null>;
+  getOrderRefundByProviderNo(
+    providerRefundNo: string,
+  ): Promise<OrderRefund | null>;
+  saveOrderRefund(value: OrderRefund): Promise<void>;
+  claimOrderRefundSubmission(
+    id: string,
+    leaseUntil: string,
+    now: string,
+    claimToken: string,
+  ): Promise<boolean>;
+  saveOrderRefundIfClaimed(
+    value: OrderRefund,
+    claimToken: string,
+  ): Promise<boolean>;
+  saveOrderRefundIfUnclaimed(value: OrderRefund, now: string): Promise<boolean>;
+  saveOrderRefundIfStatus(
+    value: OrderRefund,
+    expected: OrderRefund["status"][],
+  ): Promise<boolean>;
+  listOrderRefunds(limit: number): Promise<OrderRefund[]>;
+  listPendingOrderRefunds(limit: number): Promise<OrderRefund[]>;
+  listRefundingOrders(limit: number): Promise<Order[]>;
+  getPartialRefund(id: string): Promise<PartialRefund | null>;
+  getPartialRefundByProviderNo(
+    providerRefundNo: string,
+  ): Promise<PartialRefund | null>;
+  listPartialRefunds(limit: number): Promise<PartialRefund[]>;
+  listPartialRefundsByOrder(orderId: string): Promise<PartialRefund[]>;
+  listPartialRefundsByException(exceptionId: string): Promise<PartialRefund[]>;
+  listPendingPartialRefunds(limit: number): Promise<PartialRefund[]>;
+  savePartialRefund(value: PartialRefund): Promise<void>;
+  claimPartialRefundSubmission(
+    id: string,
+    leaseUntil: string,
+    now: string,
+    claimToken: string,
+  ): Promise<boolean>;
+  savePartialRefundIfClaimed(
+    value: PartialRefund,
+    claimToken: string,
+  ): Promise<boolean>;
+  savePartialRefundIfUnclaimed(
+    value: PartialRefund,
+    now: string,
+  ): Promise<boolean>;
+  savePartialRefundIfStatus(
+    value: PartialRefund,
+    expected: PartialRefund["status"][],
+  ): Promise<boolean>;
+  appendLedgerTransaction(value: LedgerTransaction): Promise<boolean>;
+  listLedgerTransactions(referenceId?: string): Promise<LedgerTransaction[]>;
+  saveAuditLog(value: AuditLog): Promise<void>;
+  findLatestAudit(
+    resourceType: string,
+    resourceId: string,
+    action: string,
+  ): Promise<AuditLog | null>;
+  listAuditLogs(limit: number): Promise<AuditLog[]>;
+  getDeliveryPlan(id: string): Promise<DeliveryPlan | null>;
+  getDeliveryPlanByCampaign(campaignId: string): Promise<DeliveryPlan | null>;
+  listDeliveryPlans(): Promise<DeliveryPlan[]>;
+  saveDeliveryPlan(value: DeliveryPlan): Promise<void>;
+  getDispatchBatch(id: string): Promise<DispatchBatch | null>;
+  listDispatchBatches(): Promise<DispatchBatch[]>;
+  saveDispatchBatch(value: DispatchBatch): Promise<void>;
+  getPickupCredential(orderId: string): Promise<PickupCredential | null>;
+  savePickupCredential(value: PickupCredential): Promise<void>;
+  savePickupRecord(
+    orderId: string,
+    deliveryPlanId: string,
+    verifierId: string,
+  ): Promise<void>;
+  pickupRecordExists(orderId: string): Promise<boolean>;
+  getCommunityPickupReceiptByRequestIdForUpdate(
+    orderId: string,
+    pickupRequestId: string,
+  ): Promise<CommunityPickupReceipt | null>;
+  listCommunityPickupReceiptsByOrder(
+    orderId: string,
+  ): Promise<CommunityPickupReceipt[]>;
+  saveCommunityPickupReceipt(value: CommunityPickupReceipt): Promise<boolean>;
+  getCommunityDeliveryConfirmationByBatch(
+    batchId: string,
+  ): Promise<CommunityDeliveryConfirmation | null>;
+  saveCommunityDeliveryConfirmation(
+    value: CommunityDeliveryConfirmation,
+  ): Promise<boolean>;
+  getFulfillmentException(id: string): Promise<FulfillmentException | null>;
+  getFulfillmentExceptionForUpdate(
+    id: string,
+  ): Promise<FulfillmentException | null>;
+  getFulfillmentExceptionByOrderRequestForUpdate(
+    orderId: string,
+    requestId: string,
+  ): Promise<FulfillmentException | null>;
+  listFulfillmentExceptions(limit: number): Promise<FulfillmentException[]>;
+  saveFulfillmentException(value: FulfillmentException): Promise<void>;
+  listFulfillmentAllocations(
+    exceptionId: string,
+  ): Promise<FulfillmentAllocation[]>;
+  saveFulfillmentAllocations(values: FulfillmentAllocation[]): Promise<void>;
+  markFulfillmentAllocationsRefunded(
+    exceptionId: string,
+    refund: PartialRefund,
+    at: string,
+  ): Promise<boolean>;
+  getCommunityAllocationDraftByDeliveryForUpdate(
+    deliveryId: string,
+  ): Promise<CommunityAllocationDraft | null>;
+  saveCommunityAllocationDraft(
+    value: CommunityAllocationDraft,
+  ): Promise<boolean>;
+  getCommunityPickupWindowForUpdate(
+    orderId: string,
+  ): Promise<CommunityPickupWindow | null>;
+  saveCommunityPickupWindow(value: CommunityPickupWindow): Promise<void>;
+  listCommunityPickupWindowsPastDeadline(
+    now: string,
+    limit: number,
+  ): Promise<CommunityPickupWindow[]>;
+  listCommunityPickupWindowsDueBy(
+    from: string,
+    to: string,
+    limit: number,
+  ): Promise<CommunityPickupWindow[]>;
+  listCommunityPickupWindowsByStatus(
+    statuses: CommunityPickupWindow["status"][],
+    limit: number,
+  ): Promise<CommunityPickupWindow[]>;
+  getCommunityCancellationRequestByOrderForUpdate(
+    orderId: string,
+  ): Promise<CommunityCancellationRequest | null>;
+  listCommunityCancellationRequests(
+    limit: number,
+  ): Promise<CommunityCancellationRequest[]>;
+  listPendingCommunityCancellationRequests(
+    limit: number,
+  ): Promise<CommunityCancellationRequest[]>;
+  saveCommunityCancellationRequest(
+    value: CommunityCancellationRequest,
+  ): Promise<boolean>;
+  getCommunityQualityCaseByOrderRequest(
+    orderId: string,
+    requestId: string,
+  ): Promise<CommunityQualityCase | null>;
+  getCommunityQualityCaseByOrderRequestForUpdate(
+    orderId: string,
+    requestId: string,
+  ): Promise<CommunityQualityCase | null>;
+  getCommunityQualityCaseForUpdate(
+    id: string,
+  ): Promise<CommunityQualityCase | null>;
+  listCommunityQualityCases(limit: number): Promise<CommunityQualityCase[]>;
+  listCommunityQualityCasesByOrder(
+    orderId: string,
+  ): Promise<CommunityQualityCase[]>;
+  listCommunityQualityCasesByOrderForUpdate(
+    orderId: string,
+  ): Promise<CommunityQualityCase[]>;
+  saveCommunityQualityCase(value: CommunityQualityCase): Promise<boolean>;
+  saveServiceAreaInterest(value: ServiceAreaInterest): Promise<void>;
+  getServiceAreaInterest(id: string): Promise<ServiceAreaInterest | null>;
+  listServiceAreaInterests(limit: number): Promise<ServiceAreaInterest[]>;
+  listServiceAreaInterestsByUser(
+    userId: string,
+  ): Promise<ServiceAreaInterest[]>;
+  createOrderNotificationIfAbsent(value: OrderNotification): Promise<boolean>;
+  saveOrderNotificationIfClaimed(
+    value: OrderNotification,
+    claimToken: string,
+  ): Promise<boolean>;
+  getOrderNotification(id: string): Promise<OrderNotification | null>;
+  listOrderNotificationsByUser(userId: string): Promise<OrderNotification[]>;
+  listManualOrderNotifications(limit: number): Promise<OrderNotification[]>;
+  claimPendingOrderNotifications(
+    limit: number,
+    leaseDurationMs: number,
+    claimToken: string,
+  ): Promise<OrderNotification[]>;
+  beginOrderNotificationSubmission(input: {
+    id: string;
+    claimToken: string;
+    attemptId: string;
+  }): Promise<OrderNotification | null>;
+  markOrderNotificationSentIfSubmission(
+    id: string,
+    attemptId: string,
+    receiptId: string | null,
+  ): Promise<OrderNotification | null>;
+  recordSubmissionUnknownIfSubmission(
+    id: string,
+    attemptId: string,
+    reason: string,
+  ): Promise<OrderNotification | null>;
+  markOrderNotificationRead(id: string, readAt: string): Promise<void>;
+  requeuePendingOrderNotification(
+    id: string,
+    now: string,
+  ): Promise<OrderNotification | null>;
+  markOrderNotificationManualCompleted(
+    id: string,
+    actorId: string,
+    note: string,
+    completedAt: string,
+  ): Promise<OrderNotification | null>;
+  saveNotificationPreference(value: NotificationPreference): Promise<void>;
+  getNotificationPreference(
+    userId: string,
+  ): Promise<NotificationPreference | null>;
+}
+
+type StoredLine = OrderLine & {
+  productId: string;
+  title: string;
+  skuName: string;
+};
+interface MemoryState {
+  users: Map<string, User>;
+  privacy: Map<string, PrivacyConsent>;
+  sessions: Map<string, AuthSession>;
+  credentials: Map<string, AdminCredential>;
+  roles: Map<string, Role[]>;
+  staff: Map<string, InternalStaff>;
+  staffPoints: Map<string, StaffPickupPointAssignment>;
+  areas: Map<string, ServiceArea>;
+  points: Map<string, PickupPoint>;
+  catalog: Map<string, CatalogSku>;
+  campaigns: Map<string, Campaign>;
+  idempotency: Map<string, IdempotencyRecord>;
+  orders: Map<string, Order>;
+  lines: Map<string, StoredLine[]>;
+  payments: Map<string, Payment>;
+  callbacks: Map<string, string>;
+  orderRefunds: Map<string, OrderRefund>;
+  partialRefunds: Map<string, PartialRefund>;
+  ledger: Map<string, LedgerTransaction>;
+  audits: AuditLog[];
+  plans: Map<string, DeliveryPlan>;
+  batches: Map<string, DispatchBatch>;
+  pickupCredentials: Map<string, PickupCredential>;
+  pickupRecords: Set<string>;
+  pickupReceipts: Map<string, CommunityPickupReceipt>;
+  deliveries: Map<string, CommunityDeliveryConfirmation>;
+  exceptions: Map<string, FulfillmentException>;
+  allocations: Map<string, FulfillmentAllocation>;
+  drafts: Map<string, CommunityAllocationDraft>;
+  windows: Map<string, CommunityPickupWindow>;
+  cancellations: Map<string, CommunityCancellationRequest>;
+  quality: Map<string, CommunityQualityCase>;
+  interests: Map<string, ServiceAreaInterest>;
+  notifications: Map<string, OrderNotification>;
+  preferences: Map<string, NotificationPreference>;
+}
+const emptyState = (): MemoryState => ({
+  users: new Map(),
+  privacy: new Map(),
+  sessions: new Map(),
+  credentials: new Map(),
+  roles: new Map(),
+  staff: new Map(),
+  staffPoints: new Map(),
+  areas: new Map(),
+  points: new Map(),
+  catalog: new Map(),
+  campaigns: new Map(),
+  idempotency: new Map(),
+  orders: new Map(),
+  lines: new Map(),
+  payments: new Map(),
+  callbacks: new Map(),
+  orderRefunds: new Map(),
+  partialRefunds: new Map(),
+  ledger: new Map(),
+  audits: [],
+  plans: new Map(),
+  batches: new Map(),
+  pickupCredentials: new Map(),
+  pickupRecords: new Set(),
+  pickupReceipts: new Map(),
+  deliveries: new Map(),
+  exceptions: new Map(),
+  allocations: new Map(),
+  drafts: new Map(),
+  windows: new Map(),
+  cancellations: new Map(),
+  quality: new Map(),
+  interests: new Map(),
+  notifications: new Map(),
+  preferences: new Map(),
+});
+const clone = <T>(value: T): T => structuredClone(value);
+const newest = <T extends { createdAt: string }>(values: T[]): T[] =>
+  values.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+/** Deterministic, transaction-serialised adapter for tests and local development. */
 export class MemoryStore implements CommerceStore {
-    private readonly campaigns = new Map<string, Campaign>();
-    private readonly orders = new Map<string, Order>();
-    private readonly skus = new Map<string, Sku>();
-    private readonly campaignSkus = new Map<string, CampaignItemSnapshot>();
-    private readonly idempotency = new Map<string, IdempotencyRecord>();
-    private readonly merchants = new Map<string, Merchant>();
-    private readonly products = new Map<string, Product>();
-    private readonly serviceAreas = new Map<string, ServiceArea>();
-    private readonly pickupPoints = new Map<string, PickupPoint>();
-    private readonly deliveryPlans = new Map<string, DeliveryPlan>();
-    private readonly batches = new Map<string, DispatchBatch>();
-    private readonly pickupCredentials = new Map<string, PickupCredential>();
-    private readonly pickupRecords = new Set<string>();
-    private readonly pickupVerifierAssignments: PickupVerifierAssignment[] = [];
-    private readonly usersByOpenId = new Map<string, User>();
-    private readonly usersById = new Map<string, User>();
-    private readonly sessions = new Map<string, AuthSession>();
-    private readonly privacyConsents = new Map<string, PrivacyConsent>();
-    private readonly adminCredentials = new Map<string, AdminCredential>();
-    private readonly userRoles = new Map<string, Set<Role>>();
-    private readonly internalStaff = new Map<string, InternalStaff>();
-    private readonly staffPickupPointAssignments = new Map<string, StaffPickupPointAssignment>();
-    private readonly payments = new Map<string, Payment>();
-    private readonly paymentCallbacks = new Set<string>();
-    // The in-memory adapter serializes transactions for tests. Track callback
-    // claims per transaction so a thrown handler mirrors MySQL rollback semantics.
-    private readonly paymentCallbackClaimScopes: Set<string>[] = [];
-    private readonly refunds = new Map<string, Refund>();
-    private readonly platformRefunds = new Map<string, PlatformRefund>();
-    private readonly platformPartialRefunds = new Map<string, PlatformPartialRefund>();
-    private readonly warehouses = new Map<string, Warehouse>();
-    private readonly suppliers = new Map<string, Supplier>();
-    private readonly supplierQualifications = new Map<string, SupplierQualification>();
-    private readonly platformSkus = new Map<string, PlatformSku>();
-    private readonly supplierOffers = new Map<string, SupplierSkuOffer>();
-    private readonly campaignPlatformItems = new Map<string, PlatformCampaignItem>();
-    private readonly communityCampaignItems = new Map<string, CommunityCampaignItem>();
-    private readonly salesOrderItems = new Map<string, Array<{
-        id: string;
-        platformSkuId: string;
-        productId: string;
-        title: string;
-        skuName: string;
-        quantity: number;
-        unitPriceCents: number;
-        purchaseUnitCents: number;
-        amountCents: number;
-        fulfilledQuantity: number;
-        pickedUpQuantity: number;
-        exceptionQuantity: number;
-        refundedQuantity: number;
-        refundedAmountCents: number;
-    }>>();
-    private readonly purchaseOrders = new Map<string, PurchaseOrder>();
-    private readonly goodsReceipts = new Map<string, GoodsReceipt>();
-    private readonly inventoryLots = new Map<string, InventoryLot>();
-    private readonly inventoryMovements: InventoryMovement[] = [];
-    private readonly supplierPayables = new Map<string, SupplierPayable>();
-    private readonly sortingTasks = new Map<string, SortingTask>();
-    private readonly outboundOrders = new Map<string, OutboundOrder>();
-    private readonly pickupHandovers = new Map<string, PickupHandover>();
-    private readonly fulfillmentExceptions = new Map<string, FulfillmentException>();
-    private readonly fulfillmentAllocations = new Map<string, FulfillmentAllocation>();
-    private readonly communityDeliveries = new Map<string, CommunityDeliveryConfirmation>();
-    private readonly communityPickupReceipts = new Map<string, CommunityPickupReceipt>();
-    private readonly communityQualityCases = new Map<string, CommunityQualityCase>();
-    private readonly communityAllocationDrafts = new Map<string, CommunityAllocationDraft>();
-    private readonly communityPickupWindows = new Map<string, CommunityPickupWindow>();
-    private readonly communityCancellationRequests = new Map<string, CommunityCancellationRequest>();
-    private readonly ledgerTransactions = new Map<string, LedgerTransaction>();
-    private readonly settlements = new Map<string, Settlement>();
-    private readonly auditLogs: AuditLog[] = [];
-    private readonly serviceAreaInterests = new Map<string, ServiceAreaInterest>();
-    private readonly afterSales = new Map<string, AfterSale>();
-    private readonly orderNotifications = new Map<string, OrderNotification>();
-    private readonly notificationPreferences = new Map<string, NotificationPreference>();
-    private transactionTail: Promise<void> = Promise.resolve();
-    public constructor(seed = true) {
-        if (!seed)
-            return;
-        this.skus.set('sku-demo-001', {
-            id: 'sku-demo-001', productId: 'product-demo-001', merchantId: 'merchant-demo-001',
-            name: '家乡风味手工米粉（常温预包装）', unitPriceCents: moneyCents(2980),
-            stock: 2000, soldQuantity: 0, commissionRateBps: 800,
-        });
-        this.skus.set('sku-demo-002', {
-            id: 'sku-demo-002', productId: 'product-demo-002', merchantId: 'merchant-demo-001',
-            name: '高碑店豆腐丝（300g / 袋）', unitPriceCents: moneyCents(1980),
-            stock: 1600, soldQuantity: 36, commissionRateBps: 800,
-        });
-        const now = Date.now();
-        this.usersById.set('demo-super-admin', { id: 'demo-super-admin', wechatOpenId: null, status: 'ACTIVE', createdAt: new Date(now).toISOString() });
-        this.merchants.set('merchant-demo-001', { id: 'merchant-demo-001', name: '家乡风味示例商户', status: 'ACTIVE', defaultCommissionBps: 800, wechatSubMchid: null, createdAt: new Date(now).toISOString() });
-        this.products.set('product-demo-001', { id: 'product-demo-001', merchantId: 'merchant-demo-001', title: '家乡风味手工米粉', category: '米面粮油', origin: '江西赣南', imageUrl: '/assets/product-rice-noodles.jpg', storageType: 'NORMAL_TEMPERATURE', status: 'APPROVED', sku: this.skus.get('sku-demo-001')!, createdAt: new Date(now).toISOString() });
-        this.products.set('product-demo-002', { id: 'product-demo-002', merchantId: 'merchant-demo-001', title: '高碑店豆腐丝', category: '熟食豆制品', origin: '河北保定', imageUrl: '/assets/product-tofu-strips.jpg', storageType: 'NORMAL_TEMPERATURE', status: 'APPROVED', sku: this.skus.get('sku-demo-002')!, createdAt: new Date(now).toISOString() });
-        this.serviceAreas.set('service-bd-lianchi', { id: 'service-bd-lianchi', regionCode: '130606', name: '莲池区', status: 'ENABLED', orderEnabled: true, createdAt: new Date(now).toISOString() });
-        this.pickupPoints.set('pickup-demo-001', { id: 'pickup-demo-001', serviceAreaId: 'service-bd-lianchi', name: '莲池家乡味自提点', address: '保定市莲池区示范路 88 号', status: 'ACTIVE', capacityPerDay: 500, operationMode: 'SELF_OPERATED', responsibilityOwner: null, siteLeadName: null, siteLeadPhone: null, createdAt: new Date(now).toISOString() });
-        this.campaigns.set('campaign-demo-001', {
-            id: 'campaign-demo-001', title: '赣南米粉与客家风味 · 保定莲池区', serviceAreaId: 'service-bd-lianchi',
-            cutoffAt: new Date(now + 3 * 86400000).toISOString(),
-            dispatchAt: new Date(now + 5 * 86400000).toISOString(), minTotalQuantity: 20,
-            failureAction: 'CANCEL_AND_REFUND', skuIds: ['sku-demo-001', 'sku-demo-002'],
-            items: [
-                { skuId: 'sku-demo-001', productId: 'product-demo-001', merchantId: 'merchant-demo-001', title: '家乡风味手工米粉', category: '米面粮油', skuName: '家乡风味手工米粉（常温预包装）', origin: '江西赣南', imageUrl: '/assets/product-rice-noodles.jpg', unitPriceCents: moneyCents(2980), stock: 1000, soldQuantity: 0, commissionRateBps: 800 },
-                { skuId: 'sku-demo-002', productId: 'product-demo-002', merchantId: 'merchant-demo-001', title: '高碑店豆腐丝', category: '熟食豆制品', skuName: '高碑店豆腐丝（300g / 袋）', origin: '河北保定', imageUrl: '/assets/product-tofu-strips.jpg', unitPriceCents: moneyCents(1980), stock: 800, soldQuantity: 36, commissionRateBps: 800 },
-            ],
-            businessModelVersion: 'LEGACY_MARKETPLACE', warehouseId: null, platformItems: [], status: 'OPEN', version: 1, createdAt: new Date(now).toISOString(),
-        });
-        this.deliveryPlans.set('delivery-plan-demo-001', {
-            id: 'delivery-plan-demo-001', campaignId: 'campaign-demo-001', serviceAreaId: 'service-bd-lianchi', pickupPointId: 'pickup-demo-001', status: 'SITE_CONFIRMED',
-            siteName: '莲池家乡味自提点', address: '保定市莲池区示范路 88 号', arrivalStartAt: null, arrivalEndAt: null, contactName: null, contactPhone: null, vehicleOrderNo: null, driverName: null, driverPhone: null, vehiclePlate: null,
-            remark: '固定自提点', confirmedAt: new Date(now).toISOString(), bookedAt: null, dispatchedAt: null, arrivedAt: null, createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString(),
-        });
-        for (const item of this.campaigns.get('campaign-demo-001')!.items)
-            this.campaignSkus.set(`campaign-demo-001:${item.skuId}`, structuredClone(item));
+  protected data = emptyState();
+  private transactionTail: Promise<void> = Promise.resolve();
+  private controlledDatabaseNow: string | null = null;
+  public constructor(seed = false) {
+    void seed;
+  }
+  protected exportState(): string {
+    const output: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(this.data)) {
+      output[key] =
+        value instanceof Map
+          ? [...value.entries()]
+          : value instanceof Set
+            ? [...value]
+            : value;
     }
-    /**
-     * Keep the test adapter's transaction semantics aligned with MySQL.  This is
-     * deliberately generic so newly added domain maps participate in rollback
-     * automatically; promises and other coordination primitives are excluded.
-     */
-    private snapshotTransactionState(): Map<string, unknown> {
-        const state = this as unknown as Record<string, unknown>;
-        const snapshot = new Map<string, unknown>();
-        for (const key of Object.keys(state)) {
-            const value = state[key];
-            if (value instanceof Map || value instanceof Set || Array.isArray(value))
-                snapshot.set(key, structuredClone(value));
-        }
-        return snapshot;
+    return JSON.stringify(output);
+  }
+  protected importState(raw: string): void {
+    const input = JSON.parse(raw) as Record<string, unknown>;
+    const next = emptyState();
+    for (const key of Object.keys(next) as Array<keyof MemoryState>) {
+      const current = next[key];
+      const value = input[key];
+      if (current instanceof Map)
+        (next as unknown as Record<string, unknown>)[key] = new Map(
+          Array.isArray(value) ? (value as Array<[string, unknown]>) : [],
+        );
+      else if (current instanceof Set)
+        (next as unknown as Record<string, unknown>)[key] = new Set(
+          Array.isArray(value) ? value : [],
+        );
+      else (next as unknown as Record<string, unknown>)[key] = value ?? current;
     }
-    private restoreTransactionState(snapshot: Map<string, unknown>): void {
-        const state = this as unknown as Record<string, unknown>;
-        for (const [key, saved] of snapshot) {
-            const current = state[key];
-            if (current instanceof Map && saved instanceof Map) {
-                current.clear();
-                for (const [entryKey, entryValue] of saved)
-                    current.set(entryKey, structuredClone(entryValue));
-            }
-            else if (current instanceof Set && saved instanceof Set) {
-                current.clear();
-                for (const entryValue of saved)
-                    current.add(structuredClone(entryValue));
-            }
-            else if (Array.isArray(current) && Array.isArray(saved)) {
-                current.splice(0, current.length, ...structuredClone(saved));
-            }
-        }
+    for (const [id, rawPoint] of next.points) {
+      const point = rawPoint as PickupPoint;
+      const complete =
+        Boolean(point.businessHours?.trim()) &&
+        Boolean(point.pickupInstructions?.trim()) &&
+        Number.isFinite(point.latitude) &&
+        point.latitude >= -90 &&
+        point.latitude <= 90 &&
+        Number.isFinite(point.longitude) &&
+        point.longitude >= -180 &&
+        point.longitude <= 180;
+      next.points.set(id, {
+        ...point,
+        businessHours: point.businessHours ?? "",
+        pickupInstructions: point.pickupInstructions ?? "",
+        latitude: Number.isFinite(point.latitude) ? point.latitude : 0,
+        longitude: Number.isFinite(point.longitude) ? point.longitude : 0,
+        contactName: point.contactName ?? "",
+        contactPhone: point.contactPhone ?? "",
+        // Earlier aggregate payloads used SUSPENDED for a disabled pickup
+        // point. Persist only the approved ACTIVE | INACTIVE lifecycle.
+        status:
+          complete && point.status === "ACTIVE" ? "ACTIVE" : "INACTIVE",
+      });
     }
-    public async transaction<T>(work: (store: CommerceStore) => Promise<T>): Promise<T> {
-        const previous = this.transactionTail;
-        let release = (): void => undefined;
-        this.transactionTail = new Promise<void>((resolve) => { release = resolve; });
-        await previous;
-        const snapshot = this.snapshotTransactionState();
-        const callbackClaims = new Set<string>();
-        this.paymentCallbackClaimScopes.push(callbackClaims);
-        let rolledBack = false;
-        try {
-            return await work(this);
-        }
-        catch (error) {
-            rolledBack = true;
-            this.restoreTransactionState(snapshot);
-            throw error;
-        }
-        finally {
-            if (!rolledBack)
-                this.paymentCallbackClaimScopes.pop();
-            release();
-        }
+    for (const [id, rawCampaign] of next.campaigns) {
+      const campaign = rawCampaign as Campaign;
+      next.campaigns.set(id, {
+        ...campaign,
+        estimatedArrivalStartAt: campaign.estimatedArrivalStartAt ?? "",
+        estimatedArrivalEndAt: campaign.estimatedArrivalEndAt ?? "",
+      });
     }
-    public async health(): Promise<'ok'> { return 'ok'; }
-    public async databaseNow(): Promise<string> { return new Date().toISOString(); }
-    public async close(): Promise<void> { }
-    private campaignWithLiveInventory(value: Campaign): Campaign {
-        const copy = structuredClone(value);
-        copy.items = copy.items.map((item) => structuredClone(this.campaignSkus.get(`${copy.id}:${item.skuId}`) ?? item));
-        copy.platformItems = copy.platformItems.map((item) => structuredClone(this.campaignPlatformItems.get(`${copy.id}:${item.platformSkuId}`) ?? item));
-        return copy;
+    // Add P1-C governance facts lazily so existing MySQL aggregate documents
+    // remain readable during the rollout instead of producing partial records.
+    for (const [id, rawCase] of next.quality) {
+      const value = rawCase as CommunityQualityCase;
+      next.quality.set(id, {
+        ...value,
+        acceptanceNote: value.acceptanceNote ?? null,
+      });
     }
-    public async listCampaigns(): Promise<Campaign[]> { return [...this.campaigns.values()].map((value) => this.campaignWithLiveInventory(value)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)); }
-    public async getCampaign(id: string): Promise<Campaign | null> { const value = this.campaigns.get(id); return value ? this.campaignWithLiveInventory(value) : null; }
-    public async getCampaignForUpdate(id: string): Promise<Campaign | null> { return this.getCampaign(id); }
-    public async saveCampaign(campaign: Campaign): Promise<void> {
-        if (this.campaigns.has(campaign.id))
-            throw new Error(`Campaign ${campaign.id} already exists`);
-        this.campaigns.set(campaign.id, structuredClone(campaign));
-        for (const item of campaign.items)
-            this.campaignSkus.set(`${campaign.id}:${item.skuId}`, structuredClone(item));
+    for (const [id, rawInterest] of next.interests) {
+      const value = rawInterest as ServiceAreaInterest;
+      next.interests.set(id, {
+        ...value,
+        statusNote: value.statusNote ?? null,
+        statusChangedBy: value.statusChangedBy ?? null,
+        statusChangedAt: value.statusChangedAt ?? null,
+      });
     }
-    public async updateCampaign(campaign: Campaign, expectedVersion: number): Promise<boolean> {
-        const current = this.campaigns.get(campaign.id);
-        if (!current || current.version !== expectedVersion)
-            return false;
-        this.campaigns.set(campaign.id, structuredClone(campaign));
-        return true;
+    for (const [id, rawNotification] of next.notifications) {
+      const value = rawNotification as OrderNotification;
+      next.notifications.set(id, {
+        ...value,
+        manualCompletedBy: value.manualCompletedBy ?? null,
+        manualCompletionNote: value.manualCompletionNote ?? null,
+        providerSubmissionAttemptId: value.providerSubmissionAttemptId ?? null,
+        providerSubmissionStartedAt: value.providerSubmissionStartedAt ?? null,
+        providerResultRecordedAt: value.providerResultRecordedAt ?? null,
+        providerReceiptId: value.providerReceiptId ?? null,
+        submissionUnknownReason: value.submissionUnknownReason ?? null,
+      });
     }
-    public async replaceCampaignItems(campaign: Campaign): Promise<void> {
-        for (const key of [...this.campaignSkus.keys()])
-            if (key.startsWith(`${campaign.id}:`))
-                this.campaignSkus.delete(key);
-        for (const item of campaign.items)
-            this.campaignSkus.set(`${campaign.id}:${item.skuId}`, structuredClone(item));
+    this.data = next;
+  }
+  public async transaction<T>(
+    work: (store: CommerceStore) => Promise<T>,
+  ): Promise<T> {
+    const before = this.transactionTail;
+    let release!: () => void;
+    this.transactionTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await before;
+    const snapshot = clone(this.data);
+    try {
+      return await work(this);
+    } catch (error) {
+      this.data = snapshot;
+      throw error;
+    } finally {
+      release();
     }
-    public async getSku(id: string): Promise<Sku | null> {
-        const value = this.skus.get(id);
-        if (!value)
-            return null;
-        const product = this.products.get(value.productId);
-        const merchant = this.merchants.get(value.merchantId);
-        if (!product || product.status !== 'APPROVED' || !merchant || merchant.status !== 'ACTIVE')
-            return null;
-        return structuredClone(value);
+  }
+  public async health() {
+    return "ok" as const;
+  }
+  public async databaseNow() {
+    return this.controlledDatabaseNow ?? new Date().toISOString();
+  }
+  /** Test-only authority clock. Production adapters retain their own clock source. */
+  public setDatabaseNowForTests(value: string | null): void {
+    if (value !== null && Number.isNaN(Date.parse(value)))
+      throw new Error("database test clock must be an ISO timestamp");
+    this.controlledDatabaseNow = value;
+  }
+  public async close() {}
+  public async findUserByWechatOpenId(openId: string) {
+    return clone(
+      [...this.data.users.values()].find((v) => v.wechatOpenId === openId) ??
+        null,
+    );
+  }
+  public async getUser(id: string) {
+    return clone(this.data.users.get(id) ?? null);
+  }
+  public async saveUser(v: User) {
+    this.data.users.set(v.id, clone(v));
+  }
+  public async savePrivacyConsent(userId: string, documentVersion: string) {
+    const key = `${userId}:${documentVersion}`;
+    if (!this.data.privacy.has(key))
+      this.data.privacy.set(key, {
+        userId,
+        documentVersion,
+        consentedAt: new Date().toISOString(),
+      });
+  }
+  public async getPrivacyConsent(userId: string, version: string) {
+    return clone(this.data.privacy.get(`${userId}:${version}`) ?? null);
+  }
+  public async getAuthSession(hash: string) {
+    const v = this.data.sessions.get(hash);
+    if (!v) return null;
+    if (v.expiresAt <= new Date().toISOString()) {
+      this.data.sessions.delete(hash);
+      return null;
     }
-    public async getSkuForUpdate(id: string): Promise<Sku | null> { return this.getSku(id); }
-    public async getCampaignSku(campaignId: string, skuId: string): Promise<Sku | null> {
-        const campaignSku = this.campaignSkus.get(`${campaignId}:${skuId}`);
-        if (!campaignSku)
-            return null;
-        return { id: campaignSku.skuId, productId: campaignSku.productId, merchantId: campaignSku.merchantId, name: campaignSku.skuName, unitPriceCents: campaignSku.unitPriceCents, stock: campaignSku.stock, soldQuantity: campaignSku.soldQuantity, commissionRateBps: campaignSku.commissionRateBps };
+    const user = this.data.users.get(v.userId);
+    const staff = this.data.staff.get(v.userId);
+    return user?.status === "ACTIVE" && staff?.status !== "SUSPENDED"
+      ? clone(v)
+      : null;
+  }
+  public async saveAuthSession(v: AuthSession) {
+    this.data.sessions.set(v.tokenHash, clone(v));
+  }
+  public async deleteAuthSession(hash: string) {
+    this.data.sessions.delete(hash);
+  }
+  public async deleteAuthSessionsByUser(userId: string) {
+    for (const [key, v] of this.data.sessions)
+      if (v.userId === userId) this.data.sessions.delete(key);
+  }
+  public async findAdminCredential(username: string) {
+    return clone(
+      this.data.credentials.get(username.trim().toLowerCase()) ?? null,
+    );
+  }
+  public async findAdminCredentialByUserId(id: string) {
+    return clone(
+      [...this.data.credentials.values()].find((v) => v.userId === id) ?? null,
+    );
+  }
+  public async saveAdminCredential(v: AdminCredential) {
+    this.data.credentials.set(v.username.trim().toLowerCase(), clone(v));
+  }
+  public async replaceUserRoles(
+    userId: string,
+    roles: Role[],
+    authorizationVersion?: number,
+  ) {
+    this.data.roles.set(userId, clone(roles));
+    const credential = await this.findAdminCredentialByUserId(userId);
+    if (credential) {
+      credential.roles = clone(roles);
+      if (authorizationVersion !== undefined)
+        credential.authorizationVersion = authorizationVersion;
+      await this.saveAdminCredential(credential);
     }
-    public async reserveCampaignSkuStock(campaignId: string, skuId: string, quantity: number): Promise<boolean> {
-        const sku = this.skus.get(skuId);
-        const campaignSku = this.campaignSkus.get(`${campaignId}:${skuId}`);
-        if (!sku || !campaignSku || campaignSku.stock - campaignSku.soldQuantity < quantity || sku.stock - sku.soldQuantity < quantity)
-            return false;
-        campaignSku.soldQuantity += quantity;
-        sku.soldQuantity += quantity;
-        return true;
+  }
+  public async getInternalStaff(id: string) {
+    return clone(this.data.staff.get(id) ?? null);
+  }
+  public async listInternalStaff(query?: string) {
+    const q = query?.trim().toLowerCase();
+    return clone(
+      [...this.data.staff.values()]
+        .filter(
+          (v) =>
+            !q ||
+            `${v.staffNo} ${v.displayName} ${v.phone}`
+              .toLowerCase()
+              .includes(q),
+        )
+        .sort((a, b) => a.staffNo.localeCompare(b.staffNo)),
+    );
+  }
+  public async saveInternalStaff(v: InternalStaff) {
+    this.data.staff.set(v.userId, clone(v));
+  }
+  public async listStaffPickupPointAssignments(id?: string) {
+    return clone(
+      [...this.data.staffPoints.values()].filter(
+        (v) => !id || v.staffUserId === id,
+      ),
+    );
+  }
+  public async replaceStaffPickupPointAssignments(
+    id: string,
+    values: StaffPickupPointAssignment[],
+  ) {
+    for (const [key, v] of this.data.staffPoints)
+      if (v.staffUserId === id) this.data.staffPoints.delete(key);
+    for (const v of values)
+      this.data.staffPoints.set(
+        `${v.staffUserId}:${v.pickupPointId}`,
+        clone(v),
+      );
+  }
+  public async hasActivePickupPointAssignment(id: string, pointId: string) {
+    const staff = this.data.staff.get(id);
+    const user = this.data.users.get(id);
+    return (
+      !!staff &&
+      staff.role === "PICKUP_MANAGER" &&
+      staff.status === "ACTIVE" &&
+      user?.status === "ACTIVE" &&
+      this.data.staffPoints.has(`${id}:${pointId}`)
+    );
+  }
+  public async listServiceAreas() {
+    return clone([...this.data.areas.values()]);
+  }
+  public async saveServiceArea(v: ServiceArea) {
+    this.data.areas.set(v.id, clone(v));
+  }
+  public async updateServiceAreaOrderEnabled(id: string, enabled: boolean) {
+    const v = this.data.areas.get(id);
+    if (!v) return false;
+    v.orderEnabled = enabled;
+    return true;
+  }
+  public async listPickupPoints(areaId?: string) {
+    return clone(
+      [...this.data.points.values()].filter(
+        (v) => !areaId || v.serviceAreaId === areaId,
+      ),
+    );
+  }
+  public async savePickupPoint(v: PickupPoint) {
+    this.data.points.set(v.id, clone(v));
+  }
+  public async listCatalogSkus() {
+    return clone([...this.data.catalog.values()]);
+  }
+  public async getCatalogSku(id: string) {
+    return clone(this.data.catalog.get(id) ?? null);
+  }
+  public async saveCatalogSku(v: CatalogSku) {
+    this.data.catalog.set(v.id, clone(v));
+  }
+  public async listCampaigns() {
+    return clone([...this.data.campaigns.values()]);
+  }
+  public async getCampaign(id: string) {
+    return clone(this.data.campaigns.get(id) ?? null);
+  }
+  public async getCampaignForUpdate(id: string) {
+    return this.getCampaign(id);
+  }
+  public async saveCampaign(v: Campaign) {
+    this.data.campaigns.set(v.id, clone(v));
+  }
+  public async updateCampaign(v: Campaign, version: number) {
+    const current = this.data.campaigns.get(v.id);
+    if (!current || current.version !== version) return false;
+    this.data.campaigns.set(v.id, clone(v));
+    return true;
+  }
+  public async replaceCampaignItems(id: string, items: CampaignItem[]) {
+    const campaign = this.data.campaigns.get(id);
+    if (campaign) {
+      campaign.items = clone(items);
+      this.data.campaigns.set(id, campaign);
     }
-    public async releaseCampaignSkuStock(campaignId: string, skuId: string, quantity: number): Promise<boolean> {
-        const sku = this.skus.get(skuId);
-        const campaignSku = this.campaignSkus.get(`${campaignId}:${skuId}`);
-        if (!sku || !campaignSku || campaignSku.soldQuantity < quantity || sku.soldQuantity < quantity)
-            return false;
-        campaignSku.soldQuantity -= quantity;
-        sku.soldQuantity -= quantity;
-        return true;
+  }
+  public async getCampaignItem(id: string, skuId: string) {
+    return clone(
+      this.data.campaigns
+        .get(id)
+        ?.items.find((v) => v.catalogSkuId === skuId) ?? null,
+    );
+  }
+  public async reserveCampaignInventory(
+    id: string,
+    skuId: string,
+    quantity: number,
+  ) {
+    const item = this.data.campaigns
+      .get(id)
+      ?.items.find((v) => v.catalogSkuId === skuId);
+    if (
+      !item ||
+      quantity < 1 ||
+      item.reservedQuantity + quantity > item.sellableQuantity
+    )
+      return false;
+    item.reservedQuantity += quantity;
+    return true;
+  }
+  public async releaseCampaignInventory(
+    id: string,
+    skuId: string,
+    quantity: number,
+  ) {
+    const item = this.data.campaigns
+      .get(id)
+      ?.items.find((v) => v.catalogSkuId === skuId);
+    if (!item || quantity < 0 || item.reservedQuantity < quantity) return false;
+    item.reservedQuantity -= quantity;
+    return true;
+  }
+  public async getIdempotency(actor: string, key: string) {
+    return clone(this.data.idempotency.get(`${actor}:${key}`) ?? null);
+  }
+  public async getIdempotencyForUpdate(actor: string, key: string) {
+    return this.getIdempotency(actor, key);
+  }
+  public async saveIdempotency(
+    actor: string,
+    key: string,
+    v: IdempotencyRecord,
+  ) {
+    this.data.idempotency.set(`${actor}:${key}`, clone(v));
+  }
+  private hydrateOrder(id: string): Order | null {
+    const base = this.data.orders.get(id);
+    if (!base) return null;
+    const lines = this.data.lines.get(id);
+    if (!lines) return clone(base);
+    return clone({
+      ...base,
+      items: lines.map((line) => ({
+        orderLineId: line.id,
+        skuId: line.catalogSkuId,
+        productId: line.productId,
+        name: line.skuName,
+        quantity: line.quantity,
+        unitPriceCents: line.unitPriceCents,
+        amountCents: line.amountCents,
+        fulfilledQuantity: line.fulfilledQuantity,
+        pickedUpQuantity: line.pickedUpQuantity,
+        exceptionQuantity: line.exceptionQuantity,
+        refundedQuantity: line.refundedQuantity,
+        refundedAmountCents: line.refundedAmountCents,
+      })),
+    } as Order);
+  }
+  public async listOrdersByCampaign(id: string) {
+    return [...this.data.orders.values()]
+      .filter((v) => v.campaignId === id)
+      .map((v) => this.hydrateOrder(v.id)!);
+  }
+  public async listOrdersByUser(id: string) {
+    return newest(
+      [...this.data.orders.values()]
+        .filter((v) => v.userId === id)
+        .map((v) => this.hydrateOrder(v.id)!),
+    );
+  }
+  public async listOrders(limit: number) {
+    return newest(
+      [...this.data.orders.values()].map((v) => this.hydrateOrder(v.id)!),
+    ).slice(0, limit);
+  }
+  public async listExpiredPendingOrders(now: string, limit: number) {
+    return (await this.listOrders(Number.MAX_SAFE_INTEGER))
+      .filter((v) => v.status === "PENDING_PAYMENT" && v.expiresAt <= now)
+      .slice(0, limit);
+  }
+  public async getOrder(id: string) {
+    return this.hydrateOrder(id);
+  }
+  public async getOrderForUpdate(id: string) {
+    return this.getOrder(id);
+  }
+  public async getOrderByNo(no: string) {
+    const v = [...this.data.orders.values()].find((o) => o.orderNo === no);
+    return v ? this.hydrateOrder(v.id) : null;
+  }
+  public async getOrderByNoForUpdate(no: string) {
+    return this.getOrderByNo(no);
+  }
+  public async saveOrder(v: Order) {
+    this.data.orders.set(v.id, clone(v));
+  }
+  public async saveOrderStatus(v: Order) {
+    const current = this.data.orders.get(v.id);
+    if (current)
+      this.data.orders.set(
+        v.id,
+        clone({
+          ...current,
+          status: v.status,
+          paidAt: v.paidAt,
+          pickedUpAt: v.pickedUpAt,
+        }),
+      );
+  }
+  public async transitionOrderStatus(
+    id: string,
+    expected: Order["status"][],
+    next: Order["status"],
+    paidAt?: string | null,
+  ) {
+    const v = this.data.orders.get(id);
+    if (!v || !expected.includes(v.status)) return false;
+    v.status = next;
+    if (paidAt !== undefined) v.paidAt = paidAt;
+    return true;
+  }
+  public async cancelPendingOrder(id: string) {
+    return this.transitionOrderStatus(id, ["PENDING_PAYMENT"], "CANCELLED");
+  }
+  public async markPendingOrderPaid(id: string, paidAt: string) {
+    return this.transitionOrderStatus(
+      id,
+      ["PENDING_PAYMENT"],
+      "PAID_WAITING_CLOSE",
+      paidAt,
+    );
+  }
+  public async saveOrderLines(orderId: string, values: NewOrderLine[]) {
+    this.data.lines.set(
+      orderId,
+      values.map(
+        (v) =>
+          ({
+            ...v,
+            orderId,
+            orderNo: this.data.orders.get(orderId)?.orderNo ?? null,
+            paidAt: this.data.orders.get(orderId)?.paidAt ?? null,
+            fulfilledQuantity: 0,
+            exceptionQuantity: 0,
+            refundedQuantity: 0,
+            refundedAmountCents: 0,
+            pickedUpQuantity: 0,
+          }) as StoredLine,
+      ),
+    );
+  }
+  private linesForOrder(id: string) {
+    const order = this.data.orders.get(id);
+    return (this.data.lines.get(id) ?? []).map((v) =>
+      clone({
+        ...v,
+        orderNo: order?.orderNo ?? null,
+        paidAt: order?.paidAt ?? null,
+      }),
+    );
+  }
+  public async listOrderLinesByCampaign(id: string) {
+    const orders = [...this.data.orders.values()]
+      .filter((v) => v.campaignId === id && !!v.paidAt)
+      .sort(
+        (a, b) =>
+          (a.paidAt ?? "").localeCompare(b.paidAt ?? "") ||
+          a.orderNo.localeCompare(b.orderNo),
+      );
+    return orders.flatMap((v) => this.linesForOrder(v.id));
+  }
+  public async listOrderLinesByCampaignForUpdate(id: string) {
+    return this.listOrderLinesByCampaign(id);
+  }
+  public async listOrderLinesByOrderForUpdate(id: string) {
+    return this.linesForOrder(id);
+  }
+  public async updateOrderLine(v: OrderLine) {
+    const values = this.data.lines.get(v.orderId);
+    const i = values?.findIndex((x) => x.id === v.id) ?? -1;
+    if (!values || i < 0) return false;
+    values[i] = { ...values[i]!, ...clone(v) };
+    return true;
+  }
+  public async listOrderDeliveryFacts(ids: string[]) {
+    const set = new Set(ids);
+    const planIds = new Set(
+      [...this.data.orders.values()]
+        .filter((v) => set.has(v.id))
+        .map((v) => v.deliveryPlanId),
+    );
+    return clone({
+      partialRefunds: [...this.data.partialRefunds.values()].filter((v) =>
+        set.has(v.orderId),
+      ),
+      qualityCases: [...this.data.quality.values()].filter((v) =>
+        set.has(v.orderId),
+      ),
+      pickupReceipts: [...this.data.pickupReceipts.values()].filter((v) =>
+        set.has(v.orderId),
+      ),
+      cancellations: [...this.data.cancellations.values()].filter((v) =>
+        set.has(v.orderId),
+      ),
+      pickupWindows: [...this.data.windows.values()].filter((v) =>
+        set.has(v.orderId),
+      ),
+      exceptions: [...this.data.exceptions.values()].filter(
+        (v) =>
+          v.orderId === null ||
+          set.has(v.orderId) ||
+          [...this.data.allocations.values()].some(
+            (a) => a.exceptionId === v.id && set.has(a.orderId),
+          ),
+      ),
+      allocations: [...this.data.allocations.values()].filter((v) =>
+        set.has(v.orderId),
+      ),
+      deliveryPlans: [...this.data.plans.values()].filter((v) =>
+        planIds.has(v.id),
+      ),
+    });
+  }
+  public async getPaymentByOrder(id: string) {
+    return clone(
+      [...this.data.payments.values()].find((v) => v.orderId === id) ?? null,
+    );
+  }
+  public async getPaymentByOrderForUpdate(id: string) {
+    return this.getPaymentByOrder(id);
+  }
+  public async savePayment(v: Payment) {
+    this.data.payments.set(v.id, clone(v));
+  }
+  public async savePaymentIfStatus(v: Payment, expected: Payment["status"][]) {
+    const current = this.data.payments.get(v.id);
+    if (!current || !expected.includes(current.status)) return false;
+    this.data.payments.set(v.id, clone(v));
+    return true;
+  }
+  public async savePaymentIfInitiationClaimed(v: Payment, token: string) {
+    const current = this.data.payments.get(v.id);
+    if (!current || current.initiationClaimToken !== token) return false;
+    this.data.payments.set(v.id, clone(v));
+    return true;
+  }
+  public async claimPaymentCallback(eventId: string, bodyHash: string) {
+    const existing = this.data.callbacks.get(eventId);
+    if (existing) {
+      if (existing !== bodyHash)
+        throw new Error("callback event payload mismatch");
+      return false;
     }
-    public async releaseReservedCampaignInventory(campaignId: string, skuId: string, quantity: number, businessModelVersion: Campaign['businessModelVersion']): Promise<boolean> {
-        if (businessModelVersion === 'PLATFORM_PROCUREMENT')
-            return this.releaseCampaignPlatformStock(campaignId, skuId, quantity);
-        if (businessModelVersion === 'PLATFORM_COMMUNITY')
-            return this.releaseCommunityCampaignStock(campaignId, skuId, quantity);
-        return this.releaseCampaignSkuStock(campaignId, skuId, quantity);
+    this.data.callbacks.set(eventId, bodyHash);
+    return true;
+  }
+  public async getOrderRefundByOrder(id: string) {
+    return clone(
+      [...this.data.orderRefunds.values()].find((v) => v.orderId === id) ??
+        null,
+    );
+  }
+  public async getOrderRefundByProviderNo(no: string) {
+    return clone(
+      [...this.data.orderRefunds.values()].find(
+        (v) => v.providerRefundNo === no,
+      ) ?? null,
+    );
+  }
+  public async saveOrderRefund(v: OrderRefund) {
+    const duplicate = [...this.data.orderRefunds.values()].find(
+      (value) => value.orderId === v.orderId && value.id !== v.id,
+    );
+    if (duplicate)
+      throw new BusinessError(
+        "FINANCIAL_INCONSISTENT",
+        "同一订单只能存在一笔全额退款义务",
+        409,
+      );
+    this.data.orderRefunds.set(v.id, clone(v));
+  }
+  private claimRefund<T extends OrderRefund | PartialRefund>(
+    map: Map<string, T>,
+    id: string,
+    lease: string,
+    now: string,
+    token: string,
+  ) {
+    const v = map.get(id);
+    if (!v) return false;
+    const active =
+      !!v.submissionClaimToken &&
+      !!v.submissionLeaseUntil &&
+      v.submissionLeaseUntil > now;
+    if (
+      active ||
+      ![
+        "CREATED",
+        "RETRYABLE_FAILURE",
+        "PROCESSING",
+        "SUBMISSION_UNKNOWN",
+        "FAILED",
+      ].includes(v.status)
+    )
+      return false;
+    v.status = "PROCESSING";
+    v.submissionLeaseUntil = lease;
+    v.submissionClaimToken = token;
+    v.recoveryVersion = (v.recoveryVersion ?? 0) + 1;
+    return true;
+  }
+  public async claimOrderRefundSubmission(
+    id: string,
+    lease: string,
+    now: string,
+    token: string,
+  ) {
+    return this.claimRefund(this.data.orderRefunds, id, lease, now, token);
+  }
+  public async saveOrderRefundIfClaimed(v: OrderRefund, token: string) {
+    const c = this.data.orderRefunds.get(v.id);
+    if (!c || c.status === "SUCCEEDED" || c.submissionClaimToken !== token)
+      return false;
+    this.data.orderRefunds.set(
+      v.id,
+      clone({ ...v, recoveryVersion: (c.recoveryVersion ?? 0) + 1 }),
+    );
+    return true;
+  }
+  public async saveOrderRefundIfUnclaimed(v: OrderRefund, now: string) {
+    const c = this.data.orderRefunds.get(v.id);
+    if (
+      !c ||
+      c.status === "SUCCEEDED" ||
+      (c.recoveryVersion ?? 0) !== (v.recoveryVersion ?? 0) ||
+      (c.submissionClaimToken &&
+        c.submissionLeaseUntil &&
+        c.submissionLeaseUntil > now)
+    )
+      return false;
+    this.data.orderRefunds.set(
+      v.id,
+      clone({ ...v, recoveryVersion: (c.recoveryVersion ?? 0) + 1 }),
+    );
+    return true;
+  }
+  public async saveOrderRefundIfStatus(
+    v: OrderRefund,
+    e: OrderRefund["status"][],
+  ) {
+    const c = this.data.orderRefunds.get(v.id);
+    if (!c || c.status === "SUCCEEDED" || !e.includes(c.status)) return false;
+    this.data.orderRefunds.set(
+      v.id,
+      clone({ ...v, recoveryVersion: (c.recoveryVersion ?? 0) + 1 }),
+    );
+    return true;
+  }
+  public async listOrderRefunds(limit: number): Promise<OrderRefund[]> {
+    return newest([...this.data.orderRefunds.values()])
+      .slice(0, limit)
+      .map((v) => clone(v));
+  }
+  public async listPendingOrderRefunds(limit: number) {
+    return (await this.listOrderRefunds(Number.MAX_SAFE_INTEGER))
+      .filter((v) =>
+        [
+          "CREATED",
+          "SUBMISSION_UNKNOWN",
+          "PROCESSING",
+          "RETRYABLE_FAILURE",
+          "FAILED",
+        ].includes(v.status),
+      )
+      .slice(0, limit);
+  }
+  public async listRefundingOrders(limit: number): Promise<Order[]> {
+    return (await this.listOrders(Number.MAX_SAFE_INTEGER))
+      .filter((value) => value.status === "REFUNDING")
+      .slice(0, limit);
+  }
+  public async getPartialRefund(id: string) {
+    return clone(this.data.partialRefunds.get(id) ?? null);
+  }
+  public async getPartialRefundByProviderNo(no: string) {
+    return clone(
+      [...this.data.partialRefunds.values()].find(
+        (v) => v.providerRefundNo === no,
+      ) ?? null,
+    );
+  }
+  public async listPartialRefunds(limit: number): Promise<PartialRefund[]> {
+    return newest([...this.data.partialRefunds.values()])
+      .slice(0, limit)
+      .map((v) => clone(v));
+  }
+  public async listPartialRefundsByOrder(id: string) {
+    return clone(
+      [...this.data.partialRefunds.values()].filter((v) => v.orderId === id),
+    );
+  }
+  public async listPartialRefundsByException(id: string) {
+    return clone(
+      [...this.data.partialRefunds.values()].filter(
+        (v) => v.exceptionId === id,
+      ),
+    );
+  }
+  public async listPendingPartialRefunds(limit: number) {
+    return (await this.listPartialRefunds(Number.MAX_SAFE_INTEGER))
+      .filter((v) =>
+        [
+          "CREATED",
+          "SUBMISSION_UNKNOWN",
+          "PROCESSING",
+          "RETRYABLE_FAILURE",
+          "FAILED",
+        ].includes(v.status),
+      )
+      .slice(0, limit);
+  }
+  public async savePartialRefund(v: PartialRefund) {
+    this.data.partialRefunds.set(v.id, clone(v));
+  }
+  public async claimPartialRefundSubmission(
+    id: string,
+    lease: string,
+    now: string,
+    token: string,
+  ) {
+    return this.claimRefund(this.data.partialRefunds, id, lease, now, token);
+  }
+  public async savePartialRefundIfClaimed(v: PartialRefund, token: string) {
+    const c = this.data.partialRefunds.get(v.id);
+    if (!c || c.status === "SUCCEEDED" || c.submissionClaimToken !== token)
+      return false;
+    this.data.partialRefunds.set(
+      v.id,
+      clone({ ...v, recoveryVersion: (c.recoveryVersion ?? 0) + 1 }),
+    );
+    return true;
+  }
+  public async savePartialRefundIfUnclaimed(v: PartialRefund, now: string) {
+    const c = this.data.partialRefunds.get(v.id);
+    if (
+      !c ||
+      c.status === "SUCCEEDED" ||
+      (c.recoveryVersion ?? 0) !== (v.recoveryVersion ?? 0) ||
+      (c.submissionClaimToken &&
+        c.submissionLeaseUntil &&
+        c.submissionLeaseUntil > now)
+    )
+      return false;
+    this.data.partialRefunds.set(
+      v.id,
+      clone({ ...v, recoveryVersion: (c.recoveryVersion ?? 0) + 1 }),
+    );
+    return true;
+  }
+  public async savePartialRefundIfStatus(
+    v: PartialRefund,
+    e: PartialRefund["status"][],
+  ) {
+    const c = this.data.partialRefunds.get(v.id);
+    if (!c || c.status === "SUCCEEDED" || !e.includes(c.status)) return false;
+    this.data.partialRefunds.set(
+      v.id,
+      clone({ ...v, recoveryVersion: (c.recoveryVersion ?? 0) + 1 }),
+    );
+    return true;
+  }
+  public async appendLedgerTransaction(v: LedgerTransaction) {
+    const duplicate = [...this.data.ledger.values()].some(
+      (x) =>
+        x.referenceType === v.referenceType &&
+        x.referenceId === v.referenceId &&
+        x.eventType === v.eventType,
+    );
+    if (duplicate) return false;
+    this.data.ledger.set(v.id, clone(v));
+    return true;
+  }
+  public async listLedgerTransactions(id?: string) {
+    return clone(
+      [...this.data.ledger.values()].filter((v) => !id || v.referenceId === id),
+    );
+  }
+  public async saveAuditLog(v: AuditLog) {
+    if (
+      !this.data.audits.some(
+        (x) => x.requestId === v.requestId && x.action === v.action,
+      )
+    )
+      this.data.audits.push(clone(v));
+  }
+  public async findLatestAudit(type: string, id: string, action: string) {
+    return clone(
+      [...this.data.audits]
+        .reverse()
+        .find(
+          (v) =>
+            v.resourceType === type &&
+            v.resourceId === id &&
+            v.action === action,
+        ) ?? null,
+    );
+  }
+  public async listAuditLogs(limit: number) {
+    return clone(
+      [...this.data.audits]
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .slice(0, limit),
+    );
+  }
+  public async getDeliveryPlan(id: string) {
+    return clone(this.data.plans.get(id) ?? null);
+  }
+  public async getDeliveryPlanByCampaign(id: string) {
+    return clone(
+      [...this.data.plans.values()].find((v) => v.campaignId === id) ?? null,
+    );
+  }
+  public async listDeliveryPlans() {
+    return clone([...this.data.plans.values()]);
+  }
+  public async saveDeliveryPlan(v: DeliveryPlan) {
+    this.data.plans.set(v.id, clone(v));
+  }
+  public async getDispatchBatch(id: string) {
+    return clone(this.data.batches.get(id) ?? null);
+  }
+  public async listDispatchBatches() {
+    return clone([...this.data.batches.values()]);
+  }
+  public async saveDispatchBatch(v: DispatchBatch) {
+    this.data.batches.set(v.id, clone(v));
+  }
+  public async getPickupCredential(id: string) {
+    return clone(this.data.pickupCredentials.get(id) ?? null);
+  }
+  public async savePickupCredential(v: PickupCredential) {
+    this.data.pickupCredentials.set(v.orderId, clone(v));
+  }
+  public async savePickupRecord(
+    orderId: string,
+    deliveryPlanId: string,
+    verifierId: string,
+  ) {
+    this.data.pickupRecords.add(`${orderId}:${deliveryPlanId}:${verifierId}`);
+  }
+  public async pickupRecordExists(id: string) {
+    return [...this.data.pickupRecords].some((v) => v.startsWith(`${id}:`));
+  }
+  public async getCommunityPickupReceiptByRequestIdForUpdate(
+    orderId: string,
+    requestId: string,
+  ) {
+    return clone(
+      [...this.data.pickupReceipts.values()].find(
+        (v) => v.orderId === orderId && v.pickupRequestId === requestId,
+      ) ?? null,
+    );
+  }
+  public async listCommunityPickupReceiptsByOrder(orderId: string) {
+    return clone(
+      [...this.data.pickupReceipts.values()]
+        .filter((value) => value.orderId === orderId)
+        .sort((left, right) => left.createdAt.localeCompare(right.createdAt)),
+    );
+  }
+  public async saveCommunityPickupReceipt(v: CommunityPickupReceipt) {
+    const duplicate = [...this.data.pickupReceipts.values()].some(
+      (x) => x.orderId === v.orderId && x.pickupRequestId === v.pickupRequestId,
+    );
+    if (duplicate) return false;
+    this.data.pickupReceipts.set(v.id, clone(v));
+    return true;
+  }
+  public async getCommunityDeliveryConfirmationByBatch(id: string) {
+    return clone(
+      [...this.data.deliveries.values()].find(
+        (v) => v.dispatchBatchId === id,
+      ) ?? null,
+    );
+  }
+  public async saveCommunityDeliveryConfirmation(
+    v: CommunityDeliveryConfirmation,
+  ) {
+    if (
+      [...this.data.deliveries.values()].some(
+        (x) => x.dispatchBatchId === v.dispatchBatchId,
+      )
+    )
+      return false;
+    this.data.deliveries.set(v.id, clone(v));
+    return true;
+  }
+  public async getFulfillmentException(id: string) {
+    return clone(this.data.exceptions.get(id) ?? null);
+  }
+  public async getFulfillmentExceptionForUpdate(id: string) {
+    return this.getFulfillmentException(id);
+  }
+  public async getFulfillmentExceptionByOrderRequestForUpdate(
+    orderId: string,
+    requestId: string,
+  ) {
+    return clone(
+      [...this.data.exceptions.values()].find(
+        (v) => v.orderId === orderId && v.clientRequestId === requestId,
+      ) ?? null,
+    );
+  }
+  public async listFulfillmentExceptions(
+    limit: number,
+  ): Promise<FulfillmentException[]> {
+    return [...this.data.exceptions.values()]
+      .sort((a, b) => b.registeredAt.localeCompare(a.registeredAt))
+      .slice(0, limit)
+      .map((v) => clone(v));
+  }
+  public async saveFulfillmentException(v: FulfillmentException) {
+    this.data.exceptions.set(v.id, clone(v));
+  }
+  public async listFulfillmentAllocations(id: string) {
+    return clone(
+      [...this.data.allocations.values()].filter((v) => v.exceptionId === id),
+    );
+  }
+  public async saveFulfillmentAllocations(values: FulfillmentAllocation[]) {
+    for (const v of values) this.data.allocations.set(v.id, clone(v));
+  }
+  public async markFulfillmentAllocationsRefunded(
+    exceptionId: string,
+    refund: PartialRefund,
+    at: string,
+  ) {
+    const values = [...this.data.allocations.values()].filter(
+      (v) =>
+        v.exceptionId === exceptionId &&
+        v.orderId === refund.orderId &&
+        v.refundedQuantity < v.exceptionQuantity,
+    );
+    if (!values.length) return false;
+    for (const v of values) {
+      const delta = v.exceptionQuantity - v.refundedQuantity;
+      v.refundedQuantity = v.exceptionQuantity;
+      v.refundedAt = at;
+      const line = this.data.lines
+        .get(v.orderId)
+        ?.find((x) => x.id === v.orderLineId);
+      if (line) {
+        line.refundedQuantity += delta;
+        line.refundedAmountCents = moneyCents(
+          Number(line.refundedAmountCents) +
+            Number(line.unitPriceCents) * delta,
+        );
+      }
     }
-    public async listOrdersByCampaign(campaignId: string): Promise<Order[]> { return [...this.orders.values()].filter((order) => order.campaignId === campaignId).map((order) => structuredClone(order)); }
-    public async listOrdersByUser(userId: string): Promise<Order[]> { return [...this.orders.values()].filter((order) => order.userId === userId).map((order) => structuredClone(order)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)); }
-    public async listOrders(limit: number): Promise<Order[]> { return [...this.orders.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit).map((order) => structuredClone(order)); }
-    public async listOrderDeliveryFacts(orderIds: string[]): Promise<OrderDeliveryFacts> { const ids = new Set(orderIds); const allocations = [...this.fulfillmentAllocations.values()].filter((value) => ids.has(value.orderId)); const exceptionIds = new Set(allocations.map((value) => value.exceptionId)); const plans = new Set([...this.orders.values()].filter((order) => ids.has(order.id)).map((order) => order.deliveryPlanId)); const clone = <T>(value: T) => structuredClone(value); return { afterSales: [...this.afterSales.values()].filter((value) => ids.has(value.orderId)).map(clone), partialRefunds: [...this.platformPartialRefunds.values()].filter((value) => ids.has(value.orderId)).map(clone), qualityCases: [...this.communityQualityCases.values()].filter((value) => ids.has(value.orderId)).map(clone), cancellations: [...this.communityCancellationRequests.values()].filter((value) => ids.has(value.orderId)).map(clone), pickupWindows: [...this.communityPickupWindows.values()].filter((value) => ids.has(value.orderId)).map(clone), exceptions: [...this.fulfillmentExceptions.values()].filter((value) => exceptionIds.has(value.id) || Boolean(value.orderId && ids.has(value.orderId))).map(clone), allocations: allocations.map(clone), deliveryPlans: [...this.deliveryPlans.values()].filter((value) => plans.has(value.id)).map(clone) }; }
-    public async listExpiredPendingOrders(now: string, limit: number): Promise<Order[]> { return [...this.orders.values()].filter((order) => order.status === 'PENDING_PAYMENT' && order.expiresAt <= now).slice(0, limit).map((order) => structuredClone(order)); }
-    public async listSettlementEligibleOrders(now: string, limit: number): Promise<Order[]> { return [...this.orders.values()].filter((order) => order.status === 'PICKED_UP' && order.pickedUpAt !== null && Date.parse(order.pickedUpAt) + 7 * 86400000 <= Date.parse(now)).sort((a, b) => (a.pickedUpAt ?? '').localeCompare(b.pickedUpAt ?? '')).slice(0, Math.max(1, limit)).map((order) => structuredClone(order)); }
-    public async getOrder(id: string): Promise<Order | null> { const value = this.orders.get(id); if (!value)
-        return null; const order = structuredClone(value); if (order.businessModelVersion !== 'LEGACY_MARKETPLACE')
-        order.items = (this.salesOrderItems.get(id) ?? []).map((item) => ({ salesOrderItemId: item.id, skuId: item.platformSkuId, productId: item.productId, merchantId: null, name: item.skuName, quantity: item.quantity, unitPriceCents: moneyCents(item.unitPriceCents), amountCents: moneyCents(item.amountCents), commissionRateBps: 0, commissionCents: moneyCents(0), purchaseUnitCents: moneyCents(item.purchaseUnitCents), fulfilledQuantity: item.fulfilledQuantity, pickedUpQuantity: item.pickedUpQuantity, exceptionQuantity: item.exceptionQuantity, refundedQuantity: item.refundedQuantity, refundedAmountCents: moneyCents(item.refundedAmountCents) })); return order; }
-    public async getOrderForUpdate(id: string): Promise<Order | null> { return this.getOrder(id); }
-    public async getOrderByNo(orderNo: string): Promise<Order | null> { const value = [...this.orders.values()].find((order) => order.orderNo === orderNo); return value ? this.getOrder(value.id) : null; }
-    public async getOrderByNoForUpdate(orderNo: string): Promise<Order | null> { return this.getOrderByNo(orderNo); }
-    public async saveOrder(order: Order): Promise<void> { this.orders.set(order.id, structuredClone(order)); }
-    public async saveOrderStatus(order: Order): Promise<void> { this.orders.set(order.id, structuredClone(order)); }
-    public async transitionOrderStatus(orderId: string, expectedStatuses: Order['status'][], nextStatus: Order['status'], paidAt?: string | null): Promise<boolean> { const order = this.orders.get(orderId); if (!order || !expectedStatuses.includes(order.status))
-        return false; order.status = nextStatus; if (paidAt !== undefined)
-        order.paidAt = paidAt; this.orders.set(orderId, structuredClone(order)); return true; }
-    public async cancelPendingOrder(orderId: string): Promise<boolean> { const order = this.orders.get(orderId); if (!order || order.status !== 'PENDING_PAYMENT')
-        return false; order.status = 'CANCELLED'; this.orders.set(orderId, structuredClone(order)); return true; }
-    public async markPendingOrderPaid(orderId: string, paidAt: string): Promise<boolean> { const order = this.orders.get(orderId); if (!order || order.status !== 'PENDING_PAYMENT')
-        return false; order.status = 'PAID_WAITING_CLOSE'; order.paidAt = paidAt; this.orders.set(orderId, structuredClone(order)); return true; }
-    public async getIdempotency(actorId: string, key: string): Promise<IdempotencyRecord | null> { const value = this.idempotency.get(`${actorId}:${key}`); return value ? structuredClone(value) : null; }
-    public async getIdempotencyForUpdate(actorId: string, key: string): Promise<IdempotencyRecord | null> { return this.getIdempotency(actorId, key); }
-    public async saveIdempotency(actorId: string, key: string, record: IdempotencyRecord): Promise<void> { this.idempotency.set(`${actorId}:${key}`, record); }
-    public async getPlatformRefundByOrder(orderId: string): Promise<PlatformRefund | null> { const value = [...this.platformRefunds.values()].find((item) => item.orderId === orderId); return value ? structuredClone(value) : null; }
-    public async getPlatformRefundByProviderNo(providerRefundNo: string): Promise<PlatformRefund | null> { const value = [...this.platformRefunds.values()].find((item) => item.providerRefundNo === providerRefundNo); return value ? structuredClone(value) : null; }
-    public async savePlatformRefund(value: PlatformRefund): Promise<void> { this.platformRefunds.set(value.id, structuredClone(value)); }
-    public async claimPlatformRefundSubmission(id: string, leaseUntil: string, now: string, token: string): Promise<boolean> { const value = this.platformRefunds.get(id); if (!value || !['CREATED', 'FAILED', 'PROCESSING'].includes(value.status) || (value.status === 'PROCESSING' && value.submissionLeaseUntil === null) || (value.submissionLeaseUntil !== null && value.submissionLeaseUntil > now))
-        return false; value.status = 'PROCESSING'; value.submissionLeaseUntil = leaseUntil; value.submissionClaimToken = token; this.platformRefunds.set(id, structuredClone(value)); return true; }
-    public async savePlatformRefundIfClaimed(value: PlatformRefund, token: string): Promise<boolean> { const current = this.platformRefunds.get(value.id); if (!current || current.submissionClaimToken !== token)
-        return false; this.platformRefunds.set(value.id, structuredClone(value)); return true; }
-    public async savePlatformRefundIfUnclaimed(value: PlatformRefund, now: string): Promise<boolean> { const current = this.platformRefunds.get(value.id); if (!current || current.submissionClaimToken !== null || (current.submissionLeaseUntil !== null && current.submissionLeaseUntil > now))
-        return false; this.platformRefunds.set(value.id, structuredClone(value)); return true; }
-    public async savePlatformRefundIfStatus(value: PlatformRefund, statuses: PlatformRefund['status'][]): Promise<boolean> { const current = this.platformRefunds.get(value.id); if (!current || !statuses.includes(current.status))
-        return false; this.platformRefunds.set(value.id, structuredClone(value)); return true; }
-    public async listPendingPlatformRefunds(limit: number): Promise<PlatformRefund[]> { return [...this.platformRefunds.values()].filter((item) => ['CREATED', 'PROCESSING', 'FAILED'].includes(item.status)).slice(0, limit).map((item) => structuredClone(item)); }
-    public async getPlatformPartialRefund(id: string): Promise<PlatformPartialRefund | null> { const value = this.platformPartialRefunds.get(id); return value ? structuredClone(value) : null; }
-    public async getPlatformPartialRefundByProviderNo(no: string): Promise<PlatformPartialRefund | null> { const value = [...this.platformPartialRefunds.values()].find((item) => item.providerRefundNo === no); return value ? structuredClone(value) : null; }
-    public async listPlatformPartialRefundsByOrder(orderId: string): Promise<PlatformPartialRefund[]> { return [...this.platformPartialRefunds.values()].filter((item) => item.orderId === orderId).map((item) => structuredClone(item)); }
-    public async listPlatformPartialRefundsByException(exceptionId: string): Promise<PlatformPartialRefund[]> { return [...this.platformPartialRefunds.values()].filter((item) => item.exceptionId === exceptionId).map((item) => structuredClone(item)); }
-    public async savePlatformPartialRefund(value: PlatformPartialRefund): Promise<void> { this.platformPartialRefunds.set(value.id, structuredClone(value)); }
-    public async claimPlatformPartialRefundSubmission(id: string, lease: string, now: string, token: string): Promise<boolean> { const value = this.platformPartialRefunds.get(id); if (!value || !['CREATED', 'FAILED', 'PROCESSING'].includes(value.status) || (value.status === 'PROCESSING' && value.submissionLeaseUntil === null) || (value.submissionLeaseUntil !== null && value.submissionLeaseUntil > now))
-        return false; value.status = 'PROCESSING'; value.submissionLeaseUntil = lease; value.submissionClaimToken = token; return true; }
-    public async savePlatformPartialRefundIfClaimed(value: PlatformPartialRefund, token: string): Promise<boolean> { const current = this.platformPartialRefunds.get(value.id); if (!current || current.submissionClaimToken !== token)
-        return false; this.platformPartialRefunds.set(value.id, structuredClone(value)); return true; }
-    public async savePlatformPartialRefundIfUnclaimed(value: PlatformPartialRefund, now: string): Promise<boolean> { const current = this.platformPartialRefunds.get(value.id); if (!current || current.submissionClaimToken !== null || (current.submissionLeaseUntil !== null && current.submissionLeaseUntil > now))
-        return false; this.platformPartialRefunds.set(value.id, structuredClone(value)); return true; }
-    public async savePlatformPartialRefundIfStatus(value: PlatformPartialRefund, statuses: PlatformPartialRefund['status'][]): Promise<boolean> { const current = this.platformPartialRefunds.get(value.id); if (!current || !statuses.includes(current.status))
-        return false; this.platformPartialRefunds.set(value.id, structuredClone(value)); return true; }
-    public async listPendingPlatformPartialRefunds(limit: number): Promise<PlatformPartialRefund[]> { return [...this.platformPartialRefunds.values()].filter((item) => ['CREATED', 'PROCESSING', 'FAILED'].includes(item.status)).slice(0, limit).map((item) => structuredClone(item)); }
-    public async listWarehouses(): Promise<Warehouse[]> { return [...this.warehouses.values()].map((item) => structuredClone(item)); }
-    public async getWarehouse(id: string): Promise<Warehouse | null> { const value = this.warehouses.get(id); return value ? structuredClone(value) : null; }
-    public async saveWarehouse(value: Warehouse): Promise<void> { this.warehouses.set(value.id, structuredClone(value)); }
-    public async listSuppliers(): Promise<Supplier[]> { return [...this.suppliers.values()].map((item) => structuredClone(item)); }
-    public async getSupplier(id: string): Promise<Supplier | null> { const value = this.suppliers.get(id); return value ? structuredClone(value) : null; }
-    public async saveSupplier(value: Supplier): Promise<void> { this.suppliers.set(value.id, structuredClone(value)); }
-    public async listSupplierQualifications(supplierId?: string): Promise<SupplierQualification[]> { return [...this.supplierQualifications.values()].filter((item) => !supplierId || item.supplierId === supplierId).map((item) => structuredClone(item)); }
-    public async saveSupplierQualification(value: SupplierQualification): Promise<void> { this.supplierQualifications.set(value.id, structuredClone(value)); }
-    public async listPlatformSkus(): Promise<PlatformSku[]> { return [...this.platformSkus.values()].map((item) => structuredClone(item)); }
-    public async getPlatformSku(id: string): Promise<PlatformSku | null> { const value = this.platformSkus.get(id); return value ? structuredClone(value) : null; }
-    public async savePlatformSku(value: PlatformSku): Promise<void> { this.platformSkus.set(value.id, structuredClone(value)); }
-    public async listSupplierSkuOffers(platformSkuId?: string): Promise<SupplierSkuOffer[]> { return [...this.supplierOffers.values()].filter((item) => !platformSkuId || item.platformSkuId === platformSkuId).map((item) => structuredClone(item)); }
-    public async getSupplierSkuOffer(id: string): Promise<SupplierSkuOffer | null> { const value = this.supplierOffers.get(id); return value ? structuredClone(value) : null; }
-    public async saveSupplierSkuOffer(value: SupplierSkuOffer): Promise<void> { this.supplierOffers.set(value.id, structuredClone(value)); }
-    public async getCampaignPlatformItem(campaignId: string, platformSkuId: string): Promise<PlatformCampaignItem | null> { const value = this.campaignPlatformItems.get(`${campaignId}:${platformSkuId}`); return value ? structuredClone(value) : null; }
-    public async replaceCampaignPlatformItems(campaign: Campaign): Promise<void> { for (const key of this.campaignPlatformItems.keys())
-        if (key.startsWith(`${campaign.id}:`))
-            this.campaignPlatformItems.delete(key); for (const item of campaign.platformItems)
-        this.campaignPlatformItems.set(`${campaign.id}:${item.platformSkuId}`, structuredClone(item)); const persisted = this.campaigns.get(campaign.id); if (persisted) {
-        persisted.platformItems = campaign.platformItems.map((item) => structuredClone(item));
-        this.campaigns.set(campaign.id, persisted);
-    } }
-    public async reserveCampaignPlatformStock(campaignId: string, platformSkuId: string, quantity: number): Promise<boolean> { const value = this.campaignPlatformItems.get(`${campaignId}:${platformSkuId}`); if (!value || value.sellableQuantity - value.reservedQuantity < quantity)
-        return false; value.reservedQuantity += quantity; return true; }
-    public async releaseCampaignPlatformStock(campaignId: string, platformSkuId: string, quantity: number): Promise<boolean> { const value = this.campaignPlatformItems.get(`${campaignId}:${platformSkuId}`); if (!value || value.reservedQuantity < quantity)
-        return false; value.reservedQuantity -= quantity; return true; }
-    public async listCommunityCampaignItems(campaignId: string): Promise<CommunityCampaignItem[]> { return [...this.communityCampaignItems.entries()].filter(([key]) => key.startsWith(`${campaignId}:`)).map(([, value]) => structuredClone(value)); }
-    public async getCommunityCampaignItem(campaignId: string, platformSkuId: string): Promise<CommunityCampaignItem | null> { const value = this.communityCampaignItems.get(`${campaignId}:${platformSkuId}`); return value ? structuredClone(value) : null; }
-    public async replaceCommunityCampaignItems(campaignId: string, items: CommunityCampaignItem[]): Promise<void> { for (const key of this.communityCampaignItems.keys())
-        if (key.startsWith(`${campaignId}:`))
-            this.communityCampaignItems.delete(key); for (const item of items)
-        this.communityCampaignItems.set(`${campaignId}:${item.platformSkuId}`, structuredClone(item)); const campaign = this.campaigns.get(campaignId); if (campaign) {
-        campaign.communityItems = items.map((item) => structuredClone(item));
-        this.campaigns.set(campaignId, campaign);
-    } }
-    public async reserveCommunityCampaignStock(campaignId: string, platformSkuId: string, quantity: number): Promise<boolean> { const item = this.communityCampaignItems.get(`${campaignId}:${platformSkuId}`); if (!item || item.sellableQuantity - item.reservedQuantity < quantity)
-        return false; item.reservedQuantity += quantity; return true; }
-    public async releaseCommunityCampaignStock(campaignId: string, platformSkuId: string, quantity: number): Promise<boolean> { const item = this.communityCampaignItems.get(`${campaignId}:${platformSkuId}`); if (!item || item.reservedQuantity < quantity)
-        return false; item.reservedQuantity -= quantity; return true; }
-    public async saveSalesOrderItems(orderId: string, items: Array<{
-        id: string;
-        platformSkuId: string;
-        productId: string;
-        title: string;
-        skuName: string;
-        quantity: number;
-        unitPriceCents: number;
-        purchaseUnitCents: number;
-        amountCents: number;
-    }>): Promise<void> { this.salesOrderItems.set(orderId, items.map((item) => ({ ...item, fulfilledQuantity: 0, pickedUpQuantity: 0, exceptionQuantity: 0, refundedQuantity: 0, refundedAmountCents: 0 }))); }
-    public async listPlatformOrderItemsByCampaign(campaignId: string): Promise<Array<{
-        orderId: string;
-        platformSkuId: string;
-        quantity: number;
-        purchaseUnitCents: number;
-    }>> { const rows: Array<{
-        orderId: string;
-        platformSkuId: string;
-        quantity: number;
-        purchaseUnitCents: number;
-    }> = []; for (const order of this.orders.values())
-        if (order.campaignId === campaignId && order.businessModelVersion !== 'LEGACY_MARKETPLACE' && ['PAID_WAITING_CLOSE', 'LOCKED', 'ALLOCATING', 'IN_TRANSIT', 'READY_FOR_PICKUP', 'PICKED_UP', 'COMPLETED'].includes(order.status))
-            for (const item of this.salesOrderItems.get(order.id) ?? [])
-                rows.push({ orderId: order.id, platformSkuId: item.platformSkuId, quantity: item.quantity, purchaseUnitCents: item.purchaseUnitCents }); return rows; }
-    public async listPlatformSalesLinesByCampaign(campaignId: string): Promise<PlatformSalesLine[]> { const rows: PlatformSalesLine[] = []; for (const order of this.orders.values())
-        if (order.campaignId === campaignId && order.businessModelVersion !== 'LEGACY_MARKETPLACE' && order.paidAt)
-            for (const item of this.salesOrderItems.get(order.id) ?? [])
-                rows.push({ id: item.id, orderId: order.id, orderNo: order.orderNo, platformSkuId: item.platformSkuId, quantity: item.quantity, unitPriceCents: moneyCents(item.unitPriceCents), purchaseUnitCents: moneyCents(item.purchaseUnitCents), amountCents: moneyCents(item.amountCents), fulfilledQuantity: item.fulfilledQuantity, exceptionQuantity: item.exceptionQuantity, refundedQuantity: item.refundedQuantity, refundedAmountCents: moneyCents(item.refundedAmountCents), pickedUpQuantity: item.pickedUpQuantity, paidAt: order.paidAt }); return rows.sort((left, right) => (left.paidAt ?? '').localeCompare(right.paidAt ?? '') || (left.orderNo ?? '').localeCompare(right.orderNo ?? '') || left.id.localeCompare(right.id)); }
-    public async listPlatformSalesLinesByCampaignForUpdate(campaignId: string): Promise<PlatformSalesLine[]> { return this.listPlatformSalesLinesByCampaign(campaignId); }
-    public async listPlatformSalesLinesByOrderForUpdate(orderId: string): Promise<PlatformSalesLine[]> { const order = this.orders.get(orderId); return (this.salesOrderItems.get(orderId) ?? []).map((item) => ({ id: item.id, orderId, orderNo: order?.orderNo ?? null, platformSkuId: item.platformSkuId, quantity: item.quantity, unitPriceCents: moneyCents(item.unitPriceCents), purchaseUnitCents: moneyCents(item.purchaseUnitCents), amountCents: moneyCents(item.amountCents), fulfilledQuantity: item.fulfilledQuantity, exceptionQuantity: item.exceptionQuantity, refundedQuantity: item.refundedQuantity, refundedAmountCents: moneyCents(item.refundedAmountCents), pickedUpQuantity: item.pickedUpQuantity, paidAt: order?.paidAt ?? null })).sort((left, right) => left.id.localeCompare(right.id)); }
-    public async updatePlatformSalesLine(value: PlatformSalesLine): Promise<boolean> { const rows = this.salesOrderItems.get(value.orderId); const item = rows?.find((item) => item.id === value.id); if (!item || value.fulfilledQuantity + value.exceptionQuantity > value.quantity || value.pickedUpQuantity > value.fulfilledQuantity)
-        return false; item.fulfilledQuantity = value.fulfilledQuantity; item.pickedUpQuantity = value.pickedUpQuantity; item.exceptionQuantity = value.exceptionQuantity; item.refundedQuantity = value.refundedQuantity; item.refundedAmountCents = Number(value.refundedAmountCents); return true; }
-    public async listPurchaseOrders(campaignId?: string): Promise<PurchaseOrder[]> { return [...this.purchaseOrders.values()].filter((item) => !campaignId || item.campaignId === campaignId).map((item) => structuredClone(item)); }
-    public async getPurchaseOrder(id: string): Promise<PurchaseOrder | null> { const value = this.purchaseOrders.get(id); return value ? structuredClone(value) : null; }
-    public async getPurchaseOrderForUpdate(id: string): Promise<PurchaseOrder | null> { return this.getPurchaseOrder(id); }
-    public async savePurchaseOrder(value: PurchaseOrder): Promise<void> { this.purchaseOrders.set(value.id, structuredClone(value)); }
-    public async getGoodsReceiptByPurchaseOrder(purchaseOrderId: string): Promise<GoodsReceipt | null> { const value = [...this.goodsReceipts.values()].find((item) => item.purchaseOrderId === purchaseOrderId); return value ? structuredClone(value) : null; }
-    public async listGoodsReceiptsByPurchaseOrder(purchaseOrderId: string): Promise<GoodsReceipt[]> { return [...this.goodsReceipts.values()].filter((item) => item.purchaseOrderId === purchaseOrderId).sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id)).map((item) => structuredClone(item)); }
-    public async saveGoodsReceipt(value: GoodsReceipt): Promise<void> { this.goodsReceipts.set(value.id, structuredClone(value)); }
-    public async listInventoryLots(warehouseId?: string): Promise<InventoryLot[]> { return [...this.inventoryLots.values()].filter((item) => !warehouseId || item.warehouseId === warehouseId).map((item) => structuredClone(item)); }
-    public async saveInventoryLot(value: InventoryLot): Promise<void> { this.inventoryLots.set(value.id, structuredClone(value)); }
-    public async appendInventoryMovement(value: InventoryMovement): Promise<void> { this.inventoryMovements.push(structuredClone(value)); }
-    public async listInventoryBalances(warehouseId?: string): Promise<InventoryBalance[]> { const balances = new Map<string, InventoryBalance>(); const keyFor = (bucket: InventoryMovement['fromBucket']): keyof Pick<InventoryBalance, 'qualified' | 'reserved' | 'sorted' | 'outbound' | 'handedOver' | 'rejected' | 'quarantine'> => { switch (bucket) {
-        case 'QUALIFIED': return 'qualified';
-        case 'RESERVED': return 'reserved';
-        case 'SORTED': return 'sorted';
-        case 'OUTBOUND': return 'outbound';
-        case 'HANDED_OVER': return 'handedOver';
-        case 'REJECTED': return 'rejected';
-        case 'QUARANTINE': return 'quarantine';
-        default: throw new Error('missing inventory bucket');
-    } }; for (const lot of this.inventoryLots.values()) {
-        if (warehouseId && lot.warehouseId !== warehouseId)
-            continue;
-        balances.set(lot.id, { inventoryLotId: lot.id, platformSkuId: lot.platformSkuId, warehouseId: lot.warehouseId, lotNo: lot.lotNo, expiresAt: lot.expiresAt, qualified: 0, reserved: 0, sorted: 0, outbound: 0, handedOver: 0, rejected: 0, quarantine: 0 });
-    } for (const movement of this.inventoryMovements) {
-        const balance = balances.get(movement.inventoryLotId);
-        if (!balance)
-            continue;
-        if (movement.fromBucket) {
-            const key = keyFor(movement.fromBucket);
-            balance[key] -= movement.quantity;
-        }
-        if (movement.toBucket) {
-            const key = keyFor(movement.toBucket);
-            balance[key] += movement.quantity;
-        }
-    } return [...balances.values()]; }
-    public async listSupplierPayables(supplierId?: string): Promise<SupplierPayable[]> { return [...this.supplierPayables.values()].filter((item) => !supplierId || item.supplierId === supplierId).map((item) => structuredClone(item)); }
-    public async getSupplierPayable(id: string): Promise<SupplierPayable | null> { const value = this.supplierPayables.get(id); return value ? structuredClone(value) : null; }
-    public async saveSupplierPayable(value: SupplierPayable): Promise<void> { this.supplierPayables.set(value.id, structuredClone(value)); }
-    public async getSortingTaskByCampaign(campaignId: string): Promise<SortingTask | null> { const value = [...this.sortingTasks.values()].find((item) => item.campaignId === campaignId); return value ? structuredClone(value) : null; }
-    public async listSortingTasks(): Promise<SortingTask[]> { return [...this.sortingTasks.values()].sort((left, right) => right.createdAt.localeCompare(left.createdAt)).map((item) => structuredClone(item)); }
-    public async saveSortingTask(value: SortingTask): Promise<void> { this.sortingTasks.set(value.id, structuredClone(value)); }
-    public async getOutboundOrderByCampaign(campaignId: string): Promise<OutboundOrder | null> { const value = [...this.outboundOrders.values()].find((item) => item.campaignId === campaignId); return value ? structuredClone(value) : null; }
-    public async getOutboundOrderForUpdate(id: string): Promise<OutboundOrder | null> { const value = this.outboundOrders.get(id); return value ? structuredClone(value) : null; }
-    public async listOutboundOrders(status?: OutboundOrder['status']): Promise<OutboundOrder[]> { return [...this.outboundOrders.values()].filter((item) => !status || item.status === status).map((item) => structuredClone(item)); }
-    public async saveOutboundOrder(value: OutboundOrder): Promise<void> { this.outboundOrders.set(value.id, structuredClone(value)); }
-    public async getPickupHandoverByOutbound(outboundOrderId: string): Promise<PickupHandover | null> { const value = [...this.pickupHandovers.values()].find((item) => item.outboundOrderId === outboundOrderId); return value ? structuredClone(value) : null; }
-    public async savePickupHandover(value: PickupHandover): Promise<void> { this.pickupHandovers.set(value.id, structuredClone(value)); }
-    public async getCommunityDeliveryConfirmationByBatch(batchId: string): Promise<CommunityDeliveryConfirmation | null> { const value = [...this.communityDeliveries.values()].find((item) => item.dispatchBatchId === batchId); return value ? structuredClone(value) : null; }
-    public async saveCommunityDeliveryConfirmation(value: CommunityDeliveryConfirmation): Promise<boolean> { if (await this.getCommunityDeliveryConfirmationByBatch(value.dispatchBatchId))
-        return false; this.communityDeliveries.set(value.id, structuredClone(value)); return true; }
-    public async getCommunityPickupReceipt(orderId: string, requestKey: string): Promise<CommunityPickupReceipt | null> { const value = [...this.communityPickupReceipts.values()].find((item) => item.orderId === orderId && item.requestKey === requestKey); return value ? structuredClone(value) : null; }
-    public async getCommunityPickupReceiptByRequestIdForUpdate(orderId: string, pickupRequestId: string): Promise<CommunityPickupReceipt | null> { const value = [...this.communityPickupReceipts.values()].find((item) => item.orderId === orderId && item.pickupRequestId === pickupRequestId); return value ? structuredClone(value) : null; }
-    public async saveCommunityPickupReceipt(value: CommunityPickupReceipt): Promise<boolean> { if (await this.getCommunityPickupReceipt(value.orderId, value.requestKey) || (value.pickupRequestId !== null && await this.getCommunityPickupReceiptByRequestIdForUpdate(value.orderId, value.pickupRequestId)))
-        return false; this.communityPickupReceipts.set(value.id, structuredClone(value)); return true; }
-    public async getCommunityQualityCaseByOrderRequest(orderId: string, clientRequestId: string): Promise<CommunityQualityCase | null> { const value = [...this.communityQualityCases.values()].find((item) => item.orderId === orderId && item.clientRequestId === clientRequestId); return value ? structuredClone(value) : null; }
-    public async getCommunityQualityCaseForUpdate(id: string): Promise<CommunityQualityCase | null> { const value = this.communityQualityCases.get(id); return value ? structuredClone(value) : null; }
-    public async getCommunityQualityCaseByOrderRequestForUpdate(orderId: string, clientRequestId: string): Promise<CommunityQualityCase | null> { return this.getCommunityQualityCaseByOrderRequest(orderId, clientRequestId); }
-    public async listCommunityQualityCases(limit: number): Promise<CommunityQualityCase[]> { return [...this.communityQualityCases.values()].sort((left, right) => right.registeredAt.localeCompare(left.registeredAt) || right.id.localeCompare(left.id)).slice(0, Math.max(1, Math.min(500, Math.trunc(limit)))).map((item) => structuredClone(item)); }
-    public async listCommunityQualityCasesByOrder(orderId: string): Promise<CommunityQualityCase[]> { return [...this.communityQualityCases.values()].filter((item) => item.orderId === orderId).sort((left, right) => left.registeredAt.localeCompare(right.registeredAt) || left.id.localeCompare(right.id)).map((item) => structuredClone(item)); }
-    public async listCommunityQualityCasesByOrderForUpdate(orderId: string): Promise<CommunityQualityCase[]> { return this.listCommunityQualityCasesByOrder(orderId); }
-    public async saveCommunityQualityCase(value: CommunityQualityCase): Promise<boolean> { const existing = await this.getCommunityQualityCaseByOrderRequest(value.orderId, value.clientRequestId); if (existing && existing.id !== value.id)
-        return false; this.communityQualityCases.set(value.id, structuredClone(value)); return true; }
-    public async getCommunityAllocationDraftByDeliveryForUpdate(communityDeliveryId: string): Promise<CommunityAllocationDraft | null> { const value = [...this.communityAllocationDrafts.values()].find((item) => item.communityDeliveryId === communityDeliveryId); return value ? structuredClone(value) : null; }
-    public async saveCommunityAllocationDraft(value: CommunityAllocationDraft): Promise<boolean> { const existing = await this.getCommunityAllocationDraftByDeliveryForUpdate(value.communityDeliveryId); if (existing && existing.id !== value.id)
-        return false; this.communityAllocationDrafts.set(value.id, structuredClone(value)); return true; }
-    public async getCommunityPickupWindowForUpdate(orderId: string): Promise<CommunityPickupWindow | null> { const value = this.communityPickupWindows.get(orderId); return value ? structuredClone(value) : null; }
-    public async saveCommunityPickupWindow(value: CommunityPickupWindow): Promise<void> { this.communityPickupWindows.set(value.orderId, structuredClone(value)); }
-    public async listCommunityPickupWindowsPastDeadline(now: string, limit: number): Promise<CommunityPickupWindow[]> { return [...this.communityPickupWindows.values()].filter((item) => ['ACTIVE', 'EXTENDED'].includes(item.status) && item.deadlineAt < now).slice(0, limit).map((item) => structuredClone(item)); }
-    public async listCommunityPickupWindowsDueBy(from: string, to: string, limit: number): Promise<CommunityPickupWindow[]> { return [...this.communityPickupWindows.values()].filter((item) => ['ACTIVE', 'EXTENDED'].includes(item.status) && item.deadlineAt >= from && item.deadlineAt <= to).sort((left, right) => left.deadlineAt.localeCompare(right.deadlineAt)).slice(0, limit).map((item) => structuredClone(item)); }
-    public async listCommunityPickupWindowsByStatus(statuses: CommunityPickupWindow['status'][], limit: number): Promise<CommunityPickupWindow[]> { return [...this.communityPickupWindows.values()].filter((item) => statuses.includes(item.status)).sort((left, right) => left.deadlineAt.localeCompare(right.deadlineAt)).slice(0, limit).map((item) => structuredClone(item)); }
-    public async getCommunityCancellationRequestByOrderForUpdate(orderId: string): Promise<CommunityCancellationRequest | null> { const value = [...this.communityCancellationRequests.values()].find((item) => item.orderId === orderId); return value ? structuredClone(value) : null; }
-    public async listCommunityCancellationRequests(limit: number): Promise<CommunityCancellationRequest[]> { return [...this.communityCancellationRequests.values()].sort((a, b) => b.requestedAt.localeCompare(a.requestedAt)).slice(0, limit).map((item) => structuredClone(item)); }
-    public async listPendingCommunityCancellationRequests(limit: number): Promise<CommunityCancellationRequest[]> { return [...this.communityCancellationRequests.values()].filter((item) => ['DIRECT_REFUNDING', 'REFUNDING'].includes(item.status)).sort((a, b) => a.requestedAt.localeCompare(b.requestedAt)).slice(0, limit).map((item) => structuredClone(item)); }
-    public async saveCommunityCancellationRequest(value: CommunityCancellationRequest): Promise<boolean> { const existing = await this.getCommunityCancellationRequestByOrderForUpdate(value.orderId); if (existing && existing.id !== value.id)
-        return false; this.communityCancellationRequests.set(value.id, structuredClone(value)); return true; }
-    public async getFulfillmentException(id: string): Promise<FulfillmentException | null> { const value = this.fulfillmentExceptions.get(id); return value ? structuredClone(value) : null; }
-    public async getFulfillmentExceptionForUpdate(id: string): Promise<FulfillmentException | null> { return this.getFulfillmentException(id); }
-    public async getFulfillmentExceptionByOrderRequest(orderId: string, clientRequestId: string): Promise<FulfillmentException | null> { const value = [...this.fulfillmentExceptions.values()].find((item) => item.orderId === orderId && item.clientRequestId === clientRequestId); return value ? structuredClone(value) : null; }
-    public async getFulfillmentExceptionByOrderRequestForUpdate(orderId: string, clientRequestId: string): Promise<FulfillmentException | null> { return this.getFulfillmentExceptionByOrderRequest(orderId, clientRequestId); }
-    public async listFulfillmentExceptions(status?: FulfillmentException['status']): Promise<FulfillmentException[]> { return [...this.fulfillmentExceptions.values()].filter((item) => !status || item.status === status).map((item) => structuredClone(item)); }
-    public async saveFulfillmentException(value: FulfillmentException): Promise<void> { this.fulfillmentExceptions.set(value.id, structuredClone(value)); }
-    public async listFulfillmentAllocations(exceptionId: string): Promise<FulfillmentAllocation[]> { return [...this.fulfillmentAllocations.values()].filter((item) => item.exceptionId === exceptionId).map((item) => structuredClone(item)); }
-    public async saveFulfillmentAllocations(values: FulfillmentAllocation[]): Promise<void> { for (const value of values)
-        this.fulfillmentAllocations.set(value.id, structuredClone(value)); }
-    public async updateFulfillmentAllocations(values: FulfillmentAllocation[]): Promise<boolean> { for (const value of values) {
-        if (!this.fulfillmentAllocations.has(value.id))
-            return false;
-    } for (const value of values)
-        this.fulfillmentAllocations.set(value.id, structuredClone(value)); return true; }
-    public async markFulfillmentAllocationsRefunded(exceptionId: string, refund: PlatformPartialRefund, at: string): Promise<boolean> { const exception = this.fulfillmentExceptions.get(exceptionId); const allocations = (await this.listFulfillmentAllocations(exceptionId)).filter((item) => item.orderId === refund.orderId && !item.refundedQuantity); const total = allocations.reduce((sum, item) => { const row = (this.salesOrderItems.get(item.orderId) ?? []).find((value) => value.id === item.salesOrderItemId); return sum + (row ? item.exceptionQuantity * row.unitPriceCents : NaN); }, 0); if (!exception || !allocations.length || total !== Number(refund.amountCents))
-        return false; for (const allocation of allocations) {
-        const row = (this.salesOrderItems.get(allocation.orderId) ?? []).find((item) => item.id === allocation.salesOrderItemId);
-        if (!row || row.refundedQuantity + allocation.exceptionQuantity > (exception.sourceStage === 'CUSTOMER_CLAIM' ? row.quantity : row.exceptionQuantity))
-            return false;
-        allocation.refundedQuantity = allocation.exceptionQuantity;
-        allocation.refundedAt = at;
-        row.refundedQuantity += allocation.exceptionQuantity;
-        row.refundedAmountCents += allocation.exceptionQuantity * row.unitPriceCents;
-        this.fulfillmentAllocations.set(allocation.id, structuredClone(allocation));
-    } return true; }
-    public async listMerchants(): Promise<Merchant[]> { return [...this.merchants.values()].map((item) => structuredClone(item)); }
-    public async saveMerchant(value: Merchant): Promise<void> { this.merchants.set(value.id, structuredClone(value)); }
-    public async deleteMerchant(id: string): Promise<boolean> { return this.merchants.delete(id); }
-    public async listProducts(): Promise<Product[]> { return [...this.products.values()]; }
-    public async saveProduct(value: Product): Promise<void> { this.products.set(value.id, value); this.skus.set(value.sku.id, value.sku); }
-    public async updateProductStatus(id: string, status: Product['status']): Promise<boolean> { const product = this.products.get(id); if (!product)
-        return false; product.status = status; return true; }
-    public async deleteProduct(id: string): Promise<boolean> { const product = this.products.get(id); if (!product)
-        return false; this.skus.delete(product.sku.id); return this.products.delete(id); }
-    public async listServiceAreas(): Promise<ServiceArea[]> { return [...this.serviceAreas.values()]; }
-    public async saveServiceArea(value: ServiceArea): Promise<void> { this.serviceAreas.set(value.id, value); }
-    public async updateServiceAreaOrderEnabled(id: string, orderEnabled: boolean): Promise<boolean> { const area = this.serviceAreas.get(id); if (!area)
-        return false; area.orderEnabled = orderEnabled; return true; }
-    public async listPickupPoints(serviceAreaId?: string): Promise<PickupPoint[]> { return [...this.pickupPoints.values()].filter((item) => !serviceAreaId || item.serviceAreaId === serviceAreaId); }
-    public async savePickupPoint(value: PickupPoint): Promise<void> { this.pickupPoints.set(value.id, value); }
-    public async getDeliveryPlan(id: string): Promise<DeliveryPlan | null> { const value = this.deliveryPlans.get(id); return value ? structuredClone(value) : null; }
-    public async getDeliveryPlanByCampaign(campaignId: string): Promise<DeliveryPlan | null> { const value = [...this.deliveryPlans.values()].find((item) => item.campaignId === campaignId); return value ? structuredClone(value) : null; }
-    public async listDeliveryPlans(): Promise<DeliveryPlan[]> { return [...this.deliveryPlans.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((item) => structuredClone(item)); }
-    public async saveDeliveryPlan(value: DeliveryPlan): Promise<void> { this.deliveryPlans.set(value.id, structuredClone(value)); }
-    public async getDispatchBatch(id: string): Promise<DispatchBatch | null> { const value = this.batches.get(id); return value ? structuredClone(value) : null; }
-    public async listDispatchBatches(): Promise<DispatchBatch[]> { return [...this.batches.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((value) => structuredClone(value)); }
-    public async saveDispatchBatch(value: DispatchBatch): Promise<void> { this.batches.set(value.id, structuredClone(value)); }
-    public async getPickupCredential(orderId: string): Promise<PickupCredential | null> { return this.pickupCredentials.get(orderId) ?? null; }
-    public async savePickupCredential(value: PickupCredential): Promise<void> { this.pickupCredentials.set(value.orderId, value); }
-    public async pickupRecordExists(orderId: string): Promise<boolean> { return this.pickupRecords.has(orderId); }
-    public async savePickupRecord(orderId: string, deliveryPlanId: string, verifierId: string): Promise<void> { void deliveryPlanId; void verifierId; this.pickupRecords.add(orderId); }
-    public async grantPickupVerifier(userId: string, pickupPointId: string): Promise<void> { this.pickupVerifierAssignments.push({ id: crypto.randomUUID(), userId, pickupPointId, action: 'GRANTED', createdAt: new Date().toISOString() }); }
-    public async revokePickupVerifier(userId: string, pickupPointId: string): Promise<void> { this.pickupVerifierAssignments.push({ id: crypto.randomUUID(), userId, pickupPointId, action: 'REVOKED', createdAt: new Date().toISOString() }); }
-    public async hasActivePickupVerifierAssignment(userId: string, pickupPointId: string): Promise<boolean> { const assignment = [...this.pickupVerifierAssignments].reverse().find((item) => item.userId === userId && item.pickupPointId === pickupPointId); return assignment?.action === 'GRANTED'; }
-    public async listPickupVerifierAssignments(userId?: string): Promise<PickupVerifierAssignment[]> { return this.pickupVerifierAssignments.filter((item) => !userId || item.userId === userId).map((item) => structuredClone(item)); }
-    public async hasActivePickupPointAssignment(userId: string, pickupPointId: string): Promise<boolean> { const staff = this.internalStaff.get(userId); if (staff)
-        return staff.status === 'ACTIVE' && staff.role === 'PICKUP_MANAGER' && this.staffPickupPointAssignments.has(`${userId}:${pickupPointId}`); return this.hasActivePickupVerifierAssignment(userId, pickupPointId); }
-    public async findUserByWechatOpenId(openId: string): Promise<User | null> { const value = this.usersByOpenId.get(openId); return value ? structuredClone(value) : null; }
-    public async saveUser(value: User): Promise<void> { const copy = structuredClone(value); this.usersById.set(value.id, copy); if (value.wechatOpenId)
-        this.usersByOpenId.set(value.wechatOpenId, copy); }
-    public async getUser(id: string): Promise<User | null> { const value = this.usersById.get(id); return value ? structuredClone(value) : null; }
-    public async savePrivacyConsent(userId: string, documentVersion: string): Promise<void> { const key = `${userId}:${documentVersion}`; if (!this.privacyConsents.has(key))
-        this.privacyConsents.set(key, { userId, documentVersion, consentedAt: new Date().toISOString() }); }
-    public async getPrivacyConsent(userId: string, documentVersion: string): Promise<PrivacyConsent | null> { const value = this.privacyConsents.get(`${userId}:${documentVersion}`); return value ? structuredClone(value) : null; }
-    public async findAdminCredential(username: string): Promise<AdminCredential | null> { const value = this.adminCredentials.get(username.toLowerCase()); return value ? { ...structuredClone(value), roles: [...(this.userRoles.get(value.userId) ?? new Set(value.roles))] } : null; }
-    public async findAdminCredentialByUserId(userId: string): Promise<AdminCredential | null> { const value = [...this.adminCredentials.values()].find((item) => item.userId === userId); return value ? { ...structuredClone(value), roles: [...(this.userRoles.get(userId) ?? new Set(value.roles))] } : null; }
-    public async saveAdminCredential(value: AdminCredential): Promise<void> { this.adminCredentials.set(value.username.toLowerCase(), structuredClone(value)); }
-    public async saveUserRole(userId: string, role: Role): Promise<void> { const roles = this.userRoles.get(userId) ?? new Set<Role>(); roles.add(role); this.userRoles.set(userId, roles); }
-    public async replaceUserRoles(userId: string, roles: Role[]): Promise<void> { this.userRoles.set(userId, new Set(roles)); }
-    public async getInternalStaff(userId: string): Promise<InternalStaff | null> { const value = this.internalStaff.get(userId); return value ? structuredClone(value) : null; }
-    public async listInternalStaff(query?: string): Promise<InternalStaff[]> { const normalized = query?.trim().toLowerCase(); return [...this.internalStaff.values()].filter((item) => !normalized || [item.staffNo, item.displayName, item.phone, item.role, item.status].some((value) => value.toLowerCase().includes(normalized))).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((item) => structuredClone(item)); }
-    public async saveInternalStaff(value: InternalStaff): Promise<void> { this.internalStaff.set(value.userId, structuredClone(value)); }
-    public async listStaffPickupPointAssignments(staffUserId?: string): Promise<StaffPickupPointAssignment[]> { return [...this.staffPickupPointAssignments.values()].filter((item) => !staffUserId || item.staffUserId === staffUserId).map((item) => structuredClone(item)); }
-    public async replaceStaffPickupPointAssignments(staffUserId: string, assignments: StaffPickupPointAssignment[]): Promise<void> { for (const key of [...this.staffPickupPointAssignments.keys()])
-        if (key.startsWith(`${staffUserId}:`))
-            this.staffPickupPointAssignments.delete(key); for (const assignment of assignments)
-        this.staffPickupPointAssignments.set(`${assignment.staffUserId}:${assignment.pickupPointId}`, structuredClone(assignment)); }
-    public async getAuthSession(tokenHash: string): Promise<AuthSession | null> { const value = this.sessions.get(tokenHash); if (!value)
-        return null; const user = this.usersById.get(value.userId); const staff = this.internalStaff.get(value.userId); if (!user || user.status !== 'ACTIVE' || (staff && staff.status !== 'ACTIVE'))
-        return null; return { ...structuredClone(value), roles: [...(this.userRoles.get(value.userId) ?? new Set(value.roles))] }; }
-    public async saveAuthSession(value: AuthSession): Promise<void> { this.sessions.set(value.tokenHash, structuredClone(value)); }
-    public async deleteAuthSession(tokenHash: string): Promise<void> { this.sessions.delete(tokenHash); }
-    public async deleteAuthSessionsByUser(userId: string): Promise<void> { for (const [token, session] of this.sessions)
-        if (session.userId === userId)
-            this.sessions.delete(token); }
-    public async getPaymentByOrder(orderId: string): Promise<Payment | null> { const value = this.payments.get(orderId); return value ? structuredClone(value) : null; }
-    public async getPaymentByOrderForUpdate(orderId: string): Promise<Payment | null> { return this.getPaymentByOrder(orderId); }
-    public async savePayment(value: Payment): Promise<void> { this.payments.set(value.orderId, structuredClone(value)); }
-    public async savePaymentIfStatus(value: Payment, expectedStatuses: Payment['status'][]): Promise<boolean> { const current = this.payments.get(value.orderId); if (current && !expectedStatuses.includes(current.status))
-        return false; this.payments.set(value.orderId, structuredClone(value)); return true; }
-    public async claimPaymentInitiation(value: Payment, leaseUntil: string, now: string, claimToken: string): Promise<boolean> {
-        const current = this.payments.get(value.orderId);
-        if (current && (current.status !== 'CREATED' || current.clientPayload !== null || (current.initiationLeaseUntil !== null && current.initiationLeaseUntil > now)))
-            return false;
-        this.payments.set(value.orderId, structuredClone({ ...current ?? value, initiationLeaseUntil: leaseUntil, initiationClaimToken: claimToken }));
-        return true;
+    return true;
+  }
+  public async getCommunityAllocationDraftByDeliveryForUpdate(id: string) {
+    return clone(
+      [...this.data.drafts.values()].find(
+        (v) => v.communityDeliveryId === id,
+      ) ?? null,
+    );
+  }
+  public async saveCommunityAllocationDraft(v: CommunityAllocationDraft) {
+    const existing = [...this.data.drafts.values()].find(
+      (x) => x.communityDeliveryId === v.communityDeliveryId,
+    );
+    if (existing && existing.id !== v.id) return false;
+    this.data.drafts.set(v.id, clone(v));
+    return true;
+  }
+  public async getCommunityPickupWindowForUpdate(id: string) {
+    return clone(this.data.windows.get(id) ?? null);
+  }
+  public async saveCommunityPickupWindow(v: CommunityPickupWindow) {
+    this.data.windows.set(v.orderId, clone(v));
+  }
+  public async listCommunityPickupWindowsPastDeadline(
+    now: string,
+    limit: number,
+  ) {
+    return clone(
+      [...this.data.windows.values()]
+        .filter(
+          (v) =>
+            ["ACTIVE", "EXTENDED"].includes(v.status) && v.deadlineAt < now,
+        )
+        .slice(0, limit),
+    );
+  }
+  public async listCommunityPickupWindowsDueBy(
+    from: string,
+    to: string,
+    limit: number,
+  ) {
+    return clone(
+      [...this.data.windows.values()]
+        .filter(
+          (v) =>
+            ["ACTIVE", "EXTENDED"].includes(v.status) &&
+            v.deadlineAt >= from &&
+            v.deadlineAt <= to,
+        )
+        .slice(0, limit),
+    );
+  }
+  public async listCommunityPickupWindowsByStatus(
+    statuses: CommunityPickupWindow["status"][],
+    limit: number,
+  ) {
+    return clone(
+      [...this.data.windows.values()]
+        .filter((v) => statuses.includes(v.status))
+        .slice(0, limit),
+    );
+  }
+  public async getCommunityCancellationRequestByOrderForUpdate(id: string) {
+    return clone(
+      [...this.data.cancellations.values()].find((v) => v.orderId === id) ??
+        null,
+    );
+  }
+  public async listCommunityCancellationRequests(
+    limit: number,
+  ): Promise<CommunityCancellationRequest[]> {
+    return [...this.data.cancellations.values()]
+      .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt))
+      .slice(0, limit)
+      .map((v) => clone(v));
+  }
+  public async listPendingCommunityCancellationRequests(limit: number) {
+    return (
+      await this.listCommunityCancellationRequests(Number.MAX_SAFE_INTEGER)
+    )
+      .filter((v) => ["DIRECT_REFUNDING", "REFUNDING"].includes(v.status))
+      .slice(0, limit);
+  }
+  public async saveCommunityCancellationRequest(
+    v: CommunityCancellationRequest,
+  ) {
+    const existing = [...this.data.cancellations.values()].find(
+      (x) => x.orderId === v.orderId,
+    );
+    if (existing && existing.id !== v.id) return false;
+    this.data.cancellations.set(v.id, clone(v));
+    return true;
+  }
+  public async getCommunityQualityCaseByOrderRequest(
+    id: string,
+    requestId: string,
+  ) {
+    return clone(
+      [...this.data.quality.values()].find(
+        (v) => v.orderId === id && v.clientRequestId === requestId,
+      ) ?? null,
+    );
+  }
+  public async getCommunityQualityCaseByOrderRequestForUpdate(
+    id: string,
+    requestId: string,
+  ) {
+    return this.getCommunityQualityCaseByOrderRequest(id, requestId);
+  }
+  public async getCommunityQualityCaseForUpdate(id: string) {
+    return clone(this.data.quality.get(id) ?? null);
+  }
+  public async listCommunityQualityCases(limit: number) {
+    return clone(
+      [...this.data.quality.values()]
+        .sort((a, b) => b.registeredAt.localeCompare(a.registeredAt))
+        .slice(0, limit),
+    );
+  }
+  public async listCommunityQualityCasesByOrder(id: string) {
+    return clone(
+      [...this.data.quality.values()].filter((v) => v.orderId === id),
+    );
+  }
+  public async listCommunityQualityCasesByOrderForUpdate(id: string) {
+    return this.listCommunityQualityCasesByOrder(id);
+  }
+  public async saveCommunityQualityCase(v: CommunityQualityCase) {
+    const existing = [...this.data.quality.values()].find(
+      (x) => x.orderId === v.orderId && x.clientRequestId === v.clientRequestId,
+    );
+    if (existing && existing.id !== v.id) return false;
+    this.data.quality.set(v.id, clone(v));
+    return true;
+  }
+  public async saveServiceAreaInterest(v: ServiceAreaInterest) {
+    this.data.interests.set(v.id, clone(v));
+  }
+  public async getServiceAreaInterest(id: string) {
+    return clone(this.data.interests.get(id) ?? null);
+  }
+  public async listServiceAreaInterests(limit: number) {
+    return newest([...this.data.interests.values()])
+      .slice(0, limit)
+      .map(clone);
+  }
+  public async listServiceAreaInterestsByUser(id: string) {
+    return clone(
+      [...this.data.interests.values()].filter((v) => v.userId === id),
+    );
+  }
+  public async createOrderNotificationIfAbsent(v: OrderNotification) {
+    if (
+      [...this.data.notifications.values()].some(
+        (x) => x.eventKey === v.eventKey,
+      )
+    )
+      return false;
+    this.data.notifications.set(v.id, clone(v));
+    return true;
+  }
+  public async saveOrderNotificationIfClaimed(
+    v: OrderNotification,
+    token: string,
+  ) {
+    const c = this.data.notifications.get(v.id);
+    if (!c || c.deliveryClaimToken !== token) return false;
+    this.data.notifications.set(v.id, clone(v));
+    return true;
+  }
+  public async getOrderNotification(id: string) {
+    return clone(this.data.notifications.get(id) ?? null);
+  }
+  public async listOrderNotificationsByUser(id: string) {
+    return clone(
+      [...this.data.notifications.values()]
+        .filter((v) => v.userId === id)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+    );
+  }
+  public async listManualOrderNotifications(limit: number) {
+    return clone(
+      [...this.data.notifications.values()]
+        .filter(
+          (v) =>
+            v.status === "MANUAL_REQUIRED" ||
+            v.status === "SUBMISSION_UNKNOWN" ||
+            (v.status === "PENDING_DELIVERY" && Boolean(v.lastDeliveryError)),
+        )
+        .sort(
+          (left, right) =>
+            (right.manualCompletedAt ?? right.createdAt).localeCompare(
+              left.manualCompletedAt ?? left.createdAt,
+            ),
+        )
+        .slice(0, limit),
+    );
+  }
+  public async claimPendingOrderNotifications(
+    limit: number,
+    leaseDurationMs: number,
+    token: string,
+  ) {
+    const now = await this.databaseNow();
+    const lease = new Date(
+      Date.parse(now) + Math.max(1, Math.trunc(leaseDurationMs)),
+    ).toISOString();
+    const values = [...this.data.notifications.values()]
+      .filter(
+        (v) =>
+          v.status === "PENDING_DELIVERY" &&
+          v.providerSubmissionStartedAt === null &&
+          (!v.nextAttemptAt || v.nextAttemptAt <= now) &&
+          (!v.deliveryLeaseUntil || v.deliveryLeaseUntil <= now),
+      )
+      .slice(0, Math.min(5, limit));
+    for (const v of values) {
+      v.deliveryLeaseUntil = lease;
+      v.deliveryClaimToken = token;
     }
-    public async savePaymentIfInitiationClaimed(value: Payment, claimToken: string): Promise<boolean> { const current = this.payments.get(value.orderId); if (!current || current.status !== 'CREATED' || current.initiationClaimToken !== claimToken)
-        return false; this.payments.set(value.orderId, structuredClone(value)); return true; }
-    public async claimPaymentCallback(provider: Payment['provider'], eventId: string): Promise<boolean> { const key = `${provider}:${eventId}`; if (this.paymentCallbacks.has(key))
-        return false; this.paymentCallbacks.add(key); this.paymentCallbackClaimScopes.at(-1)?.add(key); return true; }
-    public async listRefundsByOrder(orderId: string): Promise<Refund[]> { return [...this.refunds.values()].filter((item) => item.orderId === orderId).map((item) => structuredClone(item)); }
-    public async listRefunds(limit: number): Promise<Refund[]> { return [...this.refunds.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit).map((item) => structuredClone(item)); }
-    public async getRefundByProviderNo(providerRefundNo: string): Promise<Refund | null> { const value = [...this.refunds.values()].find((item) => item.providerRefundNo === providerRefundNo); return value ? structuredClone(value) : null; }
-    public async saveRefund(value: Refund): Promise<void> { this.refunds.set(value.id, structuredClone(value)); }
-    public async claimRefundSubmission(refundId: string, leaseUntil: string, now: string, claimToken: string): Promise<boolean> { const refund = this.refunds.get(refundId); if (!refund || (!['CREATED', 'FAILED'].includes(refund.status) && !(refund.status === 'PROCESSING' && refund.submissionLeaseUntil !== null && refund.submissionLeaseUntil <= now)))
-        return false; refund.status = 'PROCESSING'; refund.submissionLeaseUntil = leaseUntil; refund.submissionClaimToken = claimToken; this.refunds.set(refundId, structuredClone(refund)); return true; }
-    public async saveRefundIfClaimed(value: Refund, claimToken: string): Promise<boolean> { const current = this.refunds.get(value.id); if (!current || current.status !== 'PROCESSING' || current.submissionClaimToken !== claimToken)
-        return false; this.refunds.set(value.id, structuredClone(value)); return true; }
-    public async saveRefundIfUnclaimed(value: Refund, now: string): Promise<boolean> { const current = this.refunds.get(value.id); if (!current || current.status !== 'PROCESSING' || current.submissionClaimToken !== null || (current.submissionLeaseUntil !== null && current.submissionLeaseUntil > now))
-        return false; this.refunds.set(value.id, structuredClone(value)); return true; }
-    public async saveRefundIfStatus(value: Refund, expectedStatuses: Refund['status'][]): Promise<boolean> { const current = this.refunds.get(value.id); if (!current || !expectedStatuses.includes(current.status))
-        return false; this.refunds.set(value.id, structuredClone(value)); return true; }
-    public async listPendingRefunds(limit: number): Promise<Refund[]> { return [...this.refunds.values()].filter((item) => item.status === 'CREATED' || item.status === 'PROCESSING' || item.status === 'FAILED').slice(0, limit).map((item) => structuredClone(item)); }
-    public async listRefundingOrders(limit: number): Promise<Order[]> { return [...this.orders.values()].filter((item) => item.status === 'REFUNDING').sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(0, Math.max(1, Math.min(1000, Math.trunc(limit)))).map((item) => structuredClone(item)); }
-    public async appendLedgerTransaction(value: LedgerTransaction): Promise<boolean> { const key = `${value.referenceType}:${value.referenceId}:${value.eventType}`; if (this.ledgerTransactions.has(key))
-        return false; this.ledgerTransactions.set(key, structuredClone(value)); return true; }
-    public async listLedgerTransactions(referenceId?: string): Promise<LedgerTransaction[]> { return [...this.ledgerTransactions.values()].filter((item) => !referenceId || item.referenceId === referenceId).map((item) => structuredClone(item)); }
-    public async listSettlements(orderId?: string): Promise<Settlement[]> { return [...this.settlements.values()].filter((item) => !orderId || item.orderId === orderId).map((item) => structuredClone(item)); }
-    public async listPendingSettlements(limit: number): Promise<Settlement[]> { return [...this.settlements.values()].filter((item) => item.status !== 'SUCCEEDED').slice(0, limit).map((item) => structuredClone(item)); }
-    public async saveSettlement(value: Settlement): Promise<void> { this.settlements.set(value.id, structuredClone(value)); }
-    public async claimSettlementSubmission(id: string, leaseUntil: string, now: string, claimToken: string): Promise<boolean> { const value = this.settlements.get(id); if (!value || !['CREATED', 'FAILED', 'PROCESSING'].includes(value.status) || (value.submissionLeaseUntil && value.submissionLeaseUntil > now))
-        return false; value.submissionLeaseUntil = leaseUntil; value.submissionClaimToken = claimToken; this.settlements.set(id, value); return true; }
-    public async saveSettlementIfClaimed(value: Settlement, claimToken: string): Promise<boolean> { const current = this.settlements.get(value.id); if (!current || current.submissionClaimToken !== claimToken)
-        return false; this.settlements.set(value.id, structuredClone(value)); return true; }
-    public async saveSettlementIfUnclaimed(value: Settlement, now: string): Promise<boolean> { const current = this.settlements.get(value.id); if (!current || current.submissionLeaseUntil && current.submissionLeaseUntil > now)
-        return false; this.settlements.set(value.id, structuredClone(value)); return true; }
-    public async saveAuditLog(value: AuditLog): Promise<void> { this.auditLogs.push(structuredClone(value)); }
-    public async findLatestAudit(resourceType: string, resourceId: string, action: string): Promise<AuditLog | null> { const value = [...this.auditLogs].reverse().find((item) => item.resourceType === resourceType && item.resourceId === resourceId && item.action === action); return value ? structuredClone(value) : null; }
-    public async listAuditLogs(limit: number): Promise<AuditLog[]> { return [...this.auditLogs].reverse().slice(0, limit).map((item) => structuredClone(item)); }
-    public async saveServiceAreaInterest(value: ServiceAreaInterest): Promise<void> { this.serviceAreaInterests.set(value.id, structuredClone(value)); }
-    public async getServiceAreaInterest(id: string): Promise<ServiceAreaInterest | null> { const value = this.serviceAreaInterests.get(id); return value ? structuredClone(value) : null; }
-    public async listServiceAreaInterests(limit: number): Promise<ServiceAreaInterest[]> { return [...this.serviceAreaInterests.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit).map((item) => structuredClone(item)); }
-    public async listServiceAreaInterestsByUser(userId: string): Promise<ServiceAreaInterest[]> { return [...this.serviceAreaInterests.values()].filter((item) => item.userId === userId).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((item) => structuredClone(item)); }
-    public async saveAfterSale(value: AfterSale): Promise<void> { this.afterSales.set(value.id, structuredClone(value)); }
-    public async getAfterSale(id: string): Promise<AfterSale | null> { const value = this.afterSales.get(id); return value ? structuredClone(value) : null; }
-    public async listAfterSales(limit: number): Promise<AfterSale[]> { return [...this.afterSales.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit).map((item) => structuredClone(item)); }
-    public async listAfterSalesByUser(userId: string): Promise<AfterSale[]> { return [...this.afterSales.values()].filter((item) => item.userId === userId).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((item) => structuredClone(item)); }
-    public async hasOpenAfterSaleForOrder(orderId: string): Promise<boolean> { return [...this.afterSales.values()].some((item) => item.orderId === orderId && ['SUBMITTED', 'PROCESSING'].includes(item.status)); }
-    public async createOrderNotificationIfAbsent(value: OrderNotification): Promise<boolean> { if ([...this.orderNotifications.values()].some((item) => item.orderId === value.orderId && item.eventKey === value.eventKey))
-        return false; this.orderNotifications.set(value.id, structuredClone(value)); return true; }
-    public async saveOrderNotification(value: OrderNotification): Promise<void> { const existing = this.orderNotifications.get(value.id); if (existing && existing.deliveryClaimToken !== null && existing.deliveryClaimToken !== value.deliveryClaimToken)
-        return; this.orderNotifications.set(value.id, structuredClone(value)); }
-    public async saveOrderNotificationIfClaimed(value: OrderNotification, claimToken: string): Promise<boolean> { const existing = this.orderNotifications.get(value.id); if (!existing || existing.deliveryClaimToken !== claimToken)
-        return false; this.orderNotifications.set(value.id, structuredClone({ ...existing, status: value.status, deliveryAttempts: value.deliveryAttempts, nextAttemptAt: value.nextAttemptAt, deliveryLeaseUntil: value.deliveryLeaseUntil, deliveryClaimToken: value.deliveryClaimToken, lastDeliveryError: value.lastDeliveryError, deliveredAt: value.deliveredAt })); return true; }
-    public async getOrderNotification(id: string): Promise<OrderNotification | null> { const value = this.orderNotifications.get(id); return value ? structuredClone(value) : null; }
-    public async listOrderNotificationsByUser(userId: string): Promise<OrderNotification[]> { return [...this.orderNotifications.values()].filter((item) => item.userId === userId).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((item) => structuredClone(item)); }
-    public async listManualOrderNotifications(limit: number): Promise<OrderNotification[]> { return [...this.orderNotifications.values()].filter((item) => item.status === 'MANUAL_REQUIRED' || item.status === 'PENDING_DELIVERY').sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit).map((item) => structuredClone(item)); }
-    public async claimPendingOrderNotifications(limit: number, leaseUntil: string, now: string, claimToken: string): Promise<OrderNotification[]> { const claimed = [...this.orderNotifications.values()].filter((item) => item.status === 'PENDING_DELIVERY' && (!item.nextAttemptAt || item.nextAttemptAt <= now) && (!item.deliveryLeaseUntil || item.deliveryLeaseUntil <= now)).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(0, Math.max(1, Math.min(5, Math.trunc(limit)))); for (const item of claimed) {
-        item.deliveryLeaseUntil = leaseUntil;
-        item.deliveryClaimToken = claimToken;
-        this.orderNotifications.set(item.id, structuredClone(item));
-    } return claimed.map((item) => structuredClone(item)); }
-    public async markOrderNotificationRead(id: string, readAt: string): Promise<void> { const value = this.orderNotifications.get(id); if (!value || value.readAt)
-        return; value.readAt = readAt; this.orderNotifications.set(id, value); }
-    public async requeuePendingOrderNotification(id: string, now: string): Promise<OrderNotification | null> { const value = this.orderNotifications.get(id); if (!value)
-        return null; if (value.status === 'PENDING_DELIVERY' && (!value.deliveryLeaseUntil || value.deliveryLeaseUntil <= now)) {
-        value.nextAttemptAt = now;
-        value.deliveryLeaseUntil = null;
-        value.deliveryClaimToken = null;
-        this.orderNotifications.set(id, value);
-    } return structuredClone(value); }
-    public async markOrderNotificationManualCompleted(id: string): Promise<void> { const value = this.orderNotifications.get(id); if (!value)
-        return; value.status = 'MANUAL_COMPLETED'; value.manualCompletedAt = new Date().toISOString(); value.deliveryLeaseUntil = null; value.deliveryClaimToken = null; this.orderNotifications.set(id, value); }
-    public async saveNotificationPreference(value: NotificationPreference): Promise<void> { this.notificationPreferences.set(value.userId, structuredClone(value)); }
-    public async getNotificationPreference(userId: string): Promise<NotificationPreference | null> { const value = this.notificationPreferences.get(userId); return value ? structuredClone(value) : null; }
-}
-export function asMoney(value: number | string): MoneyCents {
-    return moneyCents(Number(value));
+    return clone(values);
+  }
+  public async beginOrderNotificationSubmission(input: {
+    id: string;
+    claimToken: string;
+    attemptId: string;
+  }) {
+    const now = await this.databaseNow();
+    const value = this.data.notifications.get(input.id);
+    if (
+      !value ||
+      value.status !== "PENDING_DELIVERY" ||
+      value.deliveryClaimToken !== input.claimToken ||
+      !value.deliveryLeaseUntil ||
+      value.deliveryLeaseUntil <= now ||
+      value.providerSubmissionStartedAt !== null
+    )
+      return null;
+    value.status = "SUBMISSION_UNKNOWN";
+    value.providerSubmissionAttemptId = input.attemptId;
+    value.providerSubmissionStartedAt = now;
+    value.providerResultRecordedAt = null;
+    value.providerReceiptId = null;
+    value.submissionUnknownReason = null;
+    value.deliveryAttempts += 1;
+    value.nextAttemptAt = null;
+    value.deliveryLeaseUntil = null;
+    value.deliveryClaimToken = null;
+    value.lastDeliveryError = null;
+    return clone(value);
+  }
+  public async markOrderNotificationSentIfSubmission(
+    id: string,
+    attemptId: string,
+    receiptId: string | null,
+  ) {
+    const deliveredAt = await this.databaseNow();
+    const value = this.data.notifications.get(id);
+    if (!value || value.providerSubmissionAttemptId !== attemptId) return null;
+    if (value.status === "WECHAT_SENT") return clone(value);
+    if (value.status !== "SUBMISSION_UNKNOWN") return null;
+    value.status = "WECHAT_SENT";
+    value.deliveredAt = deliveredAt;
+    value.providerReceiptId = receiptId;
+    value.providerResultRecordedAt = deliveredAt;
+    value.submissionUnknownReason = null;
+    return clone(value);
+  }
+  public async recordSubmissionUnknownIfSubmission(
+    id: string,
+    attemptId: string,
+    reason: string,
+  ) {
+    const recordedAt = await this.databaseNow();
+    const value = this.data.notifications.get(id);
+    if (
+      !value ||
+      value.status !== "SUBMISSION_UNKNOWN" ||
+      value.providerSubmissionAttemptId !== attemptId
+    )
+      return null;
+    value.submissionUnknownReason = reason.slice(0, 500);
+    value.lastDeliveryError = value.submissionUnknownReason;
+    value.providerResultRecordedAt = recordedAt;
+    return clone(value);
+  }
+  public async markOrderNotificationRead(id: string, readAt: string) {
+    const v = this.data.notifications.get(id);
+    if (v) v.readAt = readAt;
+  }
+  public async requeuePendingOrderNotification(id: string, now: string) {
+    const v = this.data.notifications.get(id);
+    if (!v) return null;
+    if (
+      v.status === "MANUAL_REQUIRED" &&
+      v.providerSubmissionStartedAt === null
+    ) {
+      v.status = "PENDING_DELIVERY";
+      v.nextAttemptAt = now;
+      v.deliveryLeaseUntil = null;
+      v.deliveryClaimToken = null;
+    }
+    return clone(v);
+  }
+  public async markOrderNotificationManualCompleted(
+    id: string,
+    actorId: string,
+    note: string,
+    completedAt: string,
+  ) {
+    const v = this.data.notifications.get(id);
+    if (!v) return null;
+    // The first completed fact is the durable record. Repeated clicks are
+    // idempotent rather than overwriting who completed which compliant task.
+    if (v.status === "MANUAL_COMPLETED") return clone(v);
+    if (
+      !["MANUAL_REQUIRED", "PENDING_DELIVERY", "SUBMISSION_UNKNOWN"].includes(
+        v.status,
+      )
+    )
+      return null;
+    v.status = "MANUAL_COMPLETED";
+    v.manualCompletedAt = completedAt;
+    v.manualCompletedBy = actorId;
+    v.manualCompletionNote = note;
+    v.deliveryLeaseUntil = null;
+    v.deliveryClaimToken = null;
+    v.nextAttemptAt = null;
+    return clone(v);
+  }
+  public async saveNotificationPreference(v: NotificationPreference) {
+    this.data.preferences.set(v.userId, clone(v));
+  }
+  public async getNotificationPreference(id: string) {
+    return clone(this.data.preferences.get(id) ?? null);
+  }
 }

@@ -1,0 +1,12 @@
+{
+  "active_sessions": [],
+  "active_task_ids": [],
+  "created_at": "2026-08-31T03:24:35.304776+00:00",
+  "current_state": "BACKLOG",
+  "input_fingerprint": "4ea54de0f18772e780cedae9896d7f8d073262150255bfa24d1ae740840f1aa0",
+  "last_event_sequence": 1,
+  "next_safe_action": "Run the current-stage role plan, then follow only its required_now wave.",
+  "role_plan_fingerprint": null,
+  "run_id": "RUN-20260831T032435Z-be4a70",
+  "schema_version": 1
+}

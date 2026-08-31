@@ -2,10 +2,12 @@
   <view class="pickup-card__stamp">提</view>
   <text class="pickup-card__title">到店后向工作人员出示</text>
   <text wx:if="{{loading}}" class="pickup-card__hint">正在生成安全取货码…</text>
-  <text wx:elif="{{error}}" class="pickup-card__error">{{error}}</text>
+  <view wx:elif="{{error}}" class="pickup-card__error"><text>{{error}}</text><button wx:if="{{error === '登录后可查看取货码'}}" class="primary-button" bindtap="openLogin">微信快捷登录</button></view>
   <block wx:else>
     <text class="pickup-card__code">{{code}}</text>
     <text class="pickup-card__hint">有效期至 {{expiresText}}</text>
+    <text class="pickup-card__hint">{{pickupDeadlineText}}</text>
+    <text wx:if="{{latestQualityDeadlineText}}" class="pickup-card__hint">上次领取凭证 · {{latestQualityDeadlineText}}</text>
     <text class="pickup-card__warning">请勿提前把取货码发送给他人</text>
   </block>
 </view>

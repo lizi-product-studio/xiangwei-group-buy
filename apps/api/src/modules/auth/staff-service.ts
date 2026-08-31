@@ -3,6 +3,7 @@ import { BusinessError } from '@hometown/domain';
 import { createAdminCredential, verifyAdminCredentialPassword } from './admin-auth.js';
 import type { CommerceStore } from '../core/store.js';
 import type { InternalStaff, InternalStaffRole, InternalStaffStatus, StaffPickupPointAssignment } from '../core/types.js';
+import type { Actor } from './auth.js';
 
 export interface StaffCreateInput {
   displayName:string;
@@ -27,6 +28,8 @@ export interface CreatedStaffRecord { staff:StaffRecord; initialCredential:strin
 
 const oneTimeCredential=():string=>`H${randomBytes(18).toString('base64url')}9`;
 const uniqueIds=(ids:string[]):string[]=>[...new Set(ids)];
+const normalizedIds=(ids:string[]):string[]=>uniqueIds(ids).sort();
+const sameIds=(left:string[],right:string[]):boolean=>JSON.stringify(normalizedIds(left))===JSON.stringify(normalizedIds(right));
 const staffNo=():string=>`STF-${new Date().toISOString().replace(/[-:.TZ]/g,'').slice(0,14)}-${randomBytes(3).toString('hex').toUpperCase()}`;
 
 export class StaffService {
@@ -48,6 +51,30 @@ export class StaffService {
     return ids;
   }
 
+  /** Re-check the initiating administrator inside the write transaction. */
+  private async assertCurrentSuperAdmin(store:CommerceStore,actor:Actor):Promise<void>{
+    // Header actors exist only when AUTH_PROVIDER=demo, which is the isolated
+    // local/test transport. Production bearer actors always carry a revision.
+    if(actor.authorizationVersion===undefined&&actor.roles.includes('SUPER_ADMIN'))return;
+    const [user,credential,staff]=await Promise.all([
+      store.getUser(actor.userId),
+      store.findAdminCredentialByUserId(actor.userId),
+      store.getInternalStaff(actor.userId),
+    ]);
+    const actualVersion=credential?.authorizationVersion??0;
+    const isActiveAdministrator=Boolean(
+      user?.status==='ACTIVE'&&credential?.roles.includes('SUPER_ADMIN')&&!credential.mustChangePassword&&
+      staff?.status==='ACTIVE'&&staff.role==='SUPER_ADMIN'&&staff.authorizationVersion===actualVersion,
+    );
+    if((actor.authorizationVersion!==undefined&&actor.authorizationVersion!==actualVersion)||!isActiveAdministrator)
+      throw new BusinessError('FORBIDDEN','当前管理员权限已变更，请重新登录后再操作',403);
+  }
+
+  private requireSensitiveReason(authorizationChanged:boolean,input:StaffUpdateInput):void{
+    if(authorizationChanged&&!input.reason?.trim())
+      throw new BusinessError('VALIDATION_ERROR','变更角色、授权点位或账号状态必须填写原因',400);
+  }
+
   private async record(store:CommerceStore,staff:InternalStaff):Promise<StaffRecord>{
     const pickupPointIds=(await store.listStaffPickupPointAssignments(staff.userId)).map((item)=>item.pickupPointId);
     return {...staff,pickupPointIds};
@@ -58,8 +85,19 @@ export class StaffService {
     await store.replaceStaffPickupPointAssignments(staffUserId,assignments);
   }
 
-  public async create(input:StaffCreateInput,actorId:string,requestId:string):Promise<CreatedStaffRecord>{
+  private async syncAssignedPointContacts(store:CommerceStore,role:InternalStaffRole,pickupPointIds:string[],displayName:string,phone:string):Promise<void>{
+    if(role!=='PICKUP_MANAGER'||!pickupPointIds.length)return;
+    const points=await store.listPickupPoints();
+    for(const id of pickupPointIds){
+      const point=points.find((item)=>item.id===id);
+      if(!point)continue;
+      await store.savePickupPoint({...point,contactName:displayName,contactPhone:phone});
+    }
+  }
+
+  public async create(input:StaffCreateInput,actor:Actor,requestId:string):Promise<CreatedStaffRecord>{
     return this.store.transaction(async(store)=>{
+      await this.assertCurrentSuperAdmin(store,actor);
       if(await store.findAdminCredential(input.username))throw new BusinessError('RESOURCE_IN_USE','账号名已被使用',409);
       if((await store.listInternalStaff()).some((item)=>item.phone===input.phone))throw new BusinessError('RESOURCE_IN_USE','手机号已被内部员工使用',409);
       const pointIds=await this.validatePointScope(store,input.role,input.pickupPointIds);
@@ -68,15 +106,16 @@ export class StaffService {
       const credential=oneTimeCredential();
       const staff:InternalStaff={
         userId,staffNo:staffNo(),displayName:input.displayName,phone:input.phone,role:input.role,status:input.status,
-        createdBy:actorId,activatedAt:null,suspendedAt:input.status==='SUSPENDED'?now:null,suspensionReason:input.status==='SUSPENDED'?'创建时设为已停用':null,createdAt:now,updatedAt:now,
+        createdBy:actor.userId,activatedAt:null,suspendedAt:input.status==='SUSPENDED'?now:null,suspensionReason:input.status==='SUSPENDED'?'创建时设为已停用':null,authorizationVersion:1,createdAt:now,updatedAt:now,
       };
       await store.saveUser({id:userId,wechatOpenId:null,status:'ACTIVE',createdAt:now});
       await store.saveInternalStaff(staff);
       await store.replaceUserRoles(userId,[input.role]);
-      await store.saveAdminCredential(await createAdminCredential(input.username,userId,credential,[input.role],true));
-      await this.replacePointScope(store,userId,pointIds,actorId,now);
+      await store.saveAdminCredential(await createAdminCredential(input.username,userId,credential,[input.role],true,1));
+      await this.replacePointScope(store,userId,pointIds,actor.userId,now);
+      await this.syncAssignedPointContacts(store,input.role,pointIds,staff.displayName,staff.phone);
       const record=await this.record(store,staff);
-      await store.saveAuditLog({id:randomUUID(),actorId,action:'STAFF_CREATED',resourceType:'INTERNAL_STAFF',resourceId:userId,requestId,beforeData:null,afterData:record,createdAt:now});
+      await store.saveAuditLog({id:randomUUID(),actorId:actor.userId,action:'STAFF_CREATED',resourceType:'INTERNAL_STAFF',resourceId:userId,requestId,beforeData:null,afterData:record,createdAt:now});
       return {staff:record,initialCredential:credential};
     });
   }
@@ -93,8 +132,9 @@ export class StaffService {
     return this.record(this.store,staff);
   }
 
-  public async update(userId:string,input:StaffUpdateInput,actorId:string,requestId:string):Promise<StaffRecord>{
+  public async update(userId:string,input:StaffUpdateInput,actor:Actor,requestId:string):Promise<StaffRecord>{
     return this.store.transaction(async(store)=>{
+      await this.assertCurrentSuperAdmin(store,actor);
       const before=await store.getInternalStaff(userId);
       if(!before)throw new BusinessError('RESOURCE_NOT_FOUND','员工不存在',404);
       const currentPointIds=(await store.listStaffPickupPointAssignments(userId)).map((item)=>item.pickupPointId);
@@ -106,36 +146,45 @@ export class StaffService {
       const credential=await store.findAdminCredentialByUserId(userId);
       if(!credential)throw new BusinessError('RESOURCE_NOT_FOUND','员工登录凭据不存在',404);
       if(requestedStatus==='ACTIVE'&&credential.mustChangePassword)throw new BusinessError('INVALID_STATE_TRANSITION','员工必须先使用一次性凭据完成激活',409);
-      if(requestedStatus==='SUSPENDED'&&!input.reason?.trim())throw new BusinessError('VALIDATION_ERROR','停用员工必须填写原因',400);
       if(requestedStatus==='PENDING_ACTIVATION'&&!credential.mustChangePassword)throw new BusinessError('INVALID_STATE_TRANSITION','已激活员工请使用停用或恢复，不可回退为待激活',409);
+      const roleChanged=nextRole!==before.role;
+      const statusChanged=requestedStatus!==before.status;
+      const scopeChanged=!sameIds(pointIds,currentPointIds);
+      const authorizationChanged=roleChanged||statusChanged||scopeChanged;
+      this.requireSensitiveReason(authorizationChanged,input);
       const now=new Date().toISOString();
-      const after:InternalStaff={...before,displayName:input.displayName??before.displayName,phone:input.phone??before.phone,role:nextRole,status:requestedStatus,activatedAt:requestedStatus==='ACTIVE'?(before.activatedAt??now):before.activatedAt,suspendedAt:requestedStatus==='SUSPENDED'?now:null,suspensionReason:requestedStatus==='SUSPENDED'?input.reason!.trim():null,updatedAt:now};
+      const nextAuthorizationVersion=authorizationChanged?Math.max(before.authorizationVersion,credential.authorizationVersion)+1:before.authorizationVersion;
+      const after:InternalStaff={...before,displayName:input.displayName??before.displayName,phone:input.phone??before.phone,role:nextRole,status:requestedStatus,activatedAt:requestedStatus==='ACTIVE'?(before.activatedAt??now):before.activatedAt,suspendedAt:requestedStatus==='SUSPENDED'?now:null,suspensionReason:requestedStatus==='SUSPENDED'?input.reason!.trim():null,authorizationVersion:nextAuthorizationVersion,updatedAt:now};
       if(after.phone!==before.phone&&(await store.listInternalStaff()).some((item)=>item.userId!==userId&&item.phone===after.phone))throw new BusinessError('RESOURCE_IN_USE','手机号已被内部员工使用',409);
       await store.saveInternalStaff(after);
-      await store.replaceUserRoles(userId,[nextRole]);
-      await this.replacePointScope(store,userId,pointIds,actorId,now);
-      const changed=JSON.stringify({...before,pickupPointIds:currentPointIds})!==JSON.stringify({...after,pickupPointIds:pointIds});
-      if(changed)await store.deleteAuthSessionsByUser(userId);
+      await store.replaceUserRoles(userId,[nextRole],authorizationChanged?nextAuthorizationVersion:undefined);
+      if(scopeChanged)await this.replacePointScope(store,userId,pointIds,actor.userId,now);
+      if(nextRole==='PICKUP_MANAGER')await this.syncAssignedPointContacts(store,nextRole,pointIds,after.displayName,after.phone);
+      if(authorizationChanged)await store.deleteAuthSessionsByUser(userId);
       const record=await this.record(store,after);
-      await store.saveAuditLog({id:randomUUID(),actorId,action:requestedStatus==='SUSPENDED'&&before.status!=='SUSPENDED'?'STAFF_SUSPENDED':'STAFF_UPDATED',resourceType:'INTERNAL_STAFF',resourceId:userId,requestId,beforeData:{...before,pickupPointIds:currentPointIds},afterData:{...record,reason:input.reason??null},createdAt:now});
+      const action=requestedStatus==='SUSPENDED'&&statusChanged?'STAFF_SUSPENDED':requestedStatus==='ACTIVE'&&before.status==='SUSPENDED'?'STAFF_REACTIVATED':roleChanged?'STAFF_ROLE_CHANGED':scopeChanged?'STAFF_PICKUP_SCOPE_CHANGED':'STAFF_UPDATED';
+      await store.saveAuditLog({id:randomUUID(),actorId:actor.userId,action,resourceType:'INTERNAL_STAFF',resourceId:userId,requestId,beforeData:{...before,pickupPointIds:currentPointIds},afterData:{...record,reason:input.reason??null},createdAt:now});
       return record;
     });
   }
 
-  public async resetCredential(userId:string,reason:string,actorId:string,requestId:string):Promise<{staff:StaffRecord;initialCredential:string}>{
+  public async resetCredential(userId:string,reason:string,actor:Actor,requestId:string):Promise<{staff:StaffRecord;initialCredential:string}>{
     return this.store.transaction(async(store)=>{
+      await this.assertCurrentSuperAdmin(store,actor);
+      if(!reason.trim())throw new BusinessError('VALIDATION_ERROR','重置凭据必须填写原因',400);
       const before=await store.getInternalStaff(userId);
       if(!before)throw new BusinessError('RESOURCE_NOT_FOUND','员工不存在',404);
       const credential=await store.findAdminCredentialByUserId(userId);
       if(!credential)throw new BusinessError('RESOURCE_NOT_FOUND','员工登录凭据不存在',404);
       const now=new Date().toISOString();
       const initialCredential=oneTimeCredential();
-      await store.saveAdminCredential(await createAdminCredential(credential.username,userId,initialCredential,credential.roles,true));
-      const after:InternalStaff={...before,status:before.status==='SUSPENDED'?'SUSPENDED':'PENDING_ACTIVATION',updatedAt:now};
+      const nextVersion=Math.max(before.authorizationVersion,credential.authorizationVersion)+1;
+      const after:InternalStaff={...before,status:before.status==='SUSPENDED'?'SUSPENDED':'PENDING_ACTIVATION',authorizationVersion:nextVersion,updatedAt:now};
       await store.saveInternalStaff(after);
+      await store.saveAdminCredential(await createAdminCredential(credential.username,userId,initialCredential,[after.role],true,nextVersion));
       await store.deleteAuthSessionsByUser(userId);
       const record=await this.record(store,after);
-      await store.saveAuditLog({id:randomUUID(),actorId,action:'STAFF_CREDENTIAL_RESET',resourceType:'INTERNAL_STAFF',resourceId:userId,requestId,beforeData:before,afterData:{...record,reason},createdAt:now});
+      await store.saveAuditLog({id:randomUUID(),actorId:actor.userId,action:'STAFF_CREDENTIAL_RESET',resourceType:'INTERNAL_STAFF',resourceId:userId,requestId,beforeData:before,afterData:{...record,reason},createdAt:now});
       return {staff:record,initialCredential};
     });
   }
@@ -148,9 +197,10 @@ export class StaffService {
       if(!before||before.status==='SUSPENDED')throw new BusinessError('FORBIDDEN','员工账号当前不可激活',403);
       if(!credential.mustChangePassword||before.status!=='PENDING_ACTIVATION')throw new BusinessError('INVALID_STATE_TRANSITION','该账号无需重复激活',409);
       const now=new Date().toISOString();
-      const after:InternalStaff={...before,status:'ACTIVE',activatedAt:now,suspendedAt:null,suspensionReason:null,updatedAt:now};
-      await store.saveAdminCredential(await createAdminCredential(credential.username,credential.userId,newPassword,credential.roles,false));
+      const nextVersion=Math.max(before.authorizationVersion,credential.authorizationVersion)+1;
+      const after:InternalStaff={...before,status:'ACTIVE',activatedAt:now,suspendedAt:null,suspensionReason:null,authorizationVersion:nextVersion,updatedAt:now};
       await store.saveInternalStaff(after);
+      await store.saveAdminCredential(await createAdminCredential(credential.username,credential.userId,newPassword,[after.role],false,nextVersion));
       await store.deleteAuthSessionsByUser(after.userId);
       await store.saveAuditLog({id:randomUUID(),actorId:after.userId,action:'STAFF_ACTIVATED',resourceType:'INTERNAL_STAFF',resourceId:after.userId,requestId,beforeData:before,afterData:after,createdAt:now});
       return after;

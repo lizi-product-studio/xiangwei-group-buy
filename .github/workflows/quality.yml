@@ -42,13 +42,13 @@ jobs:
       - run: pnpm check
       - run: pnpm test:coverage
       - run: pnpm exec playwright install --with-deps chromium
-      - name: Run Mode B browser gate
+      - name: Run community group-buying browser gate
         run: pnpm test:e2e
       - name: Upload Playwright evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-mode-b-${{ github.run_id }}
+          name: playwright-community-group-buying-${{ github.run_id }}
           path: |
             playwright-report
             test-results

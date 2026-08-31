@@ -10,7 +10,7 @@
   <view class="campaign-intro">
     <text class="campaign-intro__title">本期团购</text>
     <view class="campaign-intro__meta"><text class="campaign-intro__calendar">日</text><text>{{deliveryText}}</text></view>
-    <view class="campaign-intro__promise"><text class="campaign-intro__check">✓</text><text>平台统一采购 · 按固定自提点集中送达</text></view>
+    <view class="campaign-intro__promise"><text class="campaign-intro__check">✓</text><text>运营统一备货 · 按固定自提点集中送达</text></view>
   </view>
 
   <view class="benefit-row" aria-label="商品分类">
@@ -27,6 +27,6 @@
   <view wx:elif="{{!area}}" class="state-card"><text>当前区域暂未开放收单服务</text><text>先选择一个已开放的收货区域，系统会展示可购买商品。</text><button size="mini" class="ghost-button" bindtap="openPickup">选择收货区域</button></view>
   <view wx:elif="{{!campaigns.length}}" class="state-card"><text>这个固定自提点暂时没有正在收单的商品</text><text>可更换同一区域的固定自提点，或等待下期开团。</text><button size="mini" class="ghost-button" bindtap="openPickup">更换固定自提点</button></view>
 
-  <view class="campaign-list"><view wx:for="{{campaigns}}" wx:key="skuId" class="product-card" data-id="{{item.id}}" data-sku="{{item.skuId}}" bindtap="openCampaign"><view class="product-card__media"><image class="product-card__image" src="{{item.imageUrl || '/assets/product-rice-noodles.jpg'}}" mode="aspectFill"/><text class="product-card__tag">{{item.origin}}</text></view><view class="product-card__body"><text class="product-card__title">{{item.productTitle}}</text><text class="product-card__desc">{{item.skuName}}</text><view class="product-card__foot"><view><text class="price"><text class="price__currency">¥</text>{{item.priceText}}</text><text class="price-note">团购价</text></view><view class="buy-button">＋</view></view></view></view></view>
-  <view wx:if="{{campaigns.length}}" class="cart-entry" bindtap="openCart"><text>查看购物车</text><text class="cart-entry__hint">本期商品统一结算 ›</text></view>
+  <view class="campaign-list"><view wx:for="{{campaigns}}" wx:key="skuId" class="product-card" data-id="{{item.id}}" data-sku="{{item.skuId}}" bindtap="openCampaign"><view class="product-card__media"><image class="product-card__image" src="{{item.imageUrl || '/assets/product-rice-noodles.jpg'}}" mode="aspectFill"/><text class="product-card__tag">{{item.origin}}</text></view><view class="product-card__body"><text class="product-card__title">{{item.productTitle}}</text><text class="product-card__desc">{{item.skuName}}</text><text class="product-card__schedule">截单 {{item.cutoffText}}</text><text class="product-card__schedule">预计 {{item.arrivalText}} 到货</text><view class="product-card__foot"><view><text class="price"><text class="price__currency">¥</text>{{item.priceText}}</text><text class="price-note">团购价</text></view><view class="buy-button">＋</view></view></view></view></view>
+  <view wx:if="{{cartCount > 0}}" class="cart-entry" bindtap="openCart"><text>查看购物车 · {{cartCount}} 件</text><text class="cart-entry__hint">本期商品统一结算 ›</text></view>
 </view>

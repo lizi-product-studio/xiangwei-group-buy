@@ -18,3 +18,8 @@ button::after { border: 0; }
 .money { font-family: "DIN Alternate", Bahnschrift, sans-serif; font-weight: 750; }
 .money::before { content: "¥"; margin-right: 3rpx; font-size: .65em; }
 .eyebrow { color: #7c8775; font-size: 20rpx; font-weight: 700; }
+.point-row__actions { display: flex; gap: 24rpx; margin-top: 5rpx; }
+.point-row__actions text { color: #df4327 !important; font-size: 21rpx !important; font-weight: 650; }
+.receipt-row { display: flex; flex-direction: column; gap: 8rpx; margin-top: 16rpx; padding: 18rpx; color: #626a75; background: #f8f8f5; border-radius: 14rpx; font-size: 21rpx; line-height: 1.5; }
+.receipt-row text:first-child { color: var(--ink); font-size: 24rpx; font-weight: 700; }
+.cart-page { padding-bottom: calc(200rpx + env(safe-area-inset-bottom)) !important; }

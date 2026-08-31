@@ -1,0 +1,97 @@
+{
+  "schema_version": 3,
+  "project": "社区团购",
+  "complexity": "Complex",
+  "current_state": "BACKLOG",
+  "previous_state": null,
+  "updated_at": "2026-08-31",
+  "updated_by": "orchestrator",
+  "approval_authority": "BLOCKING_UNKNOWN",
+  "risk_acceptance_authority": "BLOCKING_UNKNOWN",
+  "execution_control": {
+    "model_routing_policy": "2.0.0",
+    "role_routing_policy": "1.2.0",
+    "capability_policy": "1.1.0",
+    "quota_mode": "economy",
+    "max_active_subagents": 1,
+    "active_sessions": [],
+    "active_attempts": 0,
+    "blocked_reason_code": null
+  },
+  "quality_gates": {
+    "problem": {
+      "status": "PENDING",
+      "mode": "INLINE",
+      "reviewer": "orchestrator",
+      "session": null,
+      "version": null,
+      "input_fingerprint": null,
+      "evidence": []
+    },
+    "solution": {
+      "status": "PENDING",
+      "mode": "INLINE",
+      "reviewer": "orchestrator",
+      "session": null,
+      "version": null,
+      "input_fingerprint": null,
+      "evidence": []
+    },
+    "release_evidence": {
+      "status": "PENDING",
+      "mode": "INLINE",
+      "reviewer": "orchestrator",
+      "session": null,
+      "version": null,
+      "input_fingerprint": null,
+      "evidence": []
+    }
+  },
+  "gates": {
+    "requirements": {
+      "status": "PENDING",
+      "version": null,
+      "evidence": []
+    },
+    "product": {
+      "status": "PENDING",
+      "version": null,
+      "evidence": []
+    },
+    "ux": {
+      "status": "PENDING",
+      "version": null,
+      "evidence": []
+    },
+    "ui": {
+      "status": "PENDING",
+      "version": null,
+      "evidence": []
+    },
+    "architecture": {
+      "status": "PENDING",
+      "version": null,
+      "evidence": []
+    },
+    "build": {
+      "status": "PENDING",
+      "version": null,
+      "evidence": []
+    },
+    "qa": {
+      "status": "PENDING",
+      "version": null,
+      "evidence": []
+    },
+    "release": {
+      "status": "PENDING",
+      "version": null,
+      "evidence": []
+    }
+  },
+  "blocked": null,
+  "rework": null,
+  "open_p0_p1": [],
+  "accepted_risks": [],
+  "active_tasks": []
+}

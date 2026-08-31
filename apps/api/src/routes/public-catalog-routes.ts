@@ -13,7 +13,25 @@ export function registerPublicCatalogRoutes(app: FastifyInstance, dependencies: 
   publicDeliveryPlan(plan: DeliveryPlan | null): unknown;
 }): void {
   app.get('/api/v1/campaigns', async () => ({ data: await Promise.all((await dependencies.campaigns.listPublic()).map(dependencies.withCampaignItems)) }));
-  app.get('/api/v1/service-areas', async () => ({ data: (await dependencies.listServiceAreas()).filter((item) => item.status === 'ENABLED' && item.orderEnabled) }));
+  app.get('/api/v1/service-areas', async () => {
+    const [areas, points] = await Promise.all([
+      dependencies.listServiceAreas(),
+      dependencies.listPickupPoints(),
+    ]);
+    const coveredAreaIds = new Set(
+      points
+        .filter((point) => point.status === 'ACTIVE')
+        .map((point) => point.serviceAreaId),
+    );
+    return {
+      data: areas.filter(
+        (area) =>
+          area.status === 'ENABLED' &&
+          area.orderEnabled &&
+          coveredAreaIds.has(area.id),
+      ),
+    };
+  });
   app.get('/api/v1/pickup-points', async (request) => {
     const query = request.query as { serviceAreaId?: string };
     return { data: (await dependencies.listPickupPoints(query.serviceAreaId)).filter((item) => item.status === 'ACTIVE') };

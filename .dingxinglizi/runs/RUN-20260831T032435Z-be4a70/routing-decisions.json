@@ -1,0 +1,15 @@
+{
+  "history": [
+    {
+      "captured_at": "2026-08-31T03:24:35.304776+00:00",
+      "required_now": [],
+      "role_plan_fingerprint": null,
+      "routing_cycle_id": null,
+      "sequence": 1
+    }
+  ],
+  "required_now": [],
+  "role_plan_fingerprint": null,
+  "routing_cycle_id": null,
+  "schema_version": 1
+}

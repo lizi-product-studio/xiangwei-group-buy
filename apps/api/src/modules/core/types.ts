@@ -1,11 +1,17 @@
-import type { CampaignStatus, MoneyCents, OrderStatus } from '@hometown/domain';
+import type { CampaignStatus, MoneyCents, OrderStatus } from "@hometown/domain";
 
-/**
- * Legacy marketplace rows are immutable compatibility data. Platform procurement
- * is the only model allowed for new mode-B campaigns and orders.
- */
-export type BusinessModelVersion = 'LEGACY_MARKETPLACE' | 'PLATFORM_PROCUREMENT' | 'PLATFORM_COMMUNITY';
-export type PaymentRoute = 'LEGACY_COMBINE' | 'PLATFORM_DIRECT';
+export interface CampaignItem {
+  catalogSkuId: string;
+  productId: string;
+  title: string;
+  category: string;
+  skuName: string;
+  origin: string;
+  imageUrl: string | null;
+  retailPriceCents: MoneyCents;
+  sellableQuantity: number;
+  reservedQuantity: number;
+}
 
 export interface Campaign {
   id: string;
@@ -13,106 +19,29 @@ export interface Campaign {
   serviceAreaId: string;
   cutoffAt: string;
   dispatchAt: string;
+  estimatedArrivalStartAt: string;
+  estimatedArrivalEndAt: string;
   minTotalQuantity: number;
-  failureAction: 'CANCEL_AND_REFUND' | 'POSTPONE';
-  businessModelVersion: BusinessModelVersion;
-  warehouseId: string | null;
-  skuIds: string[];
-  items: CampaignItemSnapshot[];
-  platformItems: PlatformCampaignItem[];
-  /** Lightweight community-group-buy snapshots never carry supplier or warehouse semantics. */
-  communityItems?: CommunityCampaignItem[];
+  failureAction: "CANCEL_AND_REFUND" | "POSTPONE";
+  items: CampaignItem[];
   status: CampaignStatus;
   version: number;
   createdAt: string;
 }
 
-/** Immutable catalogue data captured when a campaign is created or its draft is edited. */
-export interface CampaignItemSnapshot {
-  skuId: string;
-  productId: string;
-  merchantId: string;
-  title: string;
-  category: string;
-  skuName: string;
-  origin: string;
-  imageUrl: string | null;
-  unitPriceCents: MoneyCents;
-  stock: number;
-  soldQuantity: number;
-  commissionRateBps: number;
-}
-
-/** Immutable platform price / purchase price snapshot for a mode-B campaign. */
-export interface PlatformCampaignItem {
-  platformSkuId: string;
-  supplierOfferId: string;
-  productId: string;
-  title: string;
-  category: string;
-  skuName: string;
-  origin: string;
-  imageUrl: string | null;
-  retailPriceCents: MoneyCents;
-  purchasePriceCents: MoneyCents;
-  sellableQuantity: number;
-  reservedQuantity: number;
-}
-
-/** Immutable platform catalogue/price snapshot for the lightweight community flow. */
-export interface CommunityCampaignItem {
-  platformSkuId: string;
-  productId: string;
-  title: string;
-  category: string;
-  skuName: string;
-  origin: string;
-  imageUrl: string | null;
-  retailPriceCents: MoneyCents;
-  sellableQuantity: number;
-  reservedQuantity: number;
-}
-
-export interface Sku {
-  id: string;
-  productId: string;
-  merchantId: string;
-  name: string;
-  unitPriceCents: MoneyCents;
-  stock: number;
-  soldQuantity: number;
-  commissionRateBps: number;
-}
-
-export interface MerchantOrder {
-  id: string;
-  merchantId: string;
-  itemAmountCents: MoneyCents;
-  commissionCents: MoneyCents;
-  merchantReceivableCents: MoneyCents;
-}
-
 export interface OrderItem {
-  /** Direct platform sales-line ID; null on immutable legacy order_items. */
-  salesOrderItemId: string | null;
+  orderLineId: string | null;
   skuId: string;
   productId: string;
-  /** Present only for legacy compatibility DTOs. */
-  merchantId: string | null;
   name: string;
   quantity: number;
   unitPriceCents: MoneyCents;
   amountCents: MoneyCents;
-  /** Legacy-only values. Mode B always persists zero / null equivalents. */
-  commissionRateBps: number;
-  commissionCents: MoneyCents;
-  purchaseUnitCents?: MoneyCents;
-  fulfilledQuantity:number;
-  exceptionQuantity:number;
-  refundedQuantity:number;
-  refundedAmountCents:MoneyCents;
-  /** Only used by PLATFORM_COMMUNITY; existing rows intentionally remain zero. */
-  pickedUpQuantity:number;
+  fulfilledQuantity: number;
+  pickedUpQuantity: number;
+  exceptionQuantity: number;
+  refundedQuantity: number;
+  refundedAmountCents: MoneyCents;
 }
 
 export interface Order {
@@ -123,154 +52,561 @@ export interface Order {
   serviceAreaId: string;
   pickupPointId: string;
   deliveryPlanId: string;
-  businessModelVersion: BusinessModelVersion;
-  paymentRoute: PaymentRoute;
   status: OrderStatus;
   totalCents: MoneyCents;
-  commissionCents: MoneyCents;
   items: OrderItem[];
-  merchantOrders: MerchantOrder[];
   createdAt: string;
   expiresAt: string;
   paidAt: string | null;
-  pickedUpAt:string|null;
+  pickedUpAt: string | null;
 }
 
-export interface Merchant { id:string; name:string; status:'PENDING'|'ACTIVE'|'SUSPENDED'|'REJECTED'; defaultCommissionBps:number; wechatSubMchid:string|null; createdAt:string }
-export interface Product { id:string; merchantId:string; title:string; category:string; origin:string; imageUrl:string|null; storageType:'NORMAL_TEMPERATURE'; status:'DRAFT'|'PENDING_REVIEW'|'APPROVED'|'REJECTED'|'OFF_SHELF'; sku:Sku; createdAt:string }
-export interface ServiceArea { id:string; regionCode:string; name:string; status:'ENABLED'|'DISABLED'; orderEnabled:boolean; createdAt:string }
-export interface PickupPoint { id:string; serviceAreaId:string; name:string; address:string; status:'PENDING'|'ACTIVE'|'SUSPENDED'|'REJECTED'; capacityPerDay:number|null; operationMode:'SELF_OPERATED'|'PARTNER_OPERATED'|'TEMPORARY_SELF_OPERATED'|'LEASED_SITE'; responsibilityOwner:string|null; siteLeadName:string|null; siteLeadPhone:string|null; createdAt:string }
-export interface DispatchBatch { id:string; campaignId:string; serviceAreaId:string; status:'DRAFT'|'IN_TRANSIT'|'ARRIVED'|'CLOSED'; createdAt:string; dispatchedAt:string|null; arrivedAt:string|null }
-export type DeliveryPlanStatus = 'PENDING_SITE'|'SITE_CONFIRMED'|'VEHICLE_BOOKED'|'IN_TRANSIT'|'ARRIVED';
+export interface CatalogSku {
+  id: string;
+  productId: string;
+  name: string;
+  retailPriceCents: MoneyCents;
+  defaultSellableQuantity: number;
+  status: "ACTIVE" | "INACTIVE";
+  product: {
+    id: string;
+    title: string;
+    category: string;
+    origin: string;
+    imageUrl: string | null;
+    storageType: "NORMAL_TEMPERATURE";
+    status: "DRAFT" | "ACTIVE" | "OFF_SHELF";
+  };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ServiceArea {
+  id: string;
+  regionCode: string;
+  name: string;
+  status: "ENABLED" | "DISABLED";
+  orderEnabled: boolean;
+  createdAt: string;
+}
+export interface PickupPoint {
+  id: string;
+  serviceAreaId: string;
+  name: string;
+  address: string;
+  businessHours: string;
+  pickupInstructions: string;
+  latitude: number;
+  longitude: number;
+  contactName: string;
+  contactPhone: string;
+  status: "ACTIVE" | "INACTIVE";
+  capacityPerDay: number | null;
+  createdAt: string;
+}
+export interface DispatchBatch {
+  id: string;
+  campaignId: string;
+  serviceAreaId: string;
+  status: "DRAFT" | "IN_TRANSIT" | "ARRIVED" | "CLOSED";
+  createdAt: string;
+  dispatchedAt: string | null;
+  arrivedAt: string | null;
+}
+export type DeliveryPlanStatus =
+  | "SITE_CONFIRMED"
+  | "VEHICLE_BOOKED"
+  | "IN_TRANSIT"
+  | "ARRIVED";
 export interface DeliveryPlan {
-  id:string; campaignId:string; serviceAreaId:string; pickupPointId:string|null; status:DeliveryPlanStatus;
-  siteName:string|null; address:string|null; arrivalStartAt:string|null; arrivalEndAt:string|null;
-  contactName:string|null; contactPhone:string|null; vehicleOrderNo:string|null; driverName:string|null; driverPhone:string|null; vehiclePlate:string|null;
-  logisticsPlatform?:string|null; estimatedArrivalAt?:string|null;
-  remark:string|null; confirmedAt:string|null; bookedAt:string|null; dispatchedAt:string|null; arrivedAt:string|null; createdAt:string; updatedAt:string;
+  id: string;
+  campaignId: string;
+  serviceAreaId: string;
+  pickupPointId: string;
+  status: DeliveryPlanStatus;
+  siteName: string;
+  address: string;
+  arrivalStartAt: string | null;
+  arrivalEndAt: string | null;
+  contactName: string | null;
+  contactPhone: string | null;
+  vehicleOrderNo: string | null;
+  driverName: string | null;
+  driverPhone: string | null;
+  vehiclePlate: string | null;
+  logisticsPlatform: string | null;
+  estimatedArrivalAt: string | null;
+  remark: string | null;
+  confirmedAt: string;
+  bookedAt: string | null;
+  dispatchedAt: string | null;
+  arrivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
-export interface PickupCredential { orderId:string; codeHash:string; status:'ACTIVE'|'USED'|'REVOKED'; expiresAt:string }
+export interface PickupCredential {
+  orderId: string;
+  codeHash: string;
+  status: "ACTIVE" | "USED" | "REVOKED";
+  expiresAt: string;
+}
 
-export type Role = 'USER' | 'OPERATOR' | 'REVIEWER' | 'FULFILLMENT' | 'PICKUP_MANAGER' | 'PICKUP_VERIFIER' | 'CUSTOMER_SERVICE' | 'FINANCE' | 'PROCUREMENT' | 'WAREHOUSE_RECEIVER' | 'QUALITY_INSPECTOR' | 'WAREHOUSE_OPERATOR' | 'SUPER_ADMIN';
-export interface User { id:string; wechatOpenId:string|null; status:'ACTIVE'|'BLOCKED'; createdAt:string }
-/** Immutable evidence of a user's explicit acceptance of one privacy notice version. */
-export interface PrivacyConsent { userId:string; documentVersion:string; consentedAt:string }
-export interface AuthSession { tokenHash:string; userId:string; roles:Role[]; expiresAt:string }
-export type InternalStaffRole='SUPER_ADMIN'|'OPERATOR'|'CUSTOMER_SERVICE'|'FINANCE'|'PICKUP_MANAGER';
-export type InternalStaffStatus='PENDING_ACTIVATION'|'ACTIVE'|'SUSPENDED';
-/** Internal employees are never inferred from consumer users or legacy verifier grants. */
-export interface InternalStaff { userId:string; staffNo:string; displayName:string; phone:string; role:InternalStaffRole; status:InternalStaffStatus; createdBy:string|null; activatedAt:string|null; suspendedAt:string|null; suspensionReason:string|null; createdAt:string; updatedAt:string }
-export interface StaffPickupPointAssignment { staffUserId:string; pickupPointId:string; assignedBy:string; createdAt:string; updatedAt:string }
-export interface AdminCredential { username:string; userId:string; passwordSalt:string; passwordHash:string; mustChangePassword:boolean; roles:Role[]; createdAt:string }
-/**
- * Append-only grant/revoke event. A verifier can use a pickup point only when
- * its most recent event for that point is GRANTED.
- */
-export interface PickupVerifierAssignment { id:string; userId:string; pickupPointId:string; action:'GRANTED'|'REVOKED'; createdAt:string }
+export type Role =
+  | "USER"
+  | "SUPER_ADMIN"
+  | "OPERATOR"
+  | "CUSTOMER_SERVICE"
+  | "FINANCE"
+  | "PICKUP_MANAGER";
+export type InternalStaffRole = Exclude<Role, "USER">;
+export type InternalStaffStatus = "PENDING_ACTIVATION" | "ACTIVE" | "SUSPENDED";
+export interface User {
+  id: string;
+  wechatOpenId: string | null;
+  status: "ACTIVE" | "BLOCKED";
+  createdAt: string;
+}
+export interface PrivacyConsent {
+  userId: string;
+  documentVersion: string;
+  consentedAt: string;
+}
+export interface AuthSession {
+  tokenHash: string;
+  userId: string;
+  roles: Role[];
+  /**
+   * A session is valid only for the employee authorisation revision with
+   * which it was issued.  It closes the gap between authentication at the
+   * beginning of a request and a later role/scope revocation.
+   */
+  authorizationVersion: number;
+  expiresAt: string;
+}
+export interface InternalStaff {
+  userId: string;
+  staffNo: string;
+  displayName: string;
+  phone: string;
+  role: InternalStaffRole;
+  status: InternalStaffStatus;
+  createdBy: string | null;
+  activatedAt: string | null;
+  suspendedAt: string | null;
+  suspensionReason: string | null;
+  authorizationVersion: number;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface StaffPickupPointAssignment {
+  staffUserId: string;
+  pickupPointId: string;
+  assignedBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface AdminCredential {
+  username: string;
+  userId: string;
+  passwordSalt: string;
+  passwordHash: string;
+  mustChangePassword: boolean;
+  roles: Role[];
+  authorizationVersion: number;
+  createdAt: string;
+}
+
 export interface Payment {
-  id:string; orderId:string; provider:'mock'|'wechat-platform'; paymentRoute:PaymentRoute; providerPaymentId:string|null;
-  status:'CREATED'|'SUCCEEDED'|'REFUNDING'|'REFUNDED'|'FAILED'; amountCents:MoneyCents;
-  clientPayload:Record<string,string>|null; providerContext:Record<string,unknown>|null;
-  /** Durable fence for a provider-side payment-initiation request. */
-  initiationLeaseUntil:string|null; initiationClaimToken:string|null;
-  createdAt:string; succeededAt:string|null;
+  id: string;
+  orderId: string;
+  provider: "mock" | "wechat";
+  providerPaymentId: string | null;
+  status: "CREATED" | "SUCCEEDED" | "REFUNDING" | "REFUNDED" | "FAILED";
+  amountCents: MoneyCents;
+  clientPayload: Record<string, string> | null;
+  providerContext: Record<string, unknown> | null;
+  initiationLeaseUntil: string | null;
+  initiationClaimToken: string | null;
+  createdAt: string;
+  succeededAt: string | null;
 }
-export interface Refund {
-  id:string; orderId:string; paymentId:string; merchantOrderId:string; providerRefundNo:string;
-  providerRefundId:string|null; status:'CREATED'|'PROCESSING'|'SUCCEEDED'|'FAILED'; amountCents:MoneyCents;
-  createdAt:string; submissionLeaseUntil:string|null; submissionClaimToken:string|null;
-}
-export interface PlatformRefund {
-  id:string; orderId:string; paymentId:string; providerRefundNo:string; providerRefundId:string|null;
-  status:'CREATED'|'PROCESSING'|'SUCCEEDED'|'FAILED'; amountCents:MoneyCents; createdAt:string;
-  submissionLeaseUntil:string|null; submissionClaimToken:string|null;
-}
-/** A mode-B refund for an approved fulfilment discrepancy. It is deliberately
- * separate from the single full-order platform_refunds compatibility record. */
-export interface PlatformPartialRefund {
-  id:string; exceptionId:string; orderId:string; paymentId:string; providerRefundNo:string; providerRefundId:string|null;
-  status:'CREATED'|'PROCESSING'|'SUCCEEDED'|'FAILED'; amountCents:MoneyCents; createdAt:string;
-  submissionLeaseUntil:string|null; submissionClaimToken:string|null;
-}
-export interface Warehouse { id:string; name:string; address:string; status:'ACTIVE'|'SUSPENDED'; createdAt:string; updatedAt:string }
-export interface Supplier { id:string; legacyMerchantId:string|null; name:string; status:'DRAFT'|'ACTIVE'|'SUSPENDED'; contactName:string|null; contactPhone:string|null; createdAt:string; updatedAt:string }
-export interface SupplierQualification { id:string; supplierId:string; qualificationType:string; qualificationNo:string|null; expiresAt:string|null; status:'PENDING'|'APPROVED'|'REJECTED'|'EXPIRED'; evidenceSummary:string|null; createdAt:string; updatedAt:string }
-export interface PlatformSku { id:string; productId:string; name:string; retailPriceCents:MoneyCents; defaultSellableQuantity?:number; referencePurchaseCostCents?:MoneyCents|null; supplierNote?:string|null; status:'ACTIVE'|'INACTIVE'; product:{id:string;title:string;category:string;origin:string;imageUrl:string|null;storageType:'NORMAL_TEMPERATURE';status:'DRAFT'|'ACTIVE'|'OFF_SHELF'}; createdAt:string; updatedAt:string }
-export interface SupplierSkuOffer { id:string; supplierId:string; platformSkuId:string; purchasePriceCents:MoneyCents|null; minimumPurchaseQuantity:number; leadTimeDays:number; status:'DRAFT'|'ACTIVE'|'SUSPENDED'; createdAt:string; updatedAt:string }
-export interface PurchaseOrderItem { id:string; purchaseOrderId:string; platformSkuId:string; supplierOfferId:string; plannedQuantity:number; purchaseUnitCents:MoneyCents; createdAt:string }
-/** A supplemental PO retains the original short-receipt evidence instead of
- * overwriting it. The nullable parent link is additive and legacy-safe. */
-export interface PurchaseOrder { id:string; purchaseNo:string; campaignId:string; supplierId:string; warehouseId:string; status:'DRAFT'|'ORDERED'|'RECEIVING'|'RECEIVED'|'CANCELLED'; plannedArrivalAt:string|null; items:PurchaseOrderItem[]; createdAt:string; updatedAt:string }
-export interface GoodsReceiptItem { id:string; goodsReceiptId:string; purchaseOrderItemId:string; acceptedQuantity:number; rejectedQuantity:number; batchNo:string|null; productionDate:string|null; expiresAt:string|null; qualityResult:'ACCEPTED'|'PARTIALLY_ACCEPTED'|'REJECTED'; inspectionNote:string|null; exceptionReason?:FulfillmentExceptionType|null|undefined; evidenceUrl?:string|null|undefined }
-export interface GoodsReceipt { id:string; receiptNo:string; purchaseOrderId:string; warehouseId:string; status:'DRAFT'|'COMPLETED'|'EXCEPTION'; receivedBy:string; inspectedBy:string; receivedAt:string; items:GoodsReceiptItem[]; createdAt:string }
-export type InventoryBucket='QUALIFIED'|'RESERVED'|'SORTED'|'OUTBOUND'|'HANDED_OVER'|'REJECTED'|'QUARANTINE';
-export interface InventoryLot { id:string; warehouseId:string; platformSkuId:string; supplierId:string; goodsReceiptItemId:string; lotNo:string; productionDate:string|null; expiresAt:string|null; qualifiedQuantity:number; createdAt:string }
-export interface InventoryMovement { id:string; inventoryLotId:string; movementType:'RECEIPT'|'SORT_RESERVED'|'SORT_COMPLETED'|'OUTBOUND'|'HANDOVER'|'ADJUSTMENT'|'LOSS'|'QUARANTINE'; fromBucket:InventoryBucket|null; toBucket:InventoryBucket|null; quantity:number; referenceType:string; referenceId:string; actorId:string; note:string|null; createdAt:string }
-export interface InventoryBalance { inventoryLotId:string; platformSkuId:string; warehouseId:string; lotNo:string; expiresAt:string|null; qualified:number; reserved:number; sorted:number; outbound:number; handedOver:number; rejected:number; quarantine:number }
-export interface SupplierPayable { id:string; supplierId:string; purchaseOrderItemId:string; goodsReceiptItemId:string; qualifiedQuantity:number; purchaseUnitCents:MoneyCents; amountCents:MoneyCents; status:'PENDING'|'PAID'|'VOID'; paymentReference:string|null; paidAt:string|null; createdAt:string; updatedAt:string }
-export interface SortingTaskItem { id:string; sortingTaskId:string; inventoryLotId:string; platformSkuId:string; quantity:number; createdAt:string }
-export interface SortingTask { id:string; campaignId:string; warehouseId:string; status:'PENDING'|'COMPLETED'|'CANCELLED'; createdBy:string; completedBy:string|null; items:SortingTaskItem[]; createdAt:string; completedAt:string|null }
-export interface OutboundOrderItem { id:string; outboundOrderId:string; inventoryLotId:string; platformSkuId:string; quantity:number }
-export interface OutboundOrder { id:string; outboundNo:string; campaignId:string; warehouseId:string; deliveryPlanId:string; sortingTaskId:string; status:'CREATED'|'DISPATCHED'|'HANDED_OVER'|'EXCEPTION'|'CANCELLED'; carrierReference:string|null; dispatchedBy:string|null; dispatchedAt:string|null; items:OutboundOrderItem[]; createdAt:string }
-export interface PickupHandoverItem { id:string; pickupHandoverId:string; platformSkuId:string; expectedQuantity:number; receivedQuantity:number; rejectedQuantity:number; shortQuantity:number; damagedQuantity:number; reason:FulfillmentExceptionType|null; evidenceNote:string|null }
-export interface PickupHandover { id:string; outboundOrderId:string; deliveryPlanId:string; status:'PENDING'|'COMPLETED'|'EXCEPTION'; handedOverBy:string; receivedBy:string|null; exceptionNote:string|null; handedOverAt:string|null; items:PickupHandoverItem[]; createdAt:string }
-export type FulfillmentExceptionType='SHORT_RECEIPT'|'QUALITY_REJECTED'|'PACKAGE_DAMAGED'|'WAREHOUSE_SHORTAGE'|'WAREHOUSE_DAMAGE'|'MIS_SORTED'|'TRANSIT_SHORTAGE'|'TRANSIT_DAMAGE'|'WRONG_POINT'|'PICKUP_POINT_REJECTED'|'PICKUP_SHORTAGE'|'PICKUP_DAMAGE'|'QUALITY_CLAIM';
-export type ExceptionResponsibility='SUPPLIER'|'WAREHOUSE'|'CARRIER'|'PICKUP_POINT'|'PLATFORM'|'PENDING';
-export type FulfillmentExceptionStatus='REGISTERED'|'WAITING_REPLENISHMENT'|'TRANSFER_PENDING'|'REFUND_CONFIRMED'|'REFUND_PROCESSING'|'RESOLVED';
-export interface FulfillmentExceptionItem { id:string; exceptionId:string; platformSkuId:string; expectedQuantity:number; acceptedQuantity:number; rejectedQuantity:number; shortQuantity:number; damagedQuantity:number; reason:FulfillmentExceptionType; description:string; evidenceUrl:string|null }
-export interface FulfillmentException { id:string; campaignId:string; orderId:string|null; clientRequestId:string|null; outboundOrderId:string|null; deliveryPlanId:string|null; sourceStage:'SUPPLIER_RECEIPT'|'WAREHOUSE'|'TRANSIT'|'PICKUP_HANDOVER'|'CUSTOMER_CLAIM'; status:FulfillmentExceptionStatus; responsibility:ExceptionResponsibility; registeredBy:string; confirmedBy:string|null; resolutionNote:string|null; registeredAt:string; confirmedAt:string|null; items:FulfillmentExceptionItem[] }
-/** Deterministic paid-time allocation of a shortage to one platform sales line. */
-export interface FulfillmentAllocation { id:string; exceptionId:string; exceptionItemId:string; salesOrderItemId:string; orderId:string; platformSkuId:string; fulfilledQuantity:number; exceptionQuantity:number; refundedQuantity:number; createdAt:string; refundedAt:string|null }
-export interface PlatformSalesLine { id:string; orderId:string; /** present on campaign allocation reads */ orderNo?:string|null|undefined; platformSkuId:string; quantity:number; unitPriceCents:MoneyCents; purchaseUnitCents:MoneyCents; amountCents:MoneyCents; fulfilledQuantity:number; exceptionQuantity:number; refundedQuantity:number; refundedAmountCents:MoneyCents; pickedUpQuantity:number; paidAt:string|null }
-export interface CommunityDeliveryItem { id:string; communityDeliveryId:string; platformSkuId:string; expectedQuantity:number; receivedQuantity:number; rejectedQuantity:number; shortQuantity:number; damagedQuantity:number; reason:FulfillmentExceptionType|null; evidenceNote:string|null; evidenceUrl:string|null }
-export interface CommunityDeliveryConfirmation { id:string; dispatchBatchId:string; campaignId:string; deliveryPlanId:string; status:'COMPLETED'|'EXCEPTION'; confirmedBy:string; receivedBy:string; confirmationNote:string|null; confirmedAt:string; items:CommunityDeliveryItem[] }
-export interface CommunityPickupReceiptItem { id:string; communityPickupReceiptId:string; platformSkuId:string; quantity:number }
-export interface CommunityPickupReceipt { id:string; orderId:string; deliveryPlanId:string; verifierId:string; requestKey:string; pickupRequestId:string|null; payloadHash:string|null; createdAt:string; items:CommunityPickupReceiptItem[] }
-/** A point arrival with shortages is a proposal until an operator confirms it. */
-export interface CommunityAllocationDraftItem { id:string; allocationDraftId:string; salesOrderItemId:string; orderId:string; orderNo:string; platformSkuId:string; paidAt:string; fulfilledQuantity:number; exceptionQuantity:number }
-export interface CommunityAllocationDraft { id:string; communityDeliveryId:string; exceptionId:string; campaignId:string; deliveryPlanId:string; version:number; sortRule:'paidAt_ASC_orderNo_ASC'; status:'PENDING_OPERATOR_CONFIRMATION'|'CONFIRMED'; createdBy:string; createdAt:string; confirmedBy:string|null; confirmedAt:string|null; items:CommunityAllocationDraftItem[] }
-/** Kept separate from the global order state machine so expiry cannot regress fulfilment history. */
-export interface CommunityPickupWindow { orderId:string; deliveryPlanId:string; arrivedAt:string; deadlineAt:string; status:'ACTIVE'|'EXPIRED_PENDING'|'EXTENDED'|'REFUND_PENDING'|'LOSS_RECORDED'|'CLOSED'; extensionCount:number; extendedBy:string|null; extendedAt:string|null; dispositionBy:string|null; dispositionAt:string|null; dispositionNote:string|null; refundExceptionId:string|null; lossExceptionId:string|null }
-export interface CommunityCancellationRequest { id:string; orderId:string; userId:string; reason:string; status:'DIRECT_REFUNDING'|'PENDING_REVIEW'|'REJECTED'|'APPROVED_WAITING_FINANCE'|'REFUNDING'|'REFUNDED'; requestedAt:string; reviewedBy:string|null; reviewedAt:string|null; reviewNote:string|null; financeExecutedBy:string|null; financeExecutedAt:string|null; refundId:string|null }
-/** A community user report is a standalone post-pickup fact. It never moves fulfilment quantities. */
-export type CommunityQualityCaseStatus='REGISTERED'|'ACCEPTED'|'REJECTED'|'REFUNDING'|'RESOLVED';
-export type CommunityQualityReason='PICKUP_SHORTAGE'|'PICKUP_DAMAGE'|'QUALITY_CLAIM';
-export interface CommunityQualityCaseItem { id:string; communityQualityCaseId:string; salesOrderItemId:string; platformSkuId:string; pickedUpQuantitySnapshot:number; disputedQuantity:number; reason:CommunityQualityReason; description:string }
-export interface CommunityQualityCase { id:string; orderId:string; userId:string; clientRequestId:string; payloadHash:string; status:CommunityQualityCaseStatus; registeredAt:string; acceptedBy:string|null; acceptedAt:string|null; decisionBy:string|null; decidedAt:string|null; decisionNote:string|null; refundApprovedBy:string|null; refundApprovedAt:string|null; financeExecutedBy:string|null; financeExecutedAt:string|null; refundExceptionId:string|null; items:CommunityQualityCaseItem[] }
-export interface LedgerLine {accountCode:string;ownerId:string|null;direction:'DEBIT'|'CREDIT';amountCents:MoneyCents}
 /**
- * Immutable accounting evidence. Marketplace events remain isolated from the
- * platform-procurement events so an old commission entry cannot be mistaken
- * for supplier cost or a supplier payable.
+ * `CREATED`/`FAILED` remain readable for historical snapshots. New writes use
+ * the explicit recovery states so a network failure is never mistaken for a
+ * provider-confirmed processing result.
  */
+export type RefundStatus =
+  | "CREATED"
+  | "SUBMISSION_UNKNOWN"
+  | "PROCESSING"
+  | "RETRYABLE_FAILURE"
+  | "MANUAL_HOLD"
+  | "SUCCEEDED"
+  | "FAILED";
+export interface RefundRecoveryFields {
+  /** Number of calls to the provider refund submission endpoint. */
+  submissionAttempts?: number;
+  /** Number of provider status queries made after an ambiguous submission. */
+  queryAttempts?: number;
+  /** Earliest time at which the reconciler may make the next provider call. */
+  nextAttemptAt?: string | null;
+  /** Observable failure evidence retained across process restarts. */
+  lastError?: string | null;
+  /** Set only after bounded automatic recovery requires staff intervention. */
+  manualHoldReason?: string | null;
+  /** Monotonic CAS revision for recovery writes and callback races. */
+  recoveryVersion?: number;
+  /** Total provider submit/query calls consumed by automatic recovery. */
+  recoveryAttempts?: number;
+}
+export type OrderRefund = RefundRecoveryFields & {
+  id: string;
+  orderId: string;
+  paymentId: string;
+  providerRefundNo: string;
+  providerRefundId: string | null;
+  status: RefundStatus;
+  amountCents: MoneyCents;
+  createdAt: string;
+  submissionLeaseUntil: string | null;
+  submissionClaimToken: string | null;
+};
+export type PartialRefund = RefundRecoveryFields & {
+  id: string;
+  exceptionId: string;
+  orderId: string;
+  paymentId: string;
+  providerRefundNo: string;
+  providerRefundId: string | null;
+  status: RefundStatus;
+  amountCents: MoneyCents;
+  createdAt: string;
+  submissionLeaseUntil: string | null;
+  submissionClaimToken: string | null;
+};
+
+export type FulfillmentExceptionType =
+  | "SHORT_RECEIPT"
+  | "QUALITY_REJECTED"
+  | "PACKAGE_DAMAGED"
+  | "TRANSIT_SHORTAGE"
+  | "TRANSIT_DAMAGE"
+  | "PICKUP_POINT_REJECTED"
+  | "PICKUP_SHORTAGE"
+  | "PICKUP_DAMAGE"
+  | "QUALITY_CLAIM";
+export type ExceptionResponsibility =
+  | "CARRIER"
+  | "PICKUP_POINT"
+  | "PLATFORM"
+  | "PENDING";
+export type FulfillmentExceptionStatus =
+  | "REGISTERED"
+  | "REFUND_CONFIRMED"
+  | "REFUND_PROCESSING"
+  | "RESOLVED";
+export interface FulfillmentExceptionItem {
+  id: string;
+  exceptionId: string;
+  catalogSkuId: string;
+  expectedQuantity: number;
+  acceptedQuantity: number;
+  rejectedQuantity: number;
+  shortQuantity: number;
+  damagedQuantity: number;
+  reason: FulfillmentExceptionType;
+  description: string;
+  evidenceUrl: null;
+}
+export interface FulfillmentException {
+  id: string;
+  campaignId: string;
+  orderId: string | null;
+  clientRequestId: string | null;
+  deliveryPlanId: string | null;
+  sourceStage: "PICKUP_ARRIVAL" | "CUSTOMER_CLAIM";
+  status: FulfillmentExceptionStatus;
+  responsibility: ExceptionResponsibility;
+  registeredBy: string;
+  confirmedBy: string | null;
+  resolutionNote: string | null;
+  registeredAt: string;
+  confirmedAt: string | null;
+  items: FulfillmentExceptionItem[];
+}
+export interface FulfillmentAllocation {
+  id: string;
+  exceptionId: string;
+  exceptionItemId: string;
+  orderLineId: string;
+  orderId: string;
+  catalogSkuId: string;
+  fulfilledQuantity: number;
+  exceptionQuantity: number;
+  refundedQuantity: number;
+  createdAt: string;
+  refundedAt: string | null;
+}
+export interface OrderLine {
+  id: string;
+  orderId: string;
+  orderNo?: string | null;
+  catalogSkuId: string;
+  quantity: number;
+  unitPriceCents: MoneyCents;
+  amountCents: MoneyCents;
+  fulfilledQuantity: number;
+  exceptionQuantity: number;
+  refundedQuantity: number;
+  refundedAmountCents: MoneyCents;
+  pickedUpQuantity: number;
+  paidAt: string | null;
+}
+
+export interface CommunityDeliveryItem {
+  id: string;
+  communityDeliveryId: string;
+  catalogSkuId: string;
+  expectedQuantity: number;
+  receivedQuantity: number;
+  rejectedQuantity: number;
+  shortQuantity: number;
+  damagedQuantity: number;
+  reason: FulfillmentExceptionType | null;
+  evidenceNote: string | null;
+  evidenceUrl: null;
+}
+export interface CommunityDeliveryConfirmation {
+  id: string;
+  dispatchBatchId: string;
+  campaignId: string;
+  deliveryPlanId: string;
+  status: "COMPLETED" | "EXCEPTION";
+  confirmedBy: string;
+  receivedBy: string;
+  confirmationNote: string | null;
+  confirmedAt: string;
+  items: CommunityDeliveryItem[];
+}
+export interface CommunityPickupReceiptItem {
+  id: string;
+  communityPickupReceiptId: string;
+  catalogSkuId: string;
+  quantity: number;
+}
+export interface CommunityPickupReceipt {
+  id: string;
+  orderId: string;
+  deliveryPlanId: string;
+  verifierId: string;
+  requestKey: string;
+  pickupRequestId: string | null;
+  payloadHash: string | null;
+  createdAt: string;
+  items: CommunityPickupReceiptItem[];
+}
+export interface CommunityAllocationDraftItem {
+  id: string;
+  allocationDraftId: string;
+  orderLineId: string;
+  orderId: string;
+  orderNo: string;
+  catalogSkuId: string;
+  paidAt: string;
+  fulfilledQuantity: number;
+  exceptionQuantity: number;
+}
+export interface CommunityAllocationDraft {
+  id: string;
+  communityDeliveryId: string;
+  exceptionId: string;
+  campaignId: string;
+  deliveryPlanId: string;
+  version: number;
+  sortRule: "paidAt_ASC_orderNo_ASC";
+  status: "PENDING_OPERATOR_CONFIRMATION" | "CONFIRMED";
+  createdBy: string;
+  createdAt: string;
+  confirmedBy: string | null;
+  confirmedAt: string | null;
+  items: CommunityAllocationDraftItem[];
+}
+export interface CommunityPickupWindow {
+  orderId: string;
+  deliveryPlanId: string;
+  arrivedAt: string;
+  deadlineAt: string;
+  status:
+    | "ACTIVE"
+    | "EXPIRED_PENDING"
+    | "EXTENDED"
+    | "REFUND_PENDING"
+    | "LOSS_RECORDED"
+    | "CLOSED";
+  extensionCount: number;
+  extendedBy: string | null;
+  extendedAt: string | null;
+  dispositionBy: string | null;
+  dispositionAt: string | null;
+  dispositionNote: string | null;
+  refundExceptionId: string | null;
+  lossExceptionId: string | null;
+}
+export interface CommunityCancellationRequest {
+  id: string;
+  orderId: string;
+  userId: string;
+  reason: string;
+  status:
+    | "DIRECT_REFUNDING"
+    | "PENDING_REVIEW"
+    | "REJECTED"
+    | "APPROVED_WAITING_FINANCE"
+    | "REFUNDING"
+    | "REFUNDED";
+  requestedAt: string;
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+  reviewNote: string | null;
+  financeExecutedBy: string | null;
+  financeExecutedAt: string | null;
+  refundId: string | null;
+}
+export type CommunityQualityCaseStatus =
+  | "REGISTERED"
+  | "ACCEPTED"
+  | "REJECTED"
+  | "REFUNDING"
+  | "RESOLVED";
+export type CommunityQualityReason =
+  | "PICKUP_SHORTAGE"
+  | "PICKUP_DAMAGE"
+  | "QUALITY_CLAIM";
+export interface CommunityQualityCaseItem {
+  id: string;
+  communityQualityCaseId: string;
+  pickupReceiptId: string;
+  orderLineId: string;
+  catalogSkuId: string;
+  pickedUpQuantitySnapshot: number;
+  disputedQuantity: number;
+  reason: CommunityQualityReason;
+  description: string;
+}
+export interface CommunityQualityCase {
+  id: string;
+  orderId: string;
+  userId: string;
+  clientRequestId: string;
+  payloadHash: string;
+  status: CommunityQualityCaseStatus;
+  registeredAt: string;
+  acceptedBy: string | null;
+  acceptedAt: string | null;
+  /** Customer-service acceptance rationale; it is distinct from the operator decision. */
+  acceptanceNote: string | null;
+  decisionBy: string | null;
+  decidedAt: string | null;
+  decisionNote: string | null;
+  refundApprovedBy: string | null;
+  refundApprovedAt: string | null;
+  financeExecutedBy: string | null;
+  financeExecutedAt: string | null;
+  refundExceptionId: string | null;
+  items: CommunityQualityCaseItem[];
+}
+
+export interface LedgerLine {
+  accountCode: string;
+  ownerId: string | null;
+  direction: "DEBIT" | "CREDIT";
+  amountCents: MoneyCents;
+}
 export interface LedgerTransaction {
-  id:string;
-  referenceType:'ORDER'|'SUPPLIER_PAYABLE'|'FULFILLMENT_EXCEPTION';
-  referenceId:string;
-  eventType:'PAYMENT_SUCCEEDED'|'REFUND_SUCCEEDED'|'PARTIAL_REFUND_SUCCEEDED'|'PICKUP_CONFIRMED'|'SUPPLIER_PAYABLE_RECOGNIZED'|'SUPPLIER_PAYABLE_PAID';
-  lines:LedgerLine[];
-  createdAt:string;
+  id: string;
+  referenceType: "ORDER" | "FULFILLMENT_EXCEPTION";
+  referenceId: string;
+  eventType:
+    | "PAYMENT_SUCCEEDED"
+    | "REFUND_SUCCEEDED"
+    | "PARTIAL_REFUND_SUCCEEDED"
+    | "PICKUP_CONFIRMED";
+  lines: LedgerLine[];
+  createdAt: string;
 }
-export interface Settlement {id:string;orderId:string;paymentId:string;merchantOrderId:string;outOrderNo:string;providerOrderId:string|null;status:'CREATED'|'PROCESSING'|'SUCCEEDED'|'FAILED';commissionCents:MoneyCents;merchantReceivableCents:MoneyCents;createdAt:string;submissionLeaseUntil:string|null;submissionClaimToken:string|null}
-export interface AuditLog {id:string;actorId:string;action:string;resourceType:string;resourceId:string;requestId:string;beforeData:unknown;afterData:unknown;createdAt:string}
+export interface AuditLog {
+  id: string;
+  actorId: string;
+  action: string;
+  resourceType: string;
+  resourceId: string;
+  requestId: string;
+  beforeData: unknown;
+  afterData: unknown;
+  createdAt: string;
+}
 export interface ServiceAreaInterest {
-  id:string; userId:string; regionText:string; contactName:string; contactPhone:string;
-  /** The notice accepted when this contact detail was submitted; null for historic records. */
-  privacyVersion:string|null; privacyConsentedAt:string|null;
-  status:'NEW'|'CONTACTED'|'CLOSED'; createdAt:string;
+  id: string;
+  userId: string;
+  regionText: string;
+  contactName: string;
+  contactPhone: string;
+  privacyVersion: string | null;
+  privacyConsentedAt: string | null;
+  status: "NEW" | "CONTACTED" | "CLOSED";
+  /** Required for each operational transition; never returned with raw contact data. */
+  statusNote: string | null;
+  statusChangedBy: string | null;
+  statusChangedAt: string | null;
+  createdAt: string;
 }
-export interface AfterSale {
-  id:string; userId:string; orderId:string; reason:string; description:string;
-  status:'SUBMITTED'|'PROCESSING'|'RESOLVED'|'REJECTED';
-  resolutionType:'FULL_REFUND'|'REJECTED'|null; refundAmountCents:MoneyCents|null; refundIds:string[];
-  resolvedBy:string|null; resolutionNote:string|null; resolvedAt:string|null;
-  createdAt:string; updatedAt:string;
-}
-export type OrderNotificationType = 'SITE_CONFIRMED' | 'VEHICLE_DISPATCHED' | 'ARRIVED' | 'PARTIAL_REFUND' | 'PICKUP_DEADLINE' | 'PICKUP_EXPIRED';
-export type OrderNotificationStatus = 'PENDING_DELIVERY' | 'WECHAT_SENT' | 'IN_APP_AVAILABLE' | 'MANUAL_REQUIRED' | 'MANUAL_COMPLETED';
+export type OrderNotificationType =
+  | "SITE_CONFIRMED"
+  | "VEHICLE_DISPATCHED"
+  | "ARRIVED"
+  | "PARTIAL_REFUND"
+  | "PICKUP_DEADLINE"
+  | "PICKUP_EXPIRED"
+  | "CAMPAIGN_POSTPONED";
+export type OrderNotificationStatus =
+  | "PENDING_DELIVERY"
+  /** A provider submission may have happened; never resend without a provider idempotency/query contract. */
+  | "SUBMISSION_UNKNOWN"
+  | "WECHAT_SENT"
+  | "IN_APP_AVAILABLE"
+  | "MANUAL_REQUIRED"
+  | "MANUAL_COMPLETED";
 export interface OrderNotification {
-  id:string; eventKey:string; userId:string; orderId:string; type:OrderNotificationType; title:string; content:string;
-  status:OrderNotificationStatus; readAt:string|null; manualCompletedAt:string|null; createdAt:string;
-  deliveryAttempts:number; nextAttemptAt:string|null; deliveryLeaseUntil:string|null; deliveryClaimToken:string|null; lastDeliveryError:string|null; deliveredAt:string|null;
+  id: string;
+  eventKey: string;
+  userId: string;
+  orderId: string;
+  type: OrderNotificationType;
+  title: string;
+  content: string;
+  status: OrderNotificationStatus;
+  readAt: string | null;
+  manualCompletedAt: string | null;
+  /** The managed staff member who recorded a compliant out-of-system completion. */
+  manualCompletedBy: string | null;
+  /** Required operator record; it must never replace the original completion fact. */
+  manualCompletionNote: string | null;
+  createdAt: string;
+  deliveryAttempts: number;
+  nextAttemptAt: string | null;
+  deliveryLeaseUntil: string | null;
+  deliveryClaimToken: string | null;
+  /** Durable at-most-once fence created before any provider call. */
+  providerSubmissionAttemptId: string | null;
+  providerSubmissionStartedAt: string | null;
+  providerResultRecordedAt: string | null;
+  providerReceiptId: string | null;
+  submissionUnknownReason: string | null;
+  lastDeliveryError: string | null;
+  deliveredAt: string | null;
 }
-export interface NotificationPreference { userId:string; types:OrderNotificationType[]; updatedAt:string }
+export interface NotificationPreference {
+  userId: string;
+  types: OrderNotificationType[];
+  updatedAt: string;
+}

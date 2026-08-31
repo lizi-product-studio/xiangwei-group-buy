@@ -24,7 +24,7 @@
   <view wx:for="{{points}}" wx:key="id" class="area-group">
     <view class="point-row {{selectedId === item.id ? 'point-row--selected' : ''}}" data-id="{{item.id}}" bindtap="choosePoint">
       <view class="point-row__pin">点</view>
-      <view class="point-row__copy"><text>{{item.name}}</text><text>{{item.address}}</text></view>
+      <view class="point-row__copy"><text>{{item.name}}</text><text>{{item.address}}</text><text wx:if="{{item.businessHours}}">营业时间：{{item.businessHours}}</text><text wx:if="{{item.pickupInstructions}}">领取提示：{{item.pickupInstructions}}</text><text wx:if="{{item.contactName || item.contactPhone}}">联系人：{{item.contactName || '点位负责人'}} {{item.contactPhone}}</text><view class="point-row__actions"><text data-id="{{item.id}}" catchtap="openLocation">一键导航</text><text data-id="{{item.id}}" catchtap="callPoint">拨打电话</text></view></view>
       <text class="point-row__check">{{selectedId === item.id ? '已选择' : '选择'}}</text>
     </view>
   </view>

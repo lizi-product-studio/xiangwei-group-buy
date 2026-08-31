@@ -44,7 +44,7 @@ export class AuthService {
       }
       if (!value || value.status !== 'ACTIVE') throw new BusinessError('FORBIDDEN', '账号当前不可用', 403);
       await store.savePrivacyConsent(value.id, privacyVersion);
-      await store.saveAuthSession({ tokenHash: tokenHash(token), userId: value.id, roles: ['USER'], expiresAt });
+      await store.saveAuthSession({ tokenHash: tokenHash(token), userId: value.id, roles: ['USER'], authorizationVersion: 0, expiresAt });
       return value;
     });
     return { accessToken: token, expiresAt, userId: user.id };

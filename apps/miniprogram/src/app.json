@@ -12,7 +12,8 @@
     "pages/interest/index",
     "pages/legal/index",
     "pages/after-sale/index",
-    "pages/profile/index"
+    "pages/profile/index",
+    "pages/login/index"
   ],
   "window": {
     "navigationBarBackgroundColor": "#fffefb",

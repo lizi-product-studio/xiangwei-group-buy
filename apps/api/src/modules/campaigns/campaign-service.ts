@@ -1,24 +1,95 @@
-import { randomUUID } from 'node:crypto';
-import type { CreateCampaignInput, PostponeCampaignInput, UpdateCampaignInput } from '@hometown/api-contracts';
-import { BusinessError, transitionCampaign } from '@hometown/domain';
-import type { LegacyCommerceStore } from '../core/legacy-commerce-store.js';
-import type { Campaign, CampaignItemSnapshot, DeliveryPlan } from '../core/types.js';
-import { NoopCampaignScheduler, type CampaignScheduler } from './campaign-scheduler.js';
-import { isDeliveryPlanReadyForSale } from './sellability.js';
+import type { PostponeCampaignInput } from "@hometown/api-contracts";
+import { BusinessError, transitionCampaign } from "@hometown/domain";
+import type { CampaignScheduler } from "./campaign-scheduler.js";
+import type { CommerceStore } from "../core/store.js";
+import type { Campaign, DeliveryPlan, Order } from "../core/types.js";
+import { isDeliveryPlanReadyForSale } from "./sellability.js";
+
+export type CampaignPostponeAuditContext = {
+  actorId: string;
+  requestId: string;
+};
+export type CampaignActionAuditContext = CampaignPostponeAuditContext & {
+  reason: string | null;
+};
 
 export class CampaignService {
-  private refundHandler:((orderId:string)=>Promise<void>)|null=null;
-  private lockedHandler:((campaignId:string)=>Promise<void>)|null=null;
-  public constructor(private readonly store: LegacyCommerceStore, private readonly scheduler: CampaignScheduler = new NoopCampaignScheduler()) {}
-  public setRefundHandler(handler:(orderId:string)=>Promise<void>):void{this.refundHandler=handler;}
-  /** Called after the mode-B lock transaction commits, never inside legacy settlement code. */
-  public setLockedHandler(handler:(campaignId:string)=>Promise<void>):void{this.lockedHandler=handler;}
-
+  /** Creates a durable refund obligation inside the campaign transaction. */
+  private refundHandler: ((store: CommerceStore, orderId: string) => Promise<void>) | null = null;
+  /**
+   * Campaign time changes are customer-facing facts. The app supplies the
+   * notification outbox writer so this service can enqueue inside the same
+   * campaign transaction without acquiring a broad notification dependency.
+   */
+  private postponeNotificationHandler: ((
+    store: CommerceStore,
+    campaign: Campaign,
+    plan: DeliveryPlan,
+  ) => Promise<void>) | null = null;
+  private postponeAuditHandler: ((
+    store: CommerceStore,
+    context: CampaignPostponeAuditContext,
+    before: Campaign,
+    after: Campaign,
+  ) => Promise<void>) | null = null;
+  private actionAuditHandler: ((
+    store: CommerceStore,
+    context: CampaignActionAuditContext,
+    action: "CLOSE" | "CANCEL",
+    before: Campaign,
+    after: Campaign,
+  ) => Promise<void>) | null = null;
+  public constructor(
+    private readonly store: CommerceStore,
+    private readonly scheduler: CampaignScheduler,
+  ) {}
+  public setRefundHandler(handler: (store: CommerceStore, orderId: string) => Promise<void>): void {
+    this.refundHandler = handler;
+  }
+  public setPostponeNotificationHandler(
+    handler: (
+      store: CommerceStore,
+      campaign: Campaign,
+      plan: DeliveryPlan,
+    ) => Promise<void>,
+  ): void {
+    this.postponeNotificationHandler = handler;
+  }
+  /** The composition root supplies an audit writer backed by the same store. */
+  public setPostponeAuditHandler(
+    handler: (
+      store: CommerceStore,
+      context: CampaignPostponeAuditContext,
+      before: Campaign,
+      after: Campaign,
+    ) => Promise<void>,
+  ): void {
+    this.postponeAuditHandler = handler;
+  }
+  public setActionAuditHandler(
+    handler: (
+      store: CommerceStore,
+      context: CampaignActionAuditContext,
+      action: "CLOSE" | "CANCEL",
+      before: Campaign,
+      after: Campaign,
+    ) => Promise<void>,
+  ): void {
+    this.actionAuditHandler = handler;
+  }
+  private async createRefundObligation(
+    store: CommerceStore,
+    orderId: string,
+  ): Promise<void> {
+    if (!this.refundHandler)
+      throw new Error(
+        "CampaignService requires a refund obligation writer before cancelling paid orders",
+      );
+    await this.refundHandler(store, orderId);
+  }
   public async list(): Promise<Campaign[]> {
     return this.store.listCampaigns();
   }
-
-  /** Only expose campaigns that a customer can actually order from right now. */
   public async listPublic(now = Date.now()): Promise<Campaign[]> {
     const [campaigns, areas, plans, points] = await Promise.all([
       this.store.listCampaigns(),
@@ -26,259 +97,391 @@ export class CampaignService {
       this.store.listDeliveryPlans(),
       this.store.listPickupPoints(),
     ]);
-    const enabledAreaIds = new Set(areas.filter((area) => area.status === 'ENABLED' && area.orderEnabled).map((area) => area.id));
-    const activePointIds = new Set(points.filter((point) => point.status === 'ACTIVE').map((point) => point.id));
-    const planByCampaign = new Map(plans.map((plan) => [plan.campaignId, plan]));
+    const enabledAreas = new Set(
+      areas
+        .filter((area) => area.status === "ENABLED" && area.orderEnabled)
+        .map((area) => area.id),
+    );
+    const activePoints = new Set(
+      points
+        .filter((point) => point.status === "ACTIVE")
+        .map((point) => point.id),
+    );
+    const planByCampaign = new Map(
+      plans.map((plan) => [plan.campaignId, plan]),
+    );
     return campaigns.filter((campaign) => {
       const plan = planByCampaign.get(campaign.id);
-      return campaign.status === 'OPEN'
-        && Date.parse(campaign.cutoffAt) > now
-        && enabledAreaIds.has(campaign.serviceAreaId)
-        && plan?.serviceAreaId === campaign.serviceAreaId
-        && isDeliveryPlanReadyForSale(plan)
-        && activePointIds.has(plan.pickupPointId);
+      return (
+        campaign.status === "OPEN" &&
+        Date.parse(campaign.cutoffAt) > now &&
+        Boolean(campaign.estimatedArrivalStartAt) &&
+        Boolean(campaign.estimatedArrivalEndAt) &&
+        Date.parse(campaign.estimatedArrivalStartAt) >=
+          Date.parse(campaign.dispatchAt) &&
+        Date.parse(campaign.estimatedArrivalEndAt) >=
+          Date.parse(campaign.estimatedArrivalStartAt) &&
+        enabledAreas.has(campaign.serviceAreaId) &&
+        plan?.serviceAreaId === campaign.serviceAreaId &&
+        isDeliveryPlanReadyForSale(plan) &&
+        activePoints.has(plan.pickupPointId)
+      );
     });
   }
-
   public async getPublic(id: string, now = Date.now()): Promise<Campaign> {
-    const campaign = (await this.listPublic(now)).find((item) => item.id === id);
-    if (!campaign) throw new BusinessError('RESOURCE_NOT_FOUND', '团期不存在或当前不可购买', 404);
+    const campaign = (await this.listPublic(now)).find(
+      (item) => item.id === id,
+    );
+    if (!campaign)
+      throw new BusinessError(
+        "RESOURCE_NOT_FOUND",
+        "团期不存在或当前不可购买",
+        404,
+      );
     return campaign;
   }
-
-  public async get(id: string, store: LegacyCommerceStore = this.store): Promise<Campaign> {
+  public async get(
+    id: string,
+    store: CommerceStore = this.store,
+  ): Promise<Campaign> {
     const campaign = await store.getCampaign(id);
-    if (!campaign) throw new BusinessError('RESOURCE_NOT_FOUND', '团期不存在', 404);
+    if (!campaign)
+      throw new BusinessError("RESOURCE_NOT_FOUND", "团期不存在", 404);
     return campaign;
   }
-
-  private async getForUpdate(id: string, store: LegacyCommerceStore): Promise<Campaign> {
-    const campaign = await store.getCampaignForUpdate(id);
-    if (!campaign) throw new BusinessError('RESOURCE_NOT_FOUND', '团期不存在', 404);
-    return campaign;
-  }
-
-  public async create(input: CreateCampaignInput): Promise<Campaign> {
-    return this.store.transaction(async (store) => {
-      const area = (await store.listServiceAreas()).find((item) => item.id === input.serviceAreaId && item.status === 'ENABLED' && item.orderEnabled);
-      if (!area) throw new BusinessError('RESOURCE_NOT_FOUND', '服务区县不存在', 404);
-      const items = await this.snapshotItems(store, input.skuIds);
-      const now = new Date().toISOString();
-      const campaign: Campaign = {
-        id: randomUUID(),
-        ...input,
-      businessModelVersion:'LEGACY_MARKETPLACE', warehouseId:null, platformItems:[], communityItems:[],
-        skuIds: items.map((item) => item.skuId),
-        items,
-        status: 'DRAFT',
-        version: 1,
-        createdAt: now,
-      };
-      await store.saveCampaign(campaign);
-      const deliveryPlan: DeliveryPlan = {
-        id: randomUUID(), campaignId: campaign.id, serviceAreaId: campaign.serviceAreaId, pickupPointId:null, status: 'PENDING_SITE',
-        siteName: null, address: null, arrivalStartAt: null, arrivalEndAt: null,
-        contactName: null, contactPhone: null, vehicleOrderNo: null, driverName: null, driverPhone: null, vehiclePlate: null,
-        remark: null, confirmedAt: null, bookedAt: null, dispatchedAt: null, arrivedAt: null, createdAt: now, updatedAt: now,
-      };
-      await store.saveDeliveryPlan(deliveryPlan);
-      return campaign;
-    });
-  }
-
-  public async updateDraft(id: string, input: UpdateCampaignInput): Promise<Campaign> {
-    return this.store.transaction(async (store) => {
-      const current = await this.getForUpdate(id, store);
-      if (current.businessModelVersion !== 'LEGACY_MARKETPLACE') {
-        throw new BusinessError('INVALID_STATE_TRANSITION', '社区与平台采购团期必须使用各自的专用运营入口，不能通过历史团期编辑接口修改', 409);
-      }
-      if (current.status !== 'DRAFT') throw new BusinessError('INVALID_STATE_TRANSITION', '只有草稿团期可以编辑；已开售团期请新建下一期', 409);
-      const area = (await store.listServiceAreas()).find((item) => item.id === input.serviceAreaId && item.status === 'ENABLED' && item.orderEnabled);
-      if (!area) throw new BusinessError('RESOURCE_NOT_FOUND', '收货区域不存在或已暂停收单', 404);
-      const items = await this.snapshotItems(store, input.skuIds, current.id);
-      const updated: Campaign = { ...current, ...input, skuIds: items.map((item) => item.skuId), items, version: current.version + 1 };
-      if (!(await store.updateCampaign(updated, current.version))) throw new BusinessError('CONCURRENT_MODIFICATION', '团期已被其他操作更新，请刷新后重试', 409);
-      await store.replaceCampaignItems(updated);
-      if(current.serviceAreaId!==updated.serviceAreaId){const plan=await store.getDeliveryPlanByCampaign(id);if(plan){plan.serviceAreaId=updated.serviceAreaId;plan.pickupPointId=null;plan.status='PENDING_SITE';plan.siteName=null;plan.address=null;plan.arrivalStartAt=null;plan.arrivalEndAt=null;plan.contactName=null;plan.contactPhone=null;plan.vehicleOrderNo=null;plan.driverName=null;plan.driverPhone=null;plan.vehiclePlate=null;plan.confirmedAt=null;plan.bookedAt=null;plan.updatedAt=new Date().toISOString();await store.saveDeliveryPlan(plan);}}
-      return updated;
-    });
-  }
-
-  public async postpone(id: string, input: PostponeCampaignInput): Promise<Campaign> {
-    const campaign = await this.store.transaction(async (store) => {
-      const current = await this.getForUpdate(id, store);
-      if (current.status !== 'POSTPONED') throw new BusinessError('INVALID_STATE_TRANSITION', '只有已顺延团期可以设置新的收单时间', 409);
-      const area = (await store.listServiceAreas()).find((item) => item.id === current.serviceAreaId && item.status === 'ENABLED' && item.orderEnabled);
-      if (!area) throw new BusinessError('INVALID_STATE_TRANSITION', '收货区县当前暂停收单，不能恢复团期', 409);
-      if (Date.parse(input.cutoffAt) <= Date.now()) throw new BusinessError('VALIDATION_ERROR', '新的截单时间必须晚于当前时间', 400);
-      const updated: Campaign = { ...current, cutoffAt: input.cutoffAt, dispatchAt: input.dispatchAt, status: transitionCampaign(current.status, 'OPEN'), version: current.version + 1 };
-      if (!(await store.updateCampaign(updated, current.version))) throw new BusinessError('CONCURRENT_MODIFICATION', '团期已被其他操作更新，请刷新后重试', 409);
-      return updated;
-    });
-    await this.scheduler.scheduleClose(campaign.id, campaign.cutoffAt, campaign.version).catch(() => undefined);
-    return campaign;
-  }
-
-  public async cancel(id: string): Promise<Campaign> {
-    await this.scheduler.cancelClose(id).catch(() => undefined);
-    const refundOrderIds: string[] = [];
+  public async postpone(
+    id: string,
+    input: PostponeCampaignInput,
+    context: CampaignPostponeAuditContext,
+  ): Promise<Campaign> {
     const result = await this.store.transaction(async (store) => {
-      const campaign = await this.getForUpdate(id, store);
-      if (!['DRAFT', 'OPEN', 'POSTPONED'].includes(campaign.status)) throw new BusinessError('INVALID_STATE_TRANSITION', '当前团期不能取消；已成团请通过售后流程处理', 409);
-      const expectedVersion = campaign.version;
-      for (const order of await this.lockCampaignOrders(store, id)) {
-        if (order.status === 'PENDING_PAYMENT') {
-          if (await this.cancelPendingAndRelease(store, order)) continue;
-          const latest = await store.getOrder(order.id);
-          if (latest?.status === 'PAID_WAITING_CLOSE' && await this.refundPaidAndRelease(store, latest)) refundOrderIds.push(latest.id);
-        } else if (order.status === 'PAID_WAITING_CLOSE') {
-          if (await this.refundPaidAndRelease(store, order)) refundOrderIds.push(order.id);
-        }
-      }
-      campaign.status = transitionCampaign(campaign.status, 'CANCELLED');
-      campaign.version += 1;
-      if (!(await store.updateCampaign(campaign, expectedVersion))) throw new BusinessError('CONCURRENT_MODIFICATION', '团期已被其他操作更新，请刷新后重试', 409);
+      const campaign = await store.getCampaignForUpdate(id);
+      if (!campaign)
+        throw new BusinessError("RESOURCE_NOT_FOUND", "团期不存在", 404);
+      if (campaign.status !== "POSTPONED")
+        throw new BusinessError(
+          "INVALID_STATE_TRANSITION",
+          "只有已顺延团期可以重新开售",
+          409,
+        );
+      const before = structuredClone(campaign);
+      const now = Date.now();
+      if (
+        [
+          input.cutoffAt,
+          input.dispatchAt,
+          input.estimatedArrivalStartAt,
+          input.estimatedArrivalEndAt,
+        ].some((value) => Date.parse(value) <= now)
+      )
+        throw new BusinessError(
+          "VALIDATION_ERROR",
+          "顺延后的截单、发车和预计到货时间必须晚于当前时间",
+          400,
+        );
+      const arrivalStartAt = input.estimatedArrivalStartAt;
+      const arrivalEndAt = input.estimatedArrivalEndAt;
+      if (
+        !arrivalStartAt ||
+        !arrivalEndAt ||
+        Date.parse(arrivalStartAt) < Date.parse(input.dispatchAt) ||
+        Date.parse(arrivalEndAt) < Date.parse(arrivalStartAt)
+      )
+        throw new BusinessError(
+          "VALIDATION_ERROR",
+          "顺延后必须保留有效的预计到货时间窗口",
+          400,
+        );
+      const expected = campaign.version;
+      Object.assign(campaign, input, {
+        status: transitionCampaign(campaign.status, "OPEN"),
+        version: expected + 1,
+      });
+      const deliveryPlan = await store.getDeliveryPlanByCampaign(id);
+      if (!deliveryPlan)
+        throw new BusinessError(
+          "DELIVERY_SITE_NOT_CONFIRMED",
+          "顺延团期缺少固定自提点配送计划",
+          409,
+        );
+      deliveryPlan.arrivalStartAt = arrivalStartAt;
+      deliveryPlan.arrivalEndAt = arrivalEndAt;
+      deliveryPlan.updatedAt = new Date().toISOString();
+      await store.saveDeliveryPlan(deliveryPlan);
+      if (!(await store.updateCampaign(campaign, expected)))
+        throw new BusinessError(
+          "CONCURRENT_MODIFICATION",
+          "团期已被其他操作更新",
+          409,
+        );
+      if (this.postponeNotificationHandler)
+        await this.postponeNotificationHandler(store, campaign, deliveryPlan);
+      if (this.postponeAuditHandler)
+        await this.postponeAuditHandler(store, context, before, campaign);
       return campaign;
     });
-    if (this.refundHandler) await Promise.allSettled(refundOrderIds.map((orderId) => this.refundHandler!(orderId)));
+    await this.scheduler
+      .scheduleClose(result.id, result.cutoffAt, result.version)
+      .catch(() => undefined);
     return result;
   }
-
   public async open(id: string): Promise<Campaign> {
-    const campaign = await this.store.transaction(async (store) => {
-      const value = await this.getForUpdate(id, store);
-      if (Date.parse(value.cutoffAt) <= Date.now()) {
-        throw new BusinessError('CAMPAIGN_CLOSED', '截单时间已过，不能开售', 409);
-      }
-      const area = (await store.listServiceAreas()).find((item) => item.id === value.serviceAreaId && item.status === 'ENABLED' && item.orderEnabled);
-      if (!area) throw new BusinessError('INVALID_STATE_TRANSITION', '收货区县当前暂停收单，不能开售', 409);
-      const plan=await store.getDeliveryPlanByCampaign(value.id);const point=plan?.pickupPointId?(await store.listPickupPoints(value.serviceAreaId)).find((item)=>item.id===plan.pickupPointId&&item.status==='ACTIVE'):null;
-      if(!plan||plan.status==='PENDING_SITE'||!point)throw new BusinessError('DELIVERY_SITE_NOT_CONFIRMED','请先为团期选择已启用的固定自提点，再开售',409);
-      const expectedVersion = value.version;
-      value.status = transitionCampaign(value.status, 'OPEN');
-      value.version += 1;
-      if (!(await store.updateCampaign(value, expectedVersion))) {
-        throw new BusinessError('CONCURRENT_MODIFICATION', '团期已被其他操作更新，请刷新后重试', 409);
-      }
-      return value;
+    const result = await this.store.transaction(async (store) => {
+      const campaign = await store.getCampaignForUpdate(id);
+      if (!campaign)
+        throw new BusinessError("RESOURCE_NOT_FOUND", "团期不存在", 404);
+      if (Date.parse(campaign.cutoffAt) <= Date.now())
+        throw new BusinessError(
+          "CAMPAIGN_CLOSED",
+          "截单时间已过，不能开售",
+          409,
+        );
+      const area = (await store.listServiceAreas()).find(
+        (item) =>
+          item.id === campaign.serviceAreaId &&
+          item.status === "ENABLED" &&
+          item.orderEnabled,
+      );
+      const plan = await store.getDeliveryPlanByCampaign(id);
+      const point = plan
+        ? (await store.listPickupPoints(campaign.serviceAreaId)).find(
+            (item) =>
+              item.id === plan.pickupPointId && item.status === "ACTIVE",
+          )
+        : null;
+      if (!area || !plan || !point || !isDeliveryPlanReadyForSale(plan))
+        throw new BusinessError(
+          "DELIVERY_SITE_NOT_CONFIRMED",
+          "服务区域或固定自提点不可用",
+          409,
+        );
+      if (
+        !campaign.estimatedArrivalStartAt ||
+        !campaign.estimatedArrivalEndAt ||
+        Date.parse(campaign.estimatedArrivalStartAt) <
+          Date.parse(campaign.dispatchAt) ||
+        Date.parse(campaign.estimatedArrivalEndAt) <
+          Date.parse(campaign.estimatedArrivalStartAt)
+      )
+        throw new BusinessError(
+          "DELIVERY_SITE_NOT_CONFIRMED",
+          "开售前必须配置有效的预计到货时间窗口",
+          409,
+        );
+      const expected = campaign.version;
+      campaign.status = transitionCampaign(campaign.status, "OPEN");
+      campaign.version += 1;
+      if (!(await store.updateCampaign(campaign, expected)))
+        throw new BusinessError(
+          "CONCURRENT_MODIFICATION",
+          "团期已被其他操作更新",
+          409,
+        );
+      return campaign;
     });
-    await this.scheduler.scheduleClose(campaign.id, campaign.cutoffAt, campaign.version).catch(() => undefined);
-    return campaign;
+    await this.scheduler
+      .scheduleClose(result.id, result.cutoffAt, result.version)
+      .catch(() => undefined);
+    return result;
   }
-
-  public async close(id: string, triggeredByScheduler = false, scheduledVersion?: number): Promise<Campaign> {
+  public async close(
+    id: string,
+    triggeredByScheduler = false,
+    scheduledVersion?: number,
+    context?: CampaignActionAuditContext,
+  ): Promise<Campaign> {
     if (!triggeredByScheduler) {
       const campaign = await this.get(id);
-      if (Date.parse(campaign.cutoffAt) > Date.now()) {
-        throw new BusinessError('CAMPAIGN_CLOSED', '未到截单时间，不能提前结团', 409);
-      }
+      if (Date.parse(campaign.cutoffAt) > Date.now())
+        throw new BusinessError(
+          "CAMPAIGN_CLOSED",
+          "未到截单时间，不能提前结团",
+          409,
+        );
+      await this.scheduler.cancelClose(id).catch(() => undefined);
     }
-    if (!triggeredByScheduler) await this.scheduler.cancelClose(id).catch(() => undefined);
-    const refundOrderIds:string[]=[];
-    const result=await this.store.transaction(async (store) => {
-    const campaign = await this.getForUpdate(id, store);
-    if (scheduledVersion !== undefined && campaign.version !== scheduledVersion) return campaign;
-    if (['LOCKED', 'POSTPONED', 'CANCELLED', 'FULFILLING', 'COMPLETED'].includes(campaign.status)) return campaign;
-    const expectedVersion = campaign.version;
-    campaign.status = transitionCampaign(campaign.status, 'CLOSING');
-    const campaignOrders = await this.lockCampaignOrders(store, id);
-    const totalQuantity = campaignOrders
-      .filter((order) => order.campaignId === id && order.status === 'PAID_WAITING_CLOSE')
-      .flatMap((order) => order.items)
-      .reduce((sum, item) => sum + item.quantity, 0);
-
-    if (totalQuantity >= campaign.minTotalQuantity) {
-      campaign.status = transitionCampaign(campaign.status, 'LOCKED');
-      for (const order of campaignOrders) {
-        if (order.campaignId === id && order.status === 'PAID_WAITING_CLOSE') {
-          await store.transitionOrderStatus(order.id, ['PAID_WAITING_CLOSE'], 'LOCKED');
-        } else if (order.campaignId === id && order.status === 'PENDING_PAYMENT') {
-          if (await this.cancelPendingAndRelease(store, order)) continue;
-          const latest = await store.getOrder(order.id);
-          if (latest?.status === 'PAID_WAITING_CLOSE' && await this.refundPaidAndRelease(store, latest)) refundOrderIds.push(latest.id);
+    const result = await this.store.transaction(async (store) => {
+      const campaign = await store.getCampaignForUpdate(id);
+      if (!campaign)
+        throw new BusinessError("RESOURCE_NOT_FOUND", "团期不存在", 404);
+      if (
+        scheduledVersion !== undefined &&
+        campaign.version !== scheduledVersion
+      )
+        return campaign;
+      if (
+        [
+          "LOCKED",
+          "POSTPONED",
+          "CANCELLED",
+          "FULFILLING",
+          "COMPLETED",
+        ].includes(campaign.status)
+      )
+        return campaign;
+      const before = structuredClone(campaign);
+      const expected = campaign.version;
+      campaign.status = transitionCampaign(campaign.status, "CLOSING");
+      const orders = await store.listOrdersByCampaign(id);
+      const quantity = orders
+        .filter((order) => order.status === "PAID_WAITING_CLOSE")
+        .flatMap((order) => order.items)
+        .reduce((sum, item) => sum + item.quantity, 0);
+      if (quantity >= campaign.minTotalQuantity) {
+        campaign.status = transitionCampaign(campaign.status, "LOCKED");
+        for (const order of orders) {
+          if (order.status === "PAID_WAITING_CLOSE")
+            await store.transitionOrderStatus(
+              order.id,
+              ["PAID_WAITING_CLOSE"],
+              "LOCKED",
+            );
+          else if (order.status === "PENDING_PAYMENT")
+            await this.cancelPending(store, order);
+        }
+      } else if (campaign.failureAction === "POSTPONE") {
+        campaign.status = transitionCampaign(campaign.status, "POSTPONED");
+      } else {
+        campaign.status = transitionCampaign(campaign.status, "CANCELLED");
+        for (const order of orders) {
+          if (order.status === "PENDING_PAYMENT")
+            await this.cancelPending(store, order);
+          else if (
+            order.status === "PAID_WAITING_CLOSE" &&
+            (await this.markRefunding(store, order))
+          )
+            await this.createRefundObligation(store, order.id);
         }
       }
-    } else if (campaign.failureAction === 'POSTPONE') {
-      campaign.status = transitionCampaign(campaign.status, 'POSTPONED');
-    } else {
-      campaign.status = transitionCampaign(campaign.status, 'CANCELLED');
-      for (const order of campaignOrders) {
-        if (order.status === 'PAID_WAITING_CLOSE') {
-          if (await this.refundPaidAndRelease(store, order)) refundOrderIds.push(order.id);
-        }
-        if (order.status === 'PENDING_PAYMENT') {
-          if (await this.cancelPendingAndRelease(store, order)) continue;
-          const latest = await store.getOrder(order.id);
-          if (latest?.status === 'PAID_WAITING_CLOSE' && await this.refundPaidAndRelease(store, latest)) refundOrderIds.push(latest.id);
-        }
-      }
-    }
-    campaign.version += 1;
-    if (!(await store.updateCampaign(campaign, expectedVersion))) {
-      throw new BusinessError('CONCURRENT_MODIFICATION', '团期已被其他操作更新，请刷新后重试', 409);
-    }
-    return campaign;
+      campaign.version += 1;
+      if (!(await store.updateCampaign(campaign, expected)))
+        throw new BusinessError(
+          "CONCURRENT_MODIFICATION",
+          "团期已被其他操作更新",
+          409,
+        );
+      if (context && this.actionAuditHandler)
+        await this.actionAuditHandler(
+          store,
+          context,
+          "CLOSE",
+          before,
+          campaign,
+        );
+      return campaign;
     });
-    if(this.refundHandler)await Promise.allSettled(refundOrderIds.map((orderId)=>this.refundHandler!(orderId)));
-    if(result.businessModelVersion==='PLATFORM_PROCUREMENT'&&result.status==='LOCKED'&&this.lockedHandler)await this.lockedHandler(result.id);
     return result;
   }
-
-  private async releaseOrderStock(store: LegacyCommerceStore, order: { campaignId: string; businessModelVersion:Campaign['businessModelVersion']; items: Array<{ skuId: string; quantity: number }> }): Promise<void> {
-    for (const item of order.items) {
-      const released = await store.releaseReservedCampaignInventory(order.campaignId, item.skuId, item.quantity, order.businessModelVersion);
-      if (!released) {
-        throw new BusinessError('INVENTORY_INCONSISTENT', '订单库存释放失败，已回滚本次结团', 500, {
-          campaignId: order.campaignId,
-          skuId: item.skuId,
-        });
+  public async cancel(
+    id: string,
+    context?: CampaignActionAuditContext,
+  ): Promise<Campaign> {
+    await this.scheduler.cancelClose(id).catch(() => undefined);
+    const result = await this.store.transaction(async (store) => {
+      const campaign = await store.getCampaignForUpdate(id);
+      if (!campaign)
+        throw new BusinessError("RESOURCE_NOT_FOUND", "团期不存在", 404);
+      if (!["DRAFT", "OPEN", "POSTPONED"].includes(campaign.status))
+        throw new BusinessError(
+          "INVALID_STATE_TRANSITION",
+          "当前团期不能取消",
+          409,
+        );
+      const before = structuredClone(campaign);
+      const expected = campaign.version;
+      for (const order of await store.listOrdersByCampaign(id)) {
+        if (order.status === "PENDING_PAYMENT")
+          await this.cancelPending(store, order);
+        else if (
+          order.status === "PAID_WAITING_CLOSE" &&
+          (await this.markRefunding(store, order))
+        )
+          await this.createRefundObligation(store, order.id);
       }
-    }
+      campaign.status = transitionCampaign(campaign.status, "CANCELLED");
+      campaign.version += 1;
+      if (!(await store.updateCampaign(campaign, expected)))
+        throw new BusinessError(
+          "CONCURRENT_MODIFICATION",
+          "团期已被其他操作更新",
+          409,
+        );
+      if (context && this.actionAuditHandler)
+        await this.actionAuditHandler(
+          store,
+          context,
+          "CANCEL",
+          before,
+          campaign,
+        );
+      return campaign;
+    });
+    return result;
   }
-
-  private async cancelPendingAndRelease(store: LegacyCommerceStore, order: { id:string; campaignId:string; businessModelVersion:Campaign['businessModelVersion']; items:Array<{skuId:string;quantity:number}> }): Promise<boolean> {
-    if (!(await store.transitionOrderStatus(order.id, ['PENDING_PAYMENT'], 'CANCELLED'))) return false;
-    await this.releaseOrderStock(store, order);
+  public async cancelImpact(id: string): Promise<{
+    pendingPaymentOrderCount: number;
+    paidOrderCount: number;
+    estimatedRefundCents: number;
+  }> {
+    const campaign = await this.get(id);
+    if (!["DRAFT", "OPEN", "POSTPONED"].includes(campaign.status))
+      throw new BusinessError("INVALID_STATE_TRANSITION", "当前团期不能取消", 409);
+    const orders = await this.store.listOrdersByCampaign(id);
+    const paid = orders.filter((order) => Boolean(order.paidAt));
+    return {
+      pendingPaymentOrderCount: orders.filter(
+        (order) => order.status === "PENDING_PAYMENT",
+      ).length,
+      paidOrderCount: paid.length,
+      estimatedRefundCents: paid
+        .filter((order) => order.status !== "CANCELLED")
+        .reduce((sum, order) => sum + Number(order.totalCents), 0),
+    };
+  }
+  private async cancelPending(
+    store: CommerceStore,
+    order: Order,
+  ): Promise<void> {
+    if (!(await store.cancelPendingOrder(order.id))) return;
+    for (const item of order.items)
+      if (
+        !(await store.releaseCampaignInventory(
+          order.campaignId,
+          item.skuId,
+          item.quantity,
+        ))
+      )
+        throw new BusinessError(
+          "INVENTORY_INCONSISTENT",
+          "取消订单释放库存失败",
+          500,
+        );
+  }
+  private async markRefunding(
+    store: CommerceStore,
+    order: Order,
+  ): Promise<boolean> {
+    if (
+      !(await store.transitionOrderStatus(
+        order.id,
+        ["PAID_WAITING_CLOSE"],
+        "REFUNDING",
+      ))
+    )
+      return false;
+    for (const item of order.items)
+      if (
+        !(await store.releaseCampaignInventory(
+          order.campaignId,
+          item.skuId,
+          item.quantity,
+        ))
+      )
+        throw new BusinessError(
+          "INVENTORY_INCONSISTENT",
+          "退款释放库存失败",
+          500,
+        );
     return true;
-  }
-
-  private async refundPaidAndRelease(store: LegacyCommerceStore, order: { id:string; campaignId:string; businessModelVersion:Campaign['businessModelVersion']; items:Array<{skuId:string;quantity:number}> }): Promise<boolean> {
-    if (!(await store.transitionOrderStatus(order.id, ['PAID_WAITING_CLOSE'], 'REFUNDING'))) return false;
-    await this.releaseOrderStock(store, order);
-    return true;
-  }
-
-  private async lockCampaignOrders(store: LegacyCommerceStore, campaignId: string) {
-    const summaries = await store.listOrdersByCampaign(campaignId);
-    const locked = await Promise.all([...summaries].sort((left, right) => left.id.localeCompare(right.id)).map((order) => store.getOrderForUpdate(order.id)));
-    return locked.filter((order): order is NonNullable<typeof order> => order !== null);
-  }
-
-  private async snapshotItems(store: LegacyCommerceStore, skuIds: string[], excludeCampaignId?: string): Promise<CampaignItemSnapshot[]> {
-    const uniqueSkuIds = [...new Set(skuIds)];
-    // Every create/edit runs inside a store transaction. Lock in a stable order so two
-    // operators cannot both reserve the same unallocated SKU quantity for different campaigns.
-    const lockedSkus = new Map<string, Awaited<ReturnType<LegacyCommerceStore['getSkuForUpdate']>>>();
-    for (const skuId of [...uniqueSkuIds].sort()) lockedSkus.set(skuId, await store.getSkuForUpdate(skuId));
-    const products = new Map((await store.listProducts()).map((product) => [product.sku.id, product]));
-    const activeCampaigns = (await store.listCampaigns()).filter((campaign) => campaign.id !== excludeCampaignId && !['CANCELLED', 'COMPLETED'].includes(campaign.status));
-    const snapshots: CampaignItemSnapshot[] = [];
-    for (const skuId of uniqueSkuIds) {
-      const product = products.get(skuId);
-      const purchasableSku = lockedSkus.get(skuId);
-      if (!product || !purchasableSku) throw new BusinessError('RESOURCE_NOT_FOUND', `商品 ${skuId} 不存在或当前不可开团`, 404);
-      const allocatedElsewhere = activeCampaigns
-        .flatMap((campaign) => campaign.items)
-        .filter((item) => item.skuId === skuId)
-        .reduce((sum, item) => sum + Math.max(0, item.stock - item.soldQuantity), 0);
-      const available = product.sku.stock - product.sku.soldQuantity - allocatedElsewhere;
-      if (available <= 0) throw new BusinessError('OUT_OF_STOCK', `${product.title} 已无可售库存`, 409);
-      snapshots.push({
-        skuId, productId: product.id, merchantId: product.merchantId, title: product.title, category: product.category,
-        skuName: product.sku.name, origin: product.origin, imageUrl: product.imageUrl,
-        unitPriceCents: product.sku.unitPriceCents, stock: available, soldQuantity: 0, commissionRateBps: purchasableSku.commissionRateBps,
-      });
-    }
-    return snapshots;
   }
 }
