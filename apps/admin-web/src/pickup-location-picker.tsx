@@ -8,6 +8,9 @@ import { pickupSearchQuery, resolvePickupAddress } from "./pickup-address.ts";
 
 const defaultCenter: [number, number] = [35.6, 104.1];
 const round6 = (value: number) => Number(value.toFixed(6));
+export const isLocationServiceUnconfigured = (error: unknown) =>
+  Boolean(error && typeof error === "object" &&
+    (error as { code?: string }).code === "LOCATION_VERIFICATION_NOT_CONFIGURED");
 
 export type LocatedPlace = {
   latitude: number;
@@ -71,6 +74,7 @@ export function PickupLocationPicker({
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [mapError, setMapError] = useState<string | null>(null);
+  const [configurationError, setConfigurationError] = useState(false);
   const [verificationState, setVerificationState] =
     useState<PickupLocationVerificationState>("UNCONFIRMED");
   const [searchRetry, setSearchRetry] = useState(0);
@@ -115,6 +119,7 @@ export function PickupLocationPicker({
     void api
       .reversePlace(latitude, longitude)
       .then((place) => {
+        setConfigurationError(false);
         if (!place) {
           setMapError("该位置无法映射到行政目录，请移动图钉后重试");
           reportVerificationState("FAILED");
@@ -124,7 +129,13 @@ export function PickupLocationPicker({
         setMapError(null);
         reportVerificationState("CONFIRMED");
       })
-      .catch(() => {
+      .catch((error) => {
+        if (isLocationServiceUnconfigured(error)) {
+          setConfigurationError(true);
+          setMapError(null);
+          reportVerificationState("FAILED");
+          return;
+        }
         setMapError("位置核验暂时不可用，已保留图钉和输入，可重试或取消");
         reportVerificationState("FAILED");
       });
@@ -246,9 +257,16 @@ export function PickupLocationPicker({
       void api
         .searchPlaces(query)
         .then((places) => {
+          setConfigurationError(false);
           setOptions(places);
         })
-        .catch(() => {
+        .catch((error) => {
+          if (isLocationServiceUnconfigured(error)) {
+            setConfigurationError(true);
+            setSearchError(null);
+            reportVerificationState("FAILED");
+            return;
+          }
           setOptions([]);
           setSearchError("地点搜索暂时不可用，已保留本次输入。可重试或改用地图选点。");
           reportVerificationState("FAILED");
@@ -330,7 +348,22 @@ export function PickupLocationPicker({
             : "请选择服务区域并填写详细地址，或在地图上点选"}
       </Typography.Text>
       <div aria-live="polite">
-        {searchError && (
+        {configurationError ? (
+          <Typography.Paragraph type="danger">
+            地点服务尚未配置，暂时不能新建或修改位置；请管理员配置后重试。{" "}
+            <Button
+              type="link"
+              size="small"
+              onClick={() => {
+                setConfigurationError(false);
+                if (latitude != null && longitude != null) reverseAt(latitude, longitude);
+                else setSearchRetry((value) => value + 1);
+              }}
+            >
+              重新检测
+            </Button>
+          </Typography.Paragraph>
+        ) : searchError && (
           <Typography.Paragraph type="danger">
             {searchError}{" "}
             <Button
@@ -345,7 +378,7 @@ export function PickupLocationPicker({
             </Button>
           </Typography.Paragraph>
         )}
-        {mapError && (
+        {!configurationError && mapError && (
           <Typography.Paragraph type="danger">
             {mapError}{" "}
             {latitude != null && longitude != null && (

@@ -66,6 +66,7 @@ export interface Order {
 export interface CatalogSku {
   id: string;
   productId: string;
+  categoryId?: string | null;
   name: string;
   retailPriceCents: MoneyCents;
   defaultSellableQuantity: number;
@@ -79,6 +80,15 @@ export interface CatalogSku {
     storageType: "NORMAL_TEMPERATURE";
     status: "DRAFT" | "ACTIVE" | "OFF_SHELF";
   };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProductCategory {
+  id: string;
+  name: string;
+  sortOrder: number;
+  status: "ACTIVE" | "INACTIVE";
   createdAt: string;
   updatedAt: string;
 }

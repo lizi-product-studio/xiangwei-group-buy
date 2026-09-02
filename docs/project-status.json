@@ -4,7 +4,7 @@
   "approval_authority": "BLOCKING_UNKNOWN",
   "blocked": null,
   "complexity": "Complex",
-  "current_state": "REWORK_ENGINEERING",
+  "current_state": "RELEASE_EVIDENCE",
   "execution_control": {
     "active_attempts": 0,
     "active_sessions": [],
@@ -22,9 +22,9 @@
       "version": null
     },
     "build": {
-      "evidence": [],
-      "status": "PENDING",
-      "version": null
+      "evidence": ["evidence/admin-operability-closure-2026-09-02.md"],
+      "status": "PASS",
+      "version": "admin-operability-2026-09-02"
     },
     "product": {
       "evidence": [],
@@ -32,14 +32,14 @@
       "version": null
     },
     "qa": {
-      "evidence": [],
-      "status": "PENDING",
-      "version": null
+      "evidence": ["evidence/admin-operability-closure-2026-09-02.md"],
+      "status": "PASS",
+      "version": "admin-operability-2026-09-02"
     },
     "release": {
-      "evidence": [],
-      "status": "PENDING",
-      "version": null
+      "evidence": ["evidence/admin-operability-closure-2026-09-02.md"],
+      "status": "BLOCKED_EXTERNAL",
+      "version": "admin-operability-2026-09-02"
     },
     "requirements": {
       "evidence": [],
@@ -58,7 +58,7 @@
     }
   },
   "open_p0_p1": [],
-  "previous_state": "DISCOVERY",
+  "previous_state": "REWORK_ENGINEERING",
   "project": "社区团购",
   "quality_gates": {
     "problem": {
@@ -92,24 +92,9 @@
       "version": null
     }
   },
-  "rework": {
-    "defect_id": "PICKUP-LOCATION-IMPLEMENTATION",
-    "severity": "P1",
-    "failed_criterion": "已批准的自提点定位契约尚未在管理端、API 和确定性测试中实现",
-    "evidence": "evidence/pickup-location-quality-governor-rereview-2026-08-31.md",
-    "primary_owner": "engineering_lead",
-    "affected_artifacts": [
-      "packages/api-contracts/src/index.ts",
-      "apps/api/src/app.ts",
-      "apps/api/src/modules/service-areas/geo-search.ts",
-      "apps/admin-web/src/App.tsx",
-      "apps/admin-web/src/pickup-location-picker.tsx"
-    ],
-    "required_correction": "按已通过 Quality Governor 复核的契约实现单一行政归属、提供方无关校验、安全失败、PATCH 保留和重复提示，并通过独立 QA",
-    "reentry_gate": "CODE_REVIEW"
-  },
+  "rework": null,
   "risk_acceptance_authority": "BLOCKING_UNKNOWN",
   "schema_version": 3,
-  "updated_at": "2026-08-31T06:56:55.540362+00:00",
+  "updated_at": "2026-09-02T04:25:42Z",
   "updated_by": "orchestrator"
 }

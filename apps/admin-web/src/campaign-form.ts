@@ -52,10 +52,25 @@ const validationFieldLabels: Record<string, string> = {
   catalogSkuId: "商品",
   retailPriceCents: "团期售价",
   sellableQuantity: "可售量",
+  name: "分类名称",
+  sortOrder: "分类排序",
+  categoryId: "分类",
+  skuName: "销售规格",
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function translateValidationMessage(field: string, message: string): string {
+  if (/at least (\d+) character/i.test(message)) {
+    return `${field}至少 ${message.match(/at least (\d+) character/i)?.[1]} 个字符`;
+  }
+  if (/at most (\d+) character/i.test(message)) {
+    return `${field}不能超过 ${message.match(/at most (\d+) character/i)?.[1]} 个字符`;
+  }
+  if (/Invalid input/i.test(message)) return `${field}格式不正确`;
+  return message;
 }
 
 /** Convert Fastify/Zod validation issues into field-labelled operator copy. */
@@ -76,7 +91,8 @@ export function formatValidationDetails(details: unknown): string | null {
       const field = path.length
         ? validationFieldLabels[path[0] ?? ""] ?? path.join(".")
         : "";
-      return field ? `${field}：${detail.message}` : detail.message;
+      const readable = translateValidationMessage(field, detail.message);
+      return field ? `${field}：${readable}` : readable;
     })
     .filter((message): message is string => Boolean(message));
   const unique = [...new Set(messages)];

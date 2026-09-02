@@ -271,7 +271,7 @@ Page({
       if (!current()) return;
       void wx.showModal({
         title: "支付未完成",
-        content: error instanceof Error ? error.message : "请稍后重试",
+        content: "支付暂未完成，请稍后在订单详情继续支付。",
         showCancel: false,
       });
     } finally {

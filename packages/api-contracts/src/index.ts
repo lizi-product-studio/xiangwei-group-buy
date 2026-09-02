@@ -79,6 +79,7 @@ export const internalStaffDirectoryQuerySchema = z.object({
 export const catalogSkuSchema = z.object({
   id: identifierSchema.optional(),
   productId: identifierSchema.optional(),
+  categoryId: identifierSchema.nullable().optional(),
   title: z.string().trim().min(2).max(160),
   category: z.string().trim().min(2).max(40),
   origin: z.string().trim().min(2).max(160),
@@ -86,6 +87,12 @@ export const catalogSkuSchema = z.object({
   skuName: z.string().trim().min(1).max(160),
   retailPriceCents: z.int().min(1),
   defaultSellableQuantity: z.int().min(0).max(10_000_000).default(0),
+  status: z.enum(["ACTIVE", "INACTIVE"]).default("ACTIVE"),
+});
+export const productCategorySchema = z.object({
+  id: identifierSchema.optional(),
+  name: z.string().trim().min(2).max(40),
+  sortOrder: z.int().min(0).max(1_000_000).default(0),
   status: z.enum(["ACTIVE", "INACTIVE"]).default("ACTIVE"),
 });
 export const communityCampaignSchema = z
@@ -129,6 +136,17 @@ export const communityCampaignSchema = z
         path: ["estimatedArrivalEndAt"],
         message: "预计到货结束时间不能早于开始时间",
       });
+    const seen = new Set<string>();
+    for (const [index, item] of value.items.entries()) {
+      if (seen.has(item.catalogSkuId)) {
+        context.addIssue({
+          code: "custom",
+          path: ["items", index, "catalogSkuId"],
+          message: "同一商品不能重复添加",
+        });
+      }
+      seen.add(item.catalogSkuId);
+    }
   });
 export const postponeCampaignSchema = z
   .object({

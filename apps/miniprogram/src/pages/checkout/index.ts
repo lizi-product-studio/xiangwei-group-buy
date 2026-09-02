@@ -202,6 +202,7 @@ Page({
     const currentAction = () => actionCoordinator.isCurrent(action, customerAuth.captureSessionEpoch()) && customerAuth.isLoggedIn();
     if (!currentAction()) return;
     this.setData({ submitting: true });
+    let createdOrderId: string | null = null;
     try {
       // Save the key before the request. If the network loses the response, the next tap
       // returns this same order instead of creating and reserving stock for a second one.
@@ -221,6 +222,7 @@ Page({
         },
         submissionDraft.orderIdempotencyKey!,
       );
+      createdOrderId = order.id;
       if (!currentAction()) return;
       const provider = await payOrder(order.id, currentAction);
       if (!currentAction()) return;
@@ -260,9 +262,24 @@ Page({
         return;
       }
       if (!currentAction()) return;
+      if (createdOrderId) {
+        const result = await wx.showModal({
+          title: "订单已创建，支付暂未完成",
+          content: "订单已保留，支付可以稍后在订单详情继续完成。",
+          showCancel: true,
+          cancelText: "稍后处理",
+          confirmText: "查看订单",
+        });
+        if (!currentAction()) return;
+        if (result.confirm)
+          void wx.redirectTo({
+            url: `/pages/order-detail/index?id=${encodeURIComponent(createdOrderId)}`,
+          });
+        return;
+      }
       void wx.showModal({
-        title: "这次没有下成",
-        content: error instanceof Error ? error.message : "请稍后重试",
+        title: "订单提交失败",
+        content: "订单提交失败，请稍后重试。",
         showCancel: false,
       });
     } finally {

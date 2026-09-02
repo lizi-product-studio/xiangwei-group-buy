@@ -100,6 +100,10 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   await call(request, `/api/v1/admin/service-areas/${area.id}/order-status`, {
     orderEnabled: true,
   });
+  await call(request, "/api/v1/admin/catalog/categories", {
+    name: `蔬菜 ${suffix}`,
+    sortOrder: 1,
+  });
   const point = await call<{ id: string }>(
     request,
     "/api/v1/admin/pickup-points",
@@ -160,11 +164,12 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   await page.getByText("商品管理", { exact: true }).click();
   await page.getByRole("button", { name: "新增商品" }).click();
   await page.getByLabel("商品名称").fill(`E2E 时蔬 ${suffix}`);
-  await page.getByLabel("分类").fill("蔬菜");
+  await page.getByLabel("分类").click();
+  await page.getByText(`蔬菜 ${suffix}`, { exact: true }).click();
   await page.getByLabel("产地").fill("本地农场");
-  await page.getByLabel("规格").fill("一份");
+  await page.getByLabel("销售规格（包装单位）").fill("一份");
   await page.getByLabel("售价（元）").fill("19.999");
-  await page.getByLabel("默认可售量").fill("100");
+  await page.getByLabel("默认团期可售量").fill("100");
   await page.getByRole("button", { name: "保存商品" }).click();
   await expect(page.getByText("请输入最多两位小数的元金额")).toBeVisible();
   await page.getByLabel("售价（元）").fill("19.90");
@@ -264,7 +269,9 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
 
   const duplicatePointName = `${reviewPointName}（重复复核）`;
   await page.getByRole("button", { name: "新增自提点" }).click();
-  const duplicateAreaSelect = page.getByLabel("服务区域");
+  const duplicateDialog = page.getByRole("dialog", { name: "新增自提点" });
+  await expect(duplicateDialog).toBeVisible();
+  const duplicateAreaSelect = duplicateDialog.getByLabel("服务区域");
   if (await duplicateAreaSelect.count()) {
     await duplicateAreaSelect.click();
     await page.locator(".ant-select-item-option").last().click();
@@ -304,10 +311,10 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   await expect(page.getByText("已定位，可拖动图钉微调")).toBeVisible();
   allowExpectedPickupDuplicate = true;
   await page.locator('.ant-modal:visible button[type="submit"]').click();
-  const duplicateDialog = page.getByRole("dialog", { name: "发现疑似重复自提点" });
-  await expect(duplicateDialog).toBeVisible();
+  const duplicateConfirmDialog = page.getByRole("dialog", { name: "发现疑似重复自提点" });
+  await expect(duplicateConfirmDialog).toBeVisible();
   allowExpectedPickupDuplicate = false;
-  await duplicateDialog.getByRole("button", { name: "确认不同，仍保存" }).click();
+  await duplicateConfirmDialog.getByRole("button", { name: "确认不同，仍保存" }).click();
   await expect(page.getByText(duplicatePointName)).toBeVisible();
   expect(pickupPointWrites).toBe(3);
 
@@ -345,7 +352,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   await page.getByLabel("计划发车时间").fill(dispatchInput);
   await page.getByLabel("商品").click();
   await page
-    .getByText(`E2E 时蔬 ${suffix} · 一份`, { exact: true })
+    .getByText(`E2E 时蔬 ${suffix} · 一份 · 产地：本地农场`, { exact: true })
     .last()
     .click();
   await page.getByLabel("本团售价（元）").fill("18.80");
@@ -507,6 +514,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   await expect(labelsDialog).toHaveCount(0);
 
   await page.getByRole("button", { name: /退\s*出/ }).click();
+  await expect(page.getByRole("button", { name: "首次激活账号" })).toBeVisible();
   await page.getByRole("button", { name: "首次激活账号" }).click();
   await page.getByLabel("账号").fill(`manager.${suffix}`);
   await page.getByLabel("一次性初始凭据").fill(manager.initialCredential);
@@ -594,9 +602,11 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   expect((await completedPickupOrder.json()).data.status).toBe("PICKED_UP");
 
   await page.getByRole("button", { name: /退\s*出/ }).click();
+  await expect(page.getByRole("button", { name: "首次激活账号" })).toBeVisible();
   await page.getByLabel("账号").fill(`admin.${suffix}`);
   await page.getByLabel("密码").fill("community e2e admin password");
   await page.getByRole("button", { name: /登\s*录/ }).click();
+  await expect(page.getByRole("heading", { name: "系统设置" })).toBeVisible();
   const adminLogin = await request.fetch(`${apiBase}/api/v1/auth/admin/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -608,7 +618,33 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   expect(adminLogin.status(), await adminLogin.text()).toBe(200);
   const adminToken = (await adminLogin.json()).data.accessToken as string;
   await page.getByText("配送与到货", { exact: true }).click();
-  const emergencyRow = page.getByRole("row").filter({ hasText: `E2E 紧急到货 ${suffix}` });
+  await expect(page.getByRole("heading", { name: "配送与到货" })).toBeVisible();
+  const deliverySnapshot = await request.fetch(`${apiBase}/api/v1/admin/community/deliveries`, {
+    headers: { ...superHeaders, accept: "application/json" },
+  });
+  expect(deliverySnapshot.status(), await deliverySnapshot.text()).toBe(200);
+  const deliveryData = (await deliverySnapshot.json()).data as Array<{ campaignTitle: string }>;
+  expect(deliveryData.some((value) => value.campaignTitle === `E2E 紧急到货 ${suffix}`)).toBe(true);
+  const arrivalTable = page
+    .getByRole("heading", { name: "点位到货", exact: true })
+    .locator("xpath=following-sibling::*[1]");
+  const emergencyRow = arrivalTable
+    .getByRole("row")
+    .filter({ hasText: `E2E 紧急到货 ${suffix}` });
+  for (let pageIndex = 0; pageIndex < 20 && (await emergencyRow.count()) === 0; pageIndex += 1) {
+    const activePage = arrivalTable.locator(".ant-pagination-item-active");
+    const activePageTitle = await activePage.getAttribute("title");
+    const nextPage = arrivalTable.locator(
+      ".ant-pagination-next:not(.ant-pagination-disabled) button",
+    );
+    if ((await nextPage.count()) === 0) break;
+    await nextPage.click();
+    await expect
+      .poll(() => activePage.getAttribute("title"), { timeout: 5_000 })
+      .not.toBe(activePageTitle);
+  }
+  await expect(emergencyRow).toHaveCount(1, { timeout: 15_000 });
+  await expect(emergencyRow.getByRole("button", { name: "紧急代办到货" })).toBeVisible({ timeout: 15_000 });
   await emergencyRow.getByRole("button", { name: "紧急代办到货" }).click();
   await page.getByLabel("现场接收人").fill("王店长");
   await page.getByRole("button", { name: "提交到货确认" }).click();
@@ -685,6 +721,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
     expect(expired.status(), await expired.text()).toBe(200);
   }
   await page.getByRole("button", { name: /退\s*出/ }).click();
+  await expect(page.getByRole("button", { name: "首次激活账号" })).toBeVisible();
   await page.getByRole("button", { name: "首次激活账号" }).click();
   await page.getByLabel("账号").fill(`operator.${suffix}`);
   await page.getByLabel("一次性初始凭据").fill(operator.initialCredential);
@@ -707,11 +744,49 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   await page.getByText("配送与到货", { exact: true }).click();
   await expect(page.getByRole("button", { name: "逐商品确认到货" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "紧急代办到货" })).toHaveCount(0);
-  const differenceRow = page
+  const operatorArrivalTable = page
+    .getByRole("heading", { name: "点位到货", exact: true })
+    .locator("xpath=following-sibling::*[1]");
+  const differenceRow = operatorArrivalTable
     .getByRole("row")
     .filter({ hasText: `E2E 紧急到货 ${suffix}` });
-  await differenceRow.getByRole("button", { name: "确认差异分配" }).click();
+  for (let pageIndex = 0; pageIndex < 20 && (await differenceRow.count()) === 0; pageIndex += 1) {
+    const activePage = operatorArrivalTable.locator(".ant-pagination-item-active");
+    const activePageTitle = await activePage.getAttribute("title");
+    const nextPage = operatorArrivalTable.locator(
+      ".ant-pagination-next:not(.ant-pagination-disabled) button",
+    );
+    if ((await nextPage.count()) === 0) break;
+    await nextPage.click();
+    await expect
+      .poll(() => activePage.getAttribute("title"), { timeout: 5_000 })
+      .not.toBe(activePageTitle);
+  }
+  await expect(differenceRow).toHaveCount(1, { timeout: 15_000 });
+  let allocationPosts = 0;
+  page.on("request", (browserRequest) => {
+    if (
+      browserRequest.method() === "POST" &&
+      /\/api\/v1\/admin\/community\/deliveries\/[^/]+\/allocation-draft\/confirm$/.test(
+        browserRequest.url(),
+      )
+    )
+      allocationPosts += 1;
+  });
+  const allocationConfirmRoute =
+    /\/api\/v1\/admin\/community\/deliveries\/[^/]+\/allocation-draft\/confirm$/;
+  await page.route(allocationConfirmRoute, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    await route.continue();
+  });
+  // A slow response must not leave the confirm action live for a second
+  // write: the first click owns the action until the refresh completes.
+  await differenceRow
+    .getByRole("button", { name: "确认差异分配" })
+    .dblclick({ delay: 100 });
+  await expect.poll(() => allocationPosts).toBe(1);
   await expect(page.getByText("已确认", { exact: true })).toBeVisible();
+  await page.unroute(allocationConfirmRoute);
   await page.getByText("售后与异常", { exact: true }).click();
   await expect(page.getByRole("heading", { name: "售后与异常" })).toBeVisible();
   await page.setViewportSize({ width: 375, height: 800 });
@@ -722,9 +797,27 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
       ),
     )
     .toBe(true);
-  const extensionWindowRow = page
-    .getByRole("row")
-    .filter({ hasText: expiryOrderViews[0]!.orderNo });
+  const pickupWindowTable = page
+    .getByRole("heading", { name: "逾期领取处理", exact: true })
+    .locator("xpath=following-sibling::*[1]");
+  const findWindowRow = async (orderNo: string) => {
+    const row = pickupWindowTable.getByRole("row").filter({ hasText: orderNo });
+    for (let pageIndex = 0; pageIndex < 20 && (await row.count()) === 0; pageIndex += 1) {
+      const activePage = pickupWindowTable.locator(".ant-pagination-item-active");
+      const activePageTitle = await activePage.getAttribute("title");
+      const nextPage = pickupWindowTable.locator(
+        ".ant-pagination-next:not(.ant-pagination-disabled) button",
+      );
+      if ((await nextPage.count()) === 0) break;
+      await nextPage.click();
+      await expect
+        .poll(() => activePage.getAttribute("title"), { timeout: 5_000 })
+        .not.toBe(activePageTitle);
+    }
+    await expect(row).toHaveCount(1, { timeout: 15_000 });
+    return row;
+  };
+  const extensionWindowRow = await findWindowRow(expiryOrderViews[0]!.orderNo);
   await extensionWindowRow.getByRole("button", { name: "一次延期" }).click();
   const extensionDialog = page.getByRole("dialog", { name: "确认一次延期领取" });
   await extensionDialog.getByRole("button", { name: "二次确认并提交" }).click();
@@ -735,9 +828,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   await extensionDialog.getByRole("button", { name: "二次确认并提交" }).click();
   await expect(extensionWindowRow.getByText("已延期", { exact: true })).toBeVisible();
 
-  const refundWindowRow = page
-    .getByRole("row")
-    .filter({ hasText: expiryOrderViews[1]!.orderNo });
+  const refundWindowRow = await findWindowRow(expiryOrderViews[1]!.orderNo);
   await refundWindowRow.getByRole("button", { name: "登记退款" }).click();
   const refundWindowDialog = page.getByRole("dialog", { name: "确认登记逾期退款" });
   await refundWindowDialog.getByRole("button", { name: "二次确认并提交" }).click();
@@ -746,9 +837,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   await refundWindowDialog.getByRole("button", { name: "二次确认并提交" }).click();
   await expect(refundWindowRow.getByText("退款处理中", { exact: true })).toBeVisible();
 
-  const lossWindowRow = page
-    .getByRole("row")
-    .filter({ hasText: expiryOrderViews[2]!.orderNo });
+  const lossWindowRow = await findWindowRow(expiryOrderViews[2]!.orderNo);
   await lossWindowRow.getByRole("button", { name: "登记报损" }).click();
   const lossWindowDialog = page.getByRole("dialog", { name: "确认登记逾期报损" });
   await lossWindowDialog.getByLabel("处理原因").fill("用户逾期未领取，运营登记报损");
@@ -756,6 +845,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   await expect(lossWindowRow.getByText("已关闭", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: /退\s*出/ }).click();
+  await expect(page.getByRole("button", { name: "首次激活账号" })).toBeVisible();
   await page.getByRole("button", { name: "首次激活账号" }).click();
   await page.getByLabel("账号").fill(`finance.${suffix}`);
   await page.getByLabel("一次性初始凭据").fill(finance.initialCredential);

@@ -1,0 +1,244 @@
+schema_version: 2
+run_id: "RUN-20260831T032435Z-be4a70"
+task_id: "TASK-ADMIN-OPERABILITY-CLOSURE"
+project: "社区团购"
+stage: "REWORK_ENGINEERING"
+status: "COMPLETED"
+source_input_fingerprint: "ef1bd0187a32b6ff2a28595ae2c251e60a07b2c0f47308d1c0bd21bcdd4aae15"
+owner: "engineering_lead"
+reviewer: "qa"
+return_to: "orchestrator"
+may_spawn_agents: false
+may_spawn_workers: true
+priority: "P1"
+objective: "统一修复运营后台建档、错误与恢复体验，补齐分类主数据与前置配置交互，不改变社区团购业务规则"
+task_type: "implementation"
+role_execution:
+  policy_version: "1.3.0"
+  role_plan_fingerprint: "fa3790802496707aa2f0b45cc88aaf0b165c1b2f635539d32b05e949740b9c94"
+  status: "ROUTED"
+  quota_mode: "balanced"
+  activation_reasons:
+    - "stage:REWORK_ENGINEERING"
+    - "complexity:Complex"
+  merged_responsibilities: []
+  reviewer_activation: "deferred_until_owner_handoff"
+  concurrency_slot: 1
+risk_profile:
+  flags: []
+  failed_attempts: 0
+  failure_type: "none"
+execution_profile:
+  policy_version: "2.0.0"
+  route_fingerprint: "a6c000a94041110a332b61ce2193adc5f3b7bb70b0570063ac91622feeb39b66"
+  routing_mode: "explicit_spawn_override"
+  availability_source: ".dingxinglizi/orchestration/runtime-manifest.json"
+  availability_verified: false
+  available_models: []
+  status: "BLOCKED_MODEL_UNAVAILABLE"
+  capability_tier: "Expert"
+  platform: "codex"
+  preferred_model: ""
+  selected_model: ""
+  selected_provider: ""
+  model_reasoning_effort: "high"
+  actual_model_attested: false
+  fallback_models: []
+  routing_reasons:
+    - "base:Complex/implementation/engineering_lead"
+    - "role-floor:engineering_lead/Complex"
+    - "requested-tier:EXPERT"
+    - "platform:codex"
+    - "no-runtime-model-meets-capability-floor"
+  attempt: 1
+  max_attempts: 3
+  downgrade_policy: "new_low_risk_task_package_only"
+  escalation_history: []
+quality_review:
+  gate: "NOT_APPLICABLE"
+  review_mode: "NOT_APPLICABLE"
+  decision_question: "BLOCKING_UNKNOWN"
+  input_fingerprint: "ef1bd0187a32b6ff2a28595ae2c251e60a07b2c0f47308d1c0bd21bcdd4aae15"
+  selected_lenses: []
+  adversarial_tests: []
+  quality_case_ref: "BLOCKING_UNKNOWN"
+review_contract:
+  status: "NOT_APPLICABLE"
+  review_id: "NOT_APPLICABLE"
+  mode: "NOT_APPLICABLE"
+  phase: "NOT_APPLICABLE"
+  shard_id: "NOT_APPLICABLE"
+  baseline_commit: "NOT_APPLICABLE"
+  target_commit: "NOT_APPLICABLE"
+  target_fingerprint: "NOT_APPLICABLE"
+  repository_manifest_fingerprint: "NOT_APPLICABLE"
+  review_plan_fingerprint: "NOT_APPLICABLE"
+  shard_input_fingerprint: "NOT_APPLICABLE"
+  trust_policy_fingerprint: "NOT_APPLICABLE"
+  trusted_instruction_files: []
+  repository_execution_authorized: false
+  default_execution_policy: "NOT_APPLICABLE"
+  included_modules: []
+  included_files: []
+  pinned_file_objects_json: "NOT_APPLICABLE"
+  exclusion_index: "NOT_APPLICABLE"
+  risk_lenses: []
+  findings_output: "NOT_APPLICABLE"
+  evidence_output: "NOT_APPLICABLE"
+  source_write_authorized: false
+  fresh_session_required: false
+  compact_handoff_required: false
+  session_attestation_required: false
+  context_budget:
+    max_files: 0
+    max_bytes: 0
+    max_estimated_tokens: 0
+    estimated_files: 0
+    estimated_bytes: 0
+    estimated_tokens: 0
+    estimate_method: "NOT_APPLICABLE"
+repair_contract:
+  status: "NOT_APPLICABLE"
+  review_id: "NOT_APPLICABLE"
+  repair_plan_id: "NOT_APPLICABLE"
+  repair_plan_fingerprint: "NOT_APPLICABLE"
+  phase: "NOT_APPLICABLE"
+  finding_ids: []
+  allowed_source_files: []
+  target_fingerprint: "NOT_APPLICABLE"
+  source_write_authorized: false
+  evidence_output: "NOT_APPLICABLE"
+capability_requirements:
+  required: []
+  optional: []
+  permission_ceiling: "read"
+  provisioning_status: "PENDING"
+  resolved_skills: []
+  resolved_mcp_servers: []
+  blocked: []
+business_context:
+  value: "后台运营人员需要在服务不可用或校验失败时看到可理解、可恢复的结果；目录与分类必须由有效主数据驱动，不能依赖内部编号或英文异常。"
+  affected_roles: [SUPER_ADMIN, OPERATOR, CUSTOMER_SERVICE, FINANCE, PICKUP_MANAGER]
+  affected_objects: [Product, Category, ServiceArea, PickupPoint, Campaign, Order, Delivery, Notification, AuditEvent]
+  rule_refs: [docs/PRD.md, docs/architecture.md, docs/go-live-checklist.md]
+input_documents:
+  - "docs/00-project-context.md"
+  - "docs/01-domain-rules.md"
+  - "docs/02-glossary.md"
+  - "docs/project-status.json"
+dependencies:
+  - "保持现有单一社区团购状态机、权限、支付退款规则与消费者小程序非本次页面不变"
+scope:
+  - "统一管理端 API/网络/Zod/401/403/409/5xx 错误为中文可恢复文案，保留结构化详情供字段映射"
+  - "dashboard/products/campaigns/orders/areas/pickup-points/delivery/after-sale/governance/finance/settings 统一 loading/error/empty/ready 四态及重试"
+  - "写操作 submitting 防重复；写成功后刷新失败与写失败分离，表单草稿可恢复"
+  - "分类主数据 API、Memory/MySQL 存储与管理入口：新增、改名/排序、停用、引用保护；商品只能选有效分类"
+  - "商品字段补充销售规格（包装单位）、默认团期可售量、产地示例与契约校验"
+  - "区域行政目录选择、团期创建前置引导/切区清点位/商品带入默认价量、到货数量守恒与差异草案复核"
+  - "员工/权限写操作失败恢复；普通页面内部枚举和 ISO 时间转中文业务显示，技术编号折叠"
+  - "消费者结算无字段 JSON POST 契约与订单创建后支付失败恢复，不改变支付状态机"
+out_of_scope:
+  - "消费者小程序其他页面、真实微信登录/支付/订阅、退款和配送领域状态机改造"
+  - "多商户、供应商、仓储、旧模式、生产部署和真实环境写入"
+  - "消费者账号注销、隐私联系渠道或新增外部凭据"
+deliverables:
+  - "后台错误适配与页面状态/写入恢复实现"
+  - "分类主数据契约、存储、API、管理 UI 与引用保护测试"
+  - "区域/团期/到货/权限表单前置校验与可恢复交互"
+  - "结算创建失败与已创建订单支付失败的分阶段提示、原订单继续支付和防重复测试"
+  - "定向单元/API/浏览器证据与本文件更新"
+acceptance_criteria:
+  - id: AC-ADMIN-ERR-01
+    given: "API 网络失败、5xx、401/403/409 或 Zod details"
+    when: "后台页面请求或写入失败"
+    then: "只显示中文业务文案、恢复动作和字段提示，不显示英文原文/HTTP 码/内部字段；网络错误保留草稿"
+    evidence: "evidence/admin-operability-closure-2026-09-02.md"
+  - id: AC-ADMIN-STATE-02
+    given: "主页面 GET 失败、无数据或有数据"
+    when: "页面加载/重试"
+    then: "分别显示 loading/error+重试/empty 引导/ready，错误不得伪装为空表或零值"
+    evidence: "evidence/admin-operability-closure-2026-09-02.md"
+  - id: AC-ADMIN-MUT-03
+    given: "写请求进行中、失败或成功后刷新失败"
+    when: "用户提交或重复点击"
+    then: "按钮禁用且只发一次；失败保留表单；成功刷新失败显示已保存并可重试，不重复 POST"
+    evidence: "evidence/admin-operability-closure-2026-09-02.md"
+  - id: AC-ADMIN-CAT-04
+    given: "运营管理分类并编辑商品"
+    when: "新增/改名/排序/停用/删除或选择分类"
+    then: "引用分类不可硬删除，商品仅可选启用分类；无分类时给出创建引导"
+    evidence: "evidence/admin-operability-closure-2026-09-02.md"
+  - id: AC-ADMIN-FORM-05
+    given: "区域、团期、到货和员工表单"
+    when: "缺少前置对象、切换依赖或数量/权限不合法"
+    then: "前端明确拦截并与服务端契约一致，保留输入、说明下一步和恢复路径"
+    evidence: "evidence/admin-operability-closure-2026-09-02.md"
+  - id: AC-MINI-PAY-06
+    given: "用户提交订单后，订单创建或后续支付任一阶段失败"
+    when: "小程序展示结果并允许恢复"
+    then: "创建失败不跳转；已创建订单保留购物车与结算草稿并可查看原订单继续支付，不重复创建、不直出技术错误"
+    evidence: "evidence/admin-operability-closure-2026-09-02.md"
+allowed_files:
+  - apps/admin-web/src/App.tsx
+  - apps/admin-web/src/api.ts
+  - apps/admin-web/src/api.test.ts
+  - apps/admin-web/src/governance-page.tsx
+  - apps/admin-web/src/audit-page.tsx
+  - apps/admin-web/src/*.tsx
+  - apps/admin-web/src/*.test.tsx
+  - apps/admin-web/src/*.ts
+  - apps/admin-web/src/*.test.ts
+  - apps/api/src/app.ts
+  - apps/api/src/app.test.ts
+  - apps/api/src/modules/core/*.ts
+  - apps/api/src/modules/core/*.test.ts
+  - apps/api/src/modules/catalog/*.ts
+  - apps/api/src/modules/catalog/*.test.ts
+  - packages/api-contracts/src/index.ts
+  - packages/api-contracts/src/index.test.ts
+  - packages/domain/src/*.ts
+  - packages/domain/src/*.test.ts
+  - docs/task-admin-operability-closure.md
+  - evidence/admin-operability-closure-2026-09-02.md
+  - apps/miniprogram/src/pages/checkout/index.ts
+  - apps/miniprogram/src/pages/checkout/index.test.ts
+  - apps/miniprogram/src/pages/order-detail/index.ts
+  - apps/miniprogram/src/pages/order-detail/index.test.ts
+  - apps/miniprogram/src/utils/api.ts
+  - apps/miniprogram/src/utils/api-bodyless-post.test.ts
+forbidden:
+  - "Do not change approved scope, business rules, permissions, contracts, dependencies, or external systems without Orchestrator routing."
+  - "Do not perform production deployment, external messaging, purchases, credential use, destructive actions, or irreversible migrations without explicit authorization."
+validation:
+  commands:
+    - "pnpm --filter @hometown/api test"
+    - "pnpm --filter @hometown/admin-web test"
+    - "pnpm --filter @hometown/admin-web typecheck"
+    - "pnpm --filter @hometown/miniprogram test"
+    - "pnpm check"
+    - "pnpm test:e2e"
+    - "git diff --check"
+  manual:
+    - "断开 API 后验证配送/治理/售后显示错误而非空态，恢复后通过重试恢复"
+    - "验证分类引用保护、商品分类下拉和写成功刷新失败的单次 POST"
+    - "验证 375/768/1440 页面关键操作可见且无横向溢出"
+  evidence_locations:
+    - "evidence/admin-operability-closure-2026-09-02.md"
+assumptions_and_risks:
+  - "现有 MemoryStore 预览不提供业务演示数据，空态引导不能通过写入固定种子解决"
+  - "真实 MySQL/Redis 集成仍受环境 URL 约束，缺 URL 时按 fail-closed 处理，不计通过"
+  - "本任务沿用现有单一商品销售规格和配送/退款状态机，不引入新业务枚举"
+handoff:
+  conclusion: "PASS"
+  inputs_checked: [README.md, docs/PRD.md, docs/architecture.md, docs/go-live-checklist.md]
+  artifacts:
+    - "tasks/TASK-ADMIN-OPERABILITY-CLOSURE.yaml"
+    - "docs/task-admin-operability-closure.md"
+    - "evidence/admin-operability-closure-2026-09-02.md"
+  evidence:
+    - "evidence/admin-operability-closure-2026-09-02.md"
+  deviations:
+    - "用户实机发现支付空 JSON 与失败恢复缺陷后，将必要的小程序结算/订单详情修复纳入本任务；未改变支付状态机或接入真实支付。"
+  downstream_decisions:
+    - "独立 QA 最终 PASS，本地 P0/P1/P2 为 0，允许按冻结范围提交当前分支。"
+    - "真实 MySQL/Redis、真实微信支付与生产发布仍为外部门禁。"

@@ -26,6 +26,7 @@ import type {
   Payment,
   PickupCredential,
   PickupPoint,
+  ProductCategory,
   PrivacyConsent,
   Role,
   ServiceArea,
@@ -113,6 +114,10 @@ export interface CommerceStore {
   listCatalogSkus(): Promise<CatalogSku[]>;
   getCatalogSku(id: string): Promise<CatalogSku | null>;
   saveCatalogSku(value: CatalogSku): Promise<void>;
+  listProductCategories(includeInactive?: boolean): Promise<ProductCategory[]>;
+  getProductCategory(id: string): Promise<ProductCategory | null>;
+  saveProductCategory(value: ProductCategory): Promise<void>;
+  deleteProductCategory(id: string): Promise<boolean>;
   listCampaigns(): Promise<Campaign[]>;
   getCampaign(id: string): Promise<Campaign | null>;
   getCampaignForUpdate(id: string): Promise<Campaign | null>;
@@ -421,6 +426,7 @@ interface MemoryState {
   areas: Map<string, ServiceArea>;
   points: Map<string, PickupPoint>;
   catalog: Map<string, CatalogSku>;
+  categories: Map<string, ProductCategory>;
   campaigns: Map<string, Campaign>;
   idempotency: Map<string, IdempotencyRecord>;
   orders: Map<string, Order>;
@@ -458,6 +464,7 @@ const emptyState = (): MemoryState => ({
   areas: new Map(),
   points: new Map(),
   catalog: new Map(),
+  categories: new Map(),
   campaigns: new Map(),
   idempotency: new Map(),
   orders: new Map(),
@@ -780,6 +787,26 @@ export class MemoryStore implements CommerceStore {
   }
   public async saveCatalogSku(v: CatalogSku) {
     this.data.catalog.set(v.id, clone(v));
+  }
+  public async listProductCategories(includeInactive = false) {
+    return clone(
+      [...this.data.categories.values()]
+        .filter((value) => includeInactive || value.status === "ACTIVE")
+        .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name)),
+    );
+  }
+  public async getProductCategory(id: string) {
+    return clone(this.data.categories.get(id) ?? null);
+  }
+  public async saveProductCategory(value: ProductCategory) {
+    this.data.categories.set(value.id, clone(value));
+  }
+  public async deleteProductCategory(id: string) {
+    if (!this.data.categories.has(id)) return false;
+    if ([...this.data.catalog.values()].some((sku) => sku.categoryId === id))
+      return false;
+    this.data.categories.delete(id);
+    return true;
   }
   public async listCampaigns() {
     return clone([...this.data.campaigns.values()]);

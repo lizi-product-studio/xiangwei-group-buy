@@ -25,9 +25,11 @@ import dayjs from "dayjs";
 import {
   api,
   auth,
+  adminErrorText,
   requiresLogin,
   type Campaign,
   type CatalogSku,
+  type ProductCategory,
   type CommunityArrivalRequest,
   type CommunityDelivery,
   type DeliveryPlan,
@@ -164,9 +166,31 @@ const mutationErrorText = (error: unknown): string => {
         ? `${impact.activeManagerCount} 个有效点位负责人授权`
         : null,
     ].filter((part): part is string => Boolean(part));
-    return `${value.message}（影响：${parts.join("，")}）`;
+    return `${adminErrorText(error)}（影响：${parts.join("，")}）`;
   }
-  return value.message || "操作失败";
+  const transportError =
+    value && typeof value === "object" && ("statusCode" in value || "code" in value);
+  if (
+    error instanceof Error &&
+    error.message &&
+    /[\u3400-\u9fff]/u.test(error.message) &&
+    !transportError
+  ) {
+    return error.message;
+  }
+  return adminErrorText(error);
+};
+const refreshAfterMutation = async (
+  reload: () => Promise<void>,
+  message: { success: (content: string) => unknown; warning: (content: string) => unknown },
+  successText: string,
+) => {
+  try {
+    await reload();
+    message.success(successText);
+  } catch {
+    message.warning("已保存，列表刷新失败，请刷新");
+  }
 };
 const priceRule = {
   validator: (_: unknown, value: unknown) => {
@@ -208,7 +232,7 @@ function Login({ done }: { done: () => void }) {
       await api.login(value.username, value.password);
       done();
     } catch (error) {
-      void message.error(error instanceof Error ? error.message : "登录失败");
+      void message.error(mutationErrorText(error));
     } finally {
       setLoading(false);
     }
@@ -229,7 +253,7 @@ function Login({ done }: { done: () => void }) {
       done();
     } catch (error) {
       void message.error(
-        error instanceof Error ? error.message : "首次激活失败，请核对一次性凭据",
+        mutationErrorText(error),
       );
     } finally {
       setLoading(false);
@@ -372,27 +396,55 @@ function PageTitle({
     </header>
   );
 }
-
+function PageLoadError({
+  page,
+  reload,
+}: {
+  page: AdminPage;
+  reload: () => Promise<void>;
+}) {
+  return (
+    <Card>
+      <Alert
+        type="error"
+        showIcon
+        message={`${displayLabel(page)}数据加载失败`}
+        description="后台服务暂时无法连接，已保留填写内容，请启动服务后重试。"
+        action={<Button onClick={() => void reload().catch(() => undefined)}>重试</Button>}
+      />
+    </Card>
+  );
+}
 function Products({
   values,
+  categories,
   reload,
 }: {
   values: CatalogSku[];
+  categories: ProductCategory[];
   reload: () => Promise<void>;
 }) {
   const { message } = AntApp.useApp();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<CatalogSku | null>(null);
+  const [categoryOpen, setCategoryOpen] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<ProductCategory | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [savingCategory, setSavingCategory] = useState(false);
+  const [categoryForm] = Form.useForm();
   const [form] = Form.useForm();
   const save = async (value: {
     title: string;
     category: string;
+    categoryId?: string | null;
     origin: string;
     skuName: string;
     retailPriceYuan: string;
     defaultSellableQuantity: number;
     status: "ACTIVE" | "INACTIVE";
   }) => {
+    if (saving) return;
+    setSaving(true);
     try {
       const { retailPriceYuan, ...product } = value;
       await api.saveSku({
@@ -404,10 +456,41 @@ function Products({
       setOpen(false);
       setEditing(null);
       form.resetFields();
-      await reload();
-      void message.success("商品已保存；历史订单快照不会改变");
+      await refreshAfterMutation(reload, message, "商品已保存；历史订单快照不会改变");
     } catch (error) {
       void message.error(mutationErrorText(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+  const toggleStatus = async (value: CatalogSku) => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      await api.saveSku({
+        id: value.id,
+        productId: value.productId,
+        title: value.product.title,
+        category: value.product.category,
+        categoryId: value.categoryId ?? null,
+        origin: value.product.origin,
+        imageUrl: value.product.imageUrl,
+        skuName: value.name,
+        retailPriceCents: value.retailPriceCents,
+        defaultSellableQuantity: value.defaultSellableQuantity,
+        status: value.status === "ACTIVE" ? "INACTIVE" : "ACTIVE",
+      });
+      await refreshAfterMutation(
+        reload,
+        message,
+        value.status === "ACTIVE"
+          ? "商品已停用，公共目录不再展示"
+          : "商品已重新启用",
+      );
+    } catch (error) {
+      void message.error(mutationErrorText(error));
+    } finally {
+      setSaving(false);
     }
   };
   return (
@@ -416,6 +499,8 @@ function Products({
         title="商品管理"
         subtitle="维护社区团购商品目录与默认可售量"
         action={
+          <Space>
+          <Button onClick={() => { setEditingCategory(null); categoryForm.resetFields(); setCategoryOpen(true); }}>分类管理</Button>
           <Button
             type="primary"
             icon={<PlusOutlined />}
@@ -428,11 +513,13 @@ function Products({
           >
             新增商品
           </Button>
+          </Space>
         }
       />
       <Table
         rowKey="id"
         dataSource={values}
+        locale={{ emptyText: "暂无商品，请先创建商品" }}
         columns={[
           {
             title: "商品",
@@ -448,7 +535,7 @@ function Products({
             render: (_, v) => `${v.product.category} / ${v.product.origin}`,
           },
           { title: "售价", render: (_, v) => money(v.retailPriceCents) },
-          { title: "默认可售量", dataIndex: "defaultSellableQuantity" },
+          { title: "默认团期可售量", dataIndex: "defaultSellableQuantity" },
           { title: "状态", render: (_, v) => <Status value={v.status} /> },
           {
             title: "操作",
@@ -460,6 +547,7 @@ function Products({
                     form.setFieldsValue({
                       title: value.product.title,
                       category: value.product.category,
+                      categoryId: value.categoryId ?? null,
                       origin: value.product.origin,
                       skuName: value.name,
                       retailPriceYuan: centsToYuan(value.retailPriceCents),
@@ -473,30 +561,9 @@ function Products({
                 </Button>
                 <Button
                   danger={value.status === "ACTIVE"}
-                  onClick={() =>
-                    void api
-                      .saveSku({
-                        id: value.id,
-                        productId: value.productId,
-                        title: value.product.title,
-                        category: value.product.category,
-                        origin: value.product.origin,
-                        imageUrl: value.product.imageUrl,
-                        skuName: value.name,
-                        retailPriceCents: value.retailPriceCents,
-                        defaultSellableQuantity: value.defaultSellableQuantity,
-                        status: value.status === "ACTIVE" ? "INACTIVE" : "ACTIVE",
-                      })
-                      .then(reload)
-                      .then(() =>
-                        message.success(
-                          value.status === "ACTIVE"
-                            ? "商品已停用，公共目录不再展示"
-                            : "商品已重新启用",
-                        ),
-                      )
-                      .catch((error) => message.error(mutationErrorText(error)))
-                  }
+                  loading={saving}
+                  disabled={saving}
+                  onClick={() => void toggleStatus(value)}
                 >
                   {value.status === "ACTIVE" ? "停用" : "启用"}
                 </Button>
@@ -524,18 +591,44 @@ function Products({
           </Form.Item>
           <div className="form-grid">
             <Form.Item
-              name="category"
+              name="categoryId"
               label="分类"
-              rules={[{ required: true }]}
+              rules={[{ required: true, message: "请选择有效分类；没有分类请先创建" }]}
+            >
+              <Select
+                showSearch
+                allowClear
+                options={categories.filter((category) => category.status === "ACTIVE").map((category) => ({
+                  value: category.id,
+                  label: category.name,
+                }))}
+                placeholder={
+                  categories.length ? "请选择启用分类" : "暂无分类，请先创建"
+                }
+                onChange={(categoryId) => {
+                  const category = categories.find((item) => item.id === categoryId);
+                  if (category)
+                    form.setFieldValue("category", category.name);
+                }}
+              />
+            </Form.Item>
+            <Form.Item name="category" hidden>
+              <Input />
+            </Form.Item>
+            <Form.Item
+              name="origin"
+              label="产地"
+              rules={[{ required: true, min: 2, message: "请填写明确产地" }]}
             >
               <Input />
             </Form.Item>
-            <Form.Item name="origin" label="产地" rules={[{ required: true }]}>
-              <Input />
-            </Form.Item>
           </div>
-          <Form.Item name="skuName" label="规格" rules={[{ required: true }]}>
-            <Input />
+          <Form.Item
+            name="skuName"
+            label="销售规格（包装单位）"
+            rules={[{ required: true }]}
+          >
+            <Input placeholder="例如 500克/袋、12枚/盒" />
           </Form.Item>
           <div className="form-grid">
             <Form.Item
@@ -551,10 +644,11 @@ function Products({
             </Form.Item>
             <Form.Item
               name="defaultSellableQuantity"
-              label="默认可售量"
+              label="默认团期可售量"
+              extra="创建团期时带出的建议数量，团期内可调整"
               rules={[{ required: true }]}
             >
-              <InputNumber min={0} />
+              <InputNumber min={0} max={10_000_000} />
             </Form.Item>
           </div>
           <Form.Item name="status" label="目录状态" rules={[{ required: true }]}>
@@ -565,10 +659,133 @@ function Products({
               ]}
             />
           </Form.Item>
-          <Button type="primary" htmlType="submit">
+          <Button type="primary" htmlType="submit" loading={saving}>
             保存商品
           </Button>
         </Form>
+      </Modal>
+      <Modal
+        open={categoryOpen}
+        title="分类管理"
+        footer={null}
+        onCancel={() => setCategoryOpen(false)}
+      >
+        <Form
+          form={categoryForm}
+          layout="inline"
+          onFinish={async (value) => {
+            if (savingCategory) return;
+            setSavingCategory(true);
+            try {
+              await api.saveCategory({
+                ...(editingCategory ? { id: editingCategory.id } : {}),
+                ...value,
+              });
+              categoryForm.resetFields();
+              setEditingCategory(null);
+              await refreshAfterMutation(
+                reload,
+                message,
+                editingCategory ? "分类名称已更新" : "分类已保存",
+              );
+            } catch (error) {
+              message.error(mutationErrorText(error));
+            } finally {
+              setSavingCategory(false);
+            }
+          }}
+        >
+          <Form.Item name="name" rules={[{ required: true, min: 2, message: "分类名称至少 2 个字" }]}>
+            <Input placeholder="例如：蔬菜" />
+          </Form.Item>
+          <Form.Item name="sortOrder" initialValue={0}>
+            <InputNumber min={0} max={1_000_000} aria-label="排序" />
+          </Form.Item>
+          <Form.Item name="status" hidden initialValue="ACTIVE">
+            <Input />
+          </Form.Item>
+          <Button type="primary" htmlType="submit" loading={savingCategory}>
+            {editingCategory ? "保存分类" : "新增分类"}
+          </Button>
+          {editingCategory && (
+            <Button onClick={() => { setEditingCategory(null); categoryForm.resetFields(); }}>
+              取消编辑
+            </Button>
+          )}
+        </Form>
+        <Table
+          rowKey="id"
+          pagination={false}
+          dataSource={categories}
+          locale={{ emptyText: "暂无分类，请先新增分类" }}
+          columns={[
+            { title: "分类", dataIndex: "name" },
+            { title: "排序", dataIndex: "sortOrder" },
+            { title: "状态", render: (_, value) => <Status value={value.status} /> },
+            {
+              title: "操作",
+              render: (_, value) => (
+                <Space>
+                  <Button onClick={() => {
+                    setEditingCategory(value);
+                    categoryForm.setFieldsValue({ name: value.name, sortOrder: value.sortOrder, status: value.status });
+                  }}>重命名</Button>
+                  <Button
+                    danger={value.status === "ACTIVE"}
+                    loading={savingCategory}
+                    onClick={() => {
+                      if (savingCategory) return;
+                      setSavingCategory(true);
+                      void api
+                        .saveCategory({
+                          id: value.id,
+                          name: value.name,
+                          sortOrder: value.sortOrder,
+                          status: value.status === "ACTIVE" ? "INACTIVE" : "ACTIVE",
+                        })
+                        .then(() =>
+                          refreshAfterMutation(
+                            reload,
+                            message,
+                            value.status === "ACTIVE" ? "分类已停用" : "分类已启用",
+                          ),
+                        )
+                        .catch((error) => message.error(mutationErrorText(error)))
+                        .finally(() => setSavingCategory(false));
+                    }}
+                  >
+                    {value.status === "ACTIVE" ? "停用" : "启用"}
+                  </Button>
+                  <Button
+                    danger
+                    onClick={() => {
+                      Modal.confirm({
+                        title: "删除分类",
+                        content: `确定删除分类“${value.name}”吗？已被商品引用的分类无法删除。`,
+                        okText: "确认删除",
+                        cancelText: "取消",
+                        onOk: async () => {
+                          if (savingCategory) return;
+                          setSavingCategory(true);
+                          try {
+                            await api.deleteCategory(value.id);
+                            await refreshAfterMutation(reload, message, "分类已删除");
+                          } catch (error) {
+                            message.error(mutationErrorText(error));
+                          } finally {
+                            setSavingCategory(false);
+                          }
+                        },
+                      });
+                    }}
+                  >
+                    删除
+                  </Button>
+                </Space>
+              ),
+            },
+          ]}
+        />
       </Modal>
     </>
   );
@@ -634,8 +851,7 @@ function Campaigns({
       setOpen(false);
       setCreateReview(null);
       form.resetFields();
-      await reload();
-      void message.success("团期已创建，开售前请再次复核");
+      await refreshAfterMutation(reload, message, "团期已创建，开售前请再次复核");
     } catch (error) {
       // Keep the draft/review open so the operator can fix the exact field
       // rejected by the API instead of losing all entered values.
@@ -645,6 +861,7 @@ function Campaigns({
     }
   };
   const action = async (id: string, name: "open" | "close" | "cancel") => {
+    if (submitting) return;
     if (name === "cancel") {
       const campaign = values.find((value) => value.id === id);
       if (!campaign) return;
@@ -655,7 +872,7 @@ function Campaigns({
         });
         setCancelReason("");
       } catch (error) {
-        void message.error((error as Error).message);
+        void message.error(mutationErrorText(error));
       }
       return;
     }
@@ -665,11 +882,14 @@ function Campaigns({
       return;
     }
     try {
+      setSubmitting(true);
       await api.campaignAction(id, name);
-      await reload();
+      await refreshAfterMutation(reload, message, name === "open" ? "团期已开售" : "团期操作已完成");
       if (name === "open") setOpenReview(null);
     } catch (error) {
-      void message.error((error as Error).message);
+      void message.error(mutationErrorText(error));
+    } finally {
+      setSubmitting(false);
     }
   };
   const confirmClose = async () => {
@@ -678,10 +898,9 @@ function Campaigns({
     try {
       await api.campaignAction(closeReview.id, "close", {});
       setCloseReview(null);
-      await reload();
-      void message.success("团期已截单，库存和订单状态已更新");
+      await refreshAfterMutation(reload, message, "团期已截单，库存和订单状态已更新");
     } catch (error) {
-      void message.error((error as Error).message);
+      void message.error(mutationErrorText(error));
     } finally {
       setSubmitting(false);
     }
@@ -694,10 +913,9 @@ function Campaigns({
         reason: cancelReason.trim(),
       });
       setCancelReview(null);
-      await reload();
-      void message.success("团期已取消，待付款订单已释放，已付款订单已进入退款义务");
+      await refreshAfterMutation(reload, message, "团期已取消，待付款订单已释放，已付款订单已进入退款义务");
     } catch (error) {
-      void message.error((error as Error).message);
+      void message.error(mutationErrorText(error));
     } finally {
       setSubmitting(false);
     }
@@ -719,10 +937,9 @@ function Campaigns({
       });
       setPostponeCampaign(null);
       postponeForm.resetFields();
-      await reload();
-      void message.success("团期已顺延并重新进入开售；通知已进入既有队列");
+      await refreshAfterMutation(reload, message, "团期已顺延并重新进入开售；通知已进入既有队列");
     } catch (caught) {
-      void message.error(caught instanceof Error ? caught.message : "团期顺延失败");
+      void message.error(mutationErrorText(caught));
     } finally {
       setSubmitting(false);
     }
@@ -736,7 +953,7 @@ function Campaigns({
       setLabels(await api.packingLabels(campaign.id));
     } catch (caught) {
       setLabelsError(
-        caught instanceof Error ? caught.message : "装袋标签加载失败",
+        mutationErrorText(caught),
       );
     } finally {
       setLabelsLoading(false);
@@ -816,6 +1033,7 @@ function Campaigns({
       <Table
         rowKey="id"
         dataSource={values}
+        locale={{ emptyText: "暂无团期，请先配置商品、区域和自提点" }}
         columns={[
           {
             title: "团期",
@@ -845,18 +1063,19 @@ function Campaigns({
             render: (_, v) => (
               <Space>
                 {v.status === "DRAFT" && (
-                  <Button onClick={() => setOpenReview(v)}>
+                  <Button loading={submitting} disabled={submitting} onClick={() => setOpenReview(v)}>
                     开售
                   </Button>
                 )}
                 {v.status === "OPEN" && (
-                  <Button onClick={() => void action(v.id, "close")}>
+                  <Button loading={submitting} disabled={submitting} onClick={() => void action(v.id, "close")}>
                     截单
                   </Button>
                 )}
                 {v.status === "POSTPONED" && (
                   <Button
                     type="primary"
+                    disabled={submitting}
                     onClick={() => {
                       setPostponeCampaign(v);
                       postponeForm.setFieldsValue({
@@ -871,7 +1090,7 @@ function Campaigns({
                   </Button>
                 )}
                 {["DRAFT", "OPEN", "POSTPONED"].includes(v.status) && (
-                  <Button danger onClick={() => void action(v.id, "cancel")}>
+                  <Button danger loading={submitting} disabled={submitting} onClick={() => void action(v.id, "cancel")}>
                     取消
                   </Button>
                 )}
@@ -1021,7 +1240,7 @@ function Campaigns({
           </div>
           <div className="form-grid">
             <Form.Item name="minTotalQuantity" label="最小成团件数">
-              <InputNumber min={1} />
+              <InputNumber min={1} max={1_000_000} />
             </Form.Item>
             <Form.Item name="failureAction" label="未成团处理">
               <Select
@@ -1033,7 +1252,11 @@ function Campaigns({
             </Form.Item>
           </div>
           <Form.List name="items">
-            {(fields, { add, remove }) => (
+            {(fields, { add, remove }) => {
+              const selectedSkuIds = (form.getFieldValue("items") ?? [])
+                .map((item: { catalogSkuId?: string }) => item?.catalogSkuId)
+                .filter((id: string | undefined): id is string => Boolean(id));
+              return (
               <>
                 {fields.map((field) => (
                   <Card
@@ -1050,11 +1273,28 @@ function Campaigns({
                         <Select
                           style={{ width: 240 }}
                           options={skus
-                            .filter((v) => v.status === "ACTIVE")
+                            .filter(
+                              (v) =>
+                                v.status === "ACTIVE" &&
+                                (v.id === form.getFieldValue(["items", field.name, "catalogSkuId"]) ||
+                                  !selectedSkuIds.includes(v.id)),
+                            )
                             .map((v) => ({
                               value: v.id,
-                              label: `${v.product.title} · ${v.name}`,
+                              label: `${v.product.title} · ${v.name} · 产地：${v.product.origin}`,
                             }))}
+                          onChange={(catalogSkuId: string) => {
+                            const sku = skus.find((value) => value.id === catalogSkuId);
+                            if (!sku) return;
+                            form.setFieldValue(
+                              ["items", field.name, "retailPriceYuan"],
+                              centsToYuan(sku.retailPriceCents),
+                            );
+                            form.setFieldValue(
+                              ["items", field.name, "sellableQuantity"],
+                              sku.defaultSellableQuantity,
+                            );
+                          }}
                         />
                       </Form.Item>
                       <Form.Item
@@ -1071,9 +1311,12 @@ function Campaigns({
                       <Form.Item
                         name={[field.name, "sellableQuantity"]}
                         label="可售量"
-                        rules={[{ required: true }]}
+                        rules={[
+                          { required: true },
+                          { type: "number", min: 1, message: "可售量至少 1" },
+                        ]}
                       >
-                        <InputNumber min={1} />
+                        <InputNumber min={1} max={1_000_000} />
                       </Form.Item>
                       <Button danger onClick={() => remove(field.name)}>
                         移除
@@ -1083,7 +1326,8 @@ function Campaigns({
                 ))}
                 <Button onClick={() => add()}>添加商品</Button>
               </>
-            )}
+              );
+            }}
           </Form.List>
           <Button type="primary" htmlType="submit" style={{ marginTop: 16 }}>
             下一步：发布复核
@@ -1198,8 +1442,9 @@ function Campaigns({
             items={createReview.items.map((item) => ({
               id: item.catalogSkuId,
               title:
-                skus.find((v) => v.id === item.catalogSkuId)?.product.title ??
-                item.catalogSkuId,
+                skus.find((v) => v.id === item.catalogSkuId)
+                  ? `${skus.find((v) => v.id === item.catalogSkuId)!.product.title} · ${skus.find((v) => v.id === item.catalogSkuId)!.name} · 产地：${skus.find((v) => v.id === item.catalogSkuId)!.product.origin}`
+                  : item.catalogSkuId,
               price: money(yuanToCents(item.retailPriceYuan)),
               sellableQuantity: item.sellableQuantity,
             }))}
@@ -1229,7 +1474,7 @@ function Campaigns({
             failureAction={failureActionText(openReview.failureAction)}
             items={openReview.items.map((item) => ({
               id: item.skuId,
-              title: `${item.title} · ${item.skuName}`,
+              title: `${item.title} · ${item.skuName} · 产地：${item.origin ?? "—"}`,
               price: money(item.unitPriceCents),
               sellableQuantity: item.stock,
             }))}
@@ -1479,7 +1724,7 @@ function Orders({
       if (!query.trim()) await reload();
       void message.success(query.trim() ? "订单搜索完成" : "订单列表已刷新");
     } catch (error) {
-      void message.error(error instanceof Error ? error.message : "订单搜索失败");
+      void message.error(mutationErrorText(error));
     } finally {
       setSearching(false);
     }
@@ -1514,6 +1759,7 @@ function Orders({
       <Table
         rowKey="id"
         dataSource={displayValues}
+        locale={{ emptyText: query.trim() ? "未找到匹配订单，请检查完整订单号" : "暂无订单" }}
         columns={[
           { title: "订单号", dataIndex: "orderNo" },
           { title: "金额", render: (_, v) => money(v.totalCents) },
@@ -1682,7 +1928,7 @@ export function buildCommunityArrivalRequest(
     const abnormal =
       item.rejectedQuantity + item.shortQuantity + item.damagedQuantity;
     if (item.receivedQuantity + abnormal !== item.expectedQuantity)
-      throw new Error("每个商品的实到、拒收、短少和破损数量之和必须等于应到数量");
+      throw new Error("数量之和必须等于应到数量（每个商品分别核对实到、拒收、短少和破损）");
     if (abnormal > 0 && !item.evidenceNote?.trim())
       throw new Error("存在短少、破损或拒收时必须填写差异说明");
     return {
@@ -1717,11 +1963,13 @@ function ArrivalConfirmationModal({
   emergencyProxy,
   onClose,
   onConfirmed,
+  onSuccess,
 }: {
   arrival: CommunityDelivery | null;
   emergencyProxy: boolean;
   onClose: () => void;
   onConfirmed: () => Promise<void>;
+  onSuccess?: () => void;
 }) {
   const { message } = AntApp.useApp();
   const [form] = Form.useForm<ArrivalFormValues>();
@@ -1754,11 +2002,11 @@ function ArrivalConfirmationModal({
           emergencyProxy ? value.emergencyReason : undefined,
         ),
       );
-      void message.success("到货事实已登记");
       onClose();
       await onConfirmed();
+      onSuccess?.();
     } catch (caught) {
-      const detail = caught instanceof Error ? caught.message : "到货确认失败";
+      const detail = mutationErrorText(caught);
       setError(detail);
       void message.error(detail);
     } finally {
@@ -1880,10 +2128,12 @@ function Logistics({
   const [vehicleEmergency, setVehicleEmergency] = useState(false);
   const [vehicleForm] = Form.useForm();
   const [arrival, setArrival] = useState<CommunityDelivery | null>(null);
+  const [allocationSubmitting, setAllocationSubmitting] = useState(false);
   const [dispatchReview, setDispatchReview] = useState<DeliveryPlan | null>(
     null,
   );
   const [dispatchSubmitting, setDispatchSubmitting] = useState(false);
+  const [vehicleSubmitting, setVehicleSubmitting] = useState(false);
   const canOperate =
     roles.includes("OPERATOR") || roles.includes("SUPER_ADMIN");
   const emergencyProxy = roles.includes("SUPER_ADMIN");
@@ -1916,12 +2166,11 @@ function Logistics({
       const batch = existing ?? (await api.createBatch(campaignId));
       if (batch.status === "DRAFT") await api.dispatch(batch.id);
       setDispatchReview(null);
-      await reload();
+      await refreshAfterMutation(reload, message, "批次已发车");
     } catch (error) {
       void message.error(
-        `${(error as Error).message}；已创建的批次可继续复用，不会重复建批次`,
+        `${mutationErrorText(error)}；已创建的批次可继续复用，不会重复建批次`,
       );
-      await reload().catch(() => undefined);
     } finally {
       setDispatchSubmitting(false);
     }
@@ -1935,7 +2184,8 @@ function Logistics({
     estimatedArrivalAt?: dayjs.Dayjs;
     reason?: string;
   }) => {
-    if (!vehicle) return;
+    if (!vehicle || vehicleSubmitting) return;
+    setVehicleSubmitting(true);
     try {
       const body = {
         logisticsPlatform: value.logisticsPlatform,
@@ -1952,9 +2202,23 @@ function Logistics({
         });
       else await api.bookVehicle(vehicle.id, body);
       setVehicle(null);
-      await reload();
+      await refreshAfterMutation(reload, message, "运输信息已保存");
     } catch (error) {
-      void message.error((error as Error).message);
+      void message.error(mutationErrorText(error));
+    } finally {
+      setVehicleSubmitting(false);
+    }
+  };
+  const confirmAllocation = async (communityDeliveryId: string) => {
+    if (allocationSubmitting) return;
+    setAllocationSubmitting(true);
+    try {
+      await api.confirmAllocation(communityDeliveryId);
+      await refreshAfterMutation(reload, message, "差异分配已确认");
+    } catch (error) {
+      void message.error(mutationErrorText(error));
+    } finally {
+      setAllocationSubmitting(false);
     }
   };
   return (
@@ -1970,7 +2234,7 @@ function Logistics({
           message="配送数据加载失败"
           description={error}
           action={
-            <Button aria-label="重试" onClick={() => void reload()}>
+            <Button aria-label="重试" onClick={() => void reload().catch(() => undefined)}>
               重试
             </Button>
           }
@@ -2113,11 +2377,9 @@ function Logistics({
                     "PENDING_OPERATOR_CONFIRMATION" && (
                     <Button
                       type="primary"
-                      onClick={() =>
-                        void api
-                          .confirmAllocation(v.communityDeliveryId!)
-                          .then(reload)
-                      }
+                      loading={allocationSubmitting}
+                      disabled={allocationSubmitting}
+                      onClick={() => void confirmAllocation(v.communityDeliveryId!)}
                     >
                       确认差异分配
                     </Button>
@@ -2221,7 +2483,12 @@ function Logistics({
               <Input.TextArea rows={3} />
             </Form.Item>
           )}
-          <Button type="primary" htmlType="submit">
+          <Button
+            type="primary"
+            htmlType="submit"
+            loading={vehicleSubmitting}
+            disabled={vehicleSubmitting}
+          >
             保存
           </Button>
         </Form>
@@ -2299,6 +2566,7 @@ function Areas({
   const [locationChangeRequired, setLocationChangeRequired] = useState(true);
   const [locationVerification, setLocationVerification] =
     useState<PickupLocationVerificationState>("UNCONFIRMED");
+  const [submitting, setSubmitting] = useState(false);
   const [pointForm] = Form.useForm();
   const pointLatitude = Form.useWatch("latitude", pointForm);
   const pointLongitude = Form.useWatch("longitude", pointForm);
@@ -2370,16 +2638,48 @@ function Areas({
       <Table
         rowKey="id"
         dataSource={areas}
+        locale={{ emptyText: "暂无服务区域，请从行政目录开通" }}
         columns={[
           { title: "区域", dataIndex: "name" },
-          { title: "行政区代码", dataIndex: "regionCode" },
+          {
+            title: "行政目录",
+            render: (_, value) =>
+              regions.find((region) => region.regionCode === value.regionCode)?.path ??
+              value.name,
+          },
           {
             title: "接单",
             render: (_, v) => (
               <Button
-                onClick={() =>
-                  void api.setArea(v.id, !v.orderEnabled).then(reload)
-                }
+                loading={submitting}
+                disabled={submitting}
+                onClick={() => {
+                  const nextEnabled = !v.orderEnabled;
+                  Modal.confirm({
+                    title: nextEnabled ? "确认恢复接单？" : "确认暂停区域接单？",
+                    content: nextEnabled
+                      ? "恢复后新团期可以继续使用该区域。"
+                      : "暂停只影响后续新团期，进行中的团期和未完成订单不受影响；请确认已知晓影响范围。",
+                    okText: nextEnabled ? "确认开启" : "确认暂停",
+                    cancelText: "返回",
+                    onOk: async () => {
+                      if (submitting) return;
+                      setSubmitting(true);
+                      try {
+                        await api.setArea(v.id, nextEnabled);
+                        await refreshAfterMutation(
+                          reload,
+                          message,
+                          nextEnabled ? "区域已开启接单" : "区域已暂停接单",
+                        );
+                      } catch (error) {
+                        message.error(mutationErrorText(error));
+                      } finally {
+                        setSubmitting(false);
+                      }
+                    },
+                  });
+                }}
               >
                 {v.orderEnabled ? "暂停" : "开启"}
               </Button>
@@ -2391,6 +2691,7 @@ function Areas({
       <Table
         rowKey="id"
         dataSource={points}
+        locale={{ emptyText: "暂无自提点，请先选择服务区域并新增" }}
         columns={[
           { title: "名称", dataIndex: "name" },
           { title: "地址", dataIndex: "address" },
@@ -2431,26 +2732,67 @@ function Areas({
         footer={null}
         onCancel={() => setAreaOpen(false)}
       >
+        {regionLoadError && (
+          <Alert
+            type="error"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message="行政目录加载失败"
+            description={regionLoadError}
+            action={
+              <Button
+                size="small"
+                onClick={() =>
+                  void api
+                    .regions()
+                    .then((value) => {
+                      setRegions(value);
+                      setRegionLoadError(null);
+                    })
+                    .catch(() =>
+                      setRegionLoadError("行政目录暂时不可用，请重试后再配置区域"),
+                    )
+                }
+              >
+                重试
+              </Button>
+            }
+          />
+        )}
         <Form
           layout="vertical"
-          onFinish={(v) =>
-            void api
-              .openArea(v.regionCode)
-              .then(() => {
-                setAreaOpen(false);
-                return reload();
-              })
-              .catch((e) => message.error(mutationErrorText(e)))
-          }
+          onFinish={async (v) => {
+            if (submitting) return;
+            setSubmitting(true);
+            try {
+              await api.openArea(v.regionCode);
+              setAreaOpen(false);
+              await refreshAfterMutation(reload, message, "服务区域已开通");
+            } catch (e) {
+              message.error(mutationErrorText(e));
+            } finally {
+              setSubmitting(false);
+            }
+          }}
         >
           <Form.Item
             name="regionCode"
-            label="行政区代码"
-            rules={[{ required: true, pattern: /^\d{6,12}$/ }]}
+            label="服务区域"
+            rules={[{ required: true, message: "请选择行政目录中的服务区域" }]}
           >
-            <Input placeholder="从行政区目录选择或输入代码" />
+            <Select
+              showSearch
+              optionFilterProp="label"
+              placeholder={regionLoadError ? "行政目录加载失败，请重试" : "从行政目录选择服务区域"}
+              loading={!regions.length && !regionLoadError}
+              options={regions.map((region) => ({
+                value: region.regionCode,
+                label: `${region.path}（${region.regionCode}）`,
+              }))}
+              notFoundContent={regionLoadError ? "行政目录暂时不可用" : "暂无可选区域"}
+            />
           </Form.Item>
-          <Button type="primary" htmlType="submit">
+          <Button type="primary" htmlType="submit" loading={submitting} disabled={submitting}>
             开通
           </Button>
         </Form>
@@ -2539,6 +2881,8 @@ function Areas({
               ...(editingPoint ? {} : { contactName: "", contactPhone: "" }),
             };
             const savePoint = async (confirmDuplicate = false) => {
+              if (submitting) return;
+              setSubmitting(true);
               const request = editingPoint
                 ? api.updatePoint(
                     editingPoint.id,
@@ -2560,7 +2904,7 @@ function Areas({
                 setPointOpen(false);
                 setEditingPoint(null);
                 pointForm.resetFields();
-                await reload();
+                await refreshAfterMutation(reload, message, editingPoint ? "自提点已更新" : "自提点已创建");
               } catch (error) {
                 const code = (error as { code?: string }).code;
                 const candidates = (
@@ -2593,6 +2937,8 @@ function Areas({
                   return;
                 }
                 message.error(mutationErrorText(error));
+              } finally {
+                setSubmitting(false);
               }
             };
             void savePoint();
@@ -2766,7 +3112,8 @@ function Areas({
           <Button
             type="primary"
             htmlType="submit"
-            disabled={isPickupLocationSubmissionBlocked(
+            loading={submitting}
+            disabled={submitting || isPickupLocationSubmissionBlocked(
               locationChangeRequired,
               locationVerification,
             )}
@@ -2806,6 +3153,7 @@ function PointWorkbench({
   );
   const [submittingPickup, setSubmittingPickup] = useState(false);
   const [arrival, setArrival] = useState<CommunityDelivery | null>(null);
+  const [arrivalNotice, setArrivalNotice] = useState(false);
   const [pickupLoading, setPickupLoading] = useState(true);
   const [pickupError, setPickupError] = useState<string | null>(null);
   useEffect(() => {
@@ -2829,8 +3177,12 @@ function PointWorkbench({
     };
   }, []);
   const refreshAfterArrival = async () => {
-    await reload();
-    setPlans(await api.pickupPlans());
+    try {
+      await reload();
+      setPlans(await api.pickupPlans());
+    } catch {
+      message.warning("已保存，列表刷新失败，请刷新");
+    }
   };
   const pendingArrivals = deliveries.filter(
     (delivery) => delivery.dispatchBatchId && !delivery.arrivalConfirmed,
@@ -2845,7 +3197,7 @@ function PointWorkbench({
     try {
       setLookupOrder(await api.lookupPickup(planId, orderNo.trim()));
     } catch (error) {
-      void message.error((error as Error).message);
+      void message.error(mutationErrorText(error));
     }
   };
   const openPickupReview = () => {
@@ -2869,7 +3221,7 @@ function PointWorkbench({
         }),
       );
     } catch (error) {
-      void message.error(error instanceof Error ? error.message : "无法创建领取请求");
+      void message.error(mutationErrorText(error));
     }
   };
   const verify = async () => {
@@ -2894,7 +3246,7 @@ function PointWorkbench({
         clearPickupRequest(localStorage, pickupReview);
         setPickupReview(null);
       }
-      void message.error(error instanceof Error ? error.message : "领取核销失败");
+      void message.error(mutationErrorText(error));
     } finally {
       setSubmittingPickup(false);
     }
@@ -2905,6 +3257,17 @@ function PointWorkbench({
         title="我的点位工作台"
         subtitle="仅处理已授权点位的到货与领取，不提供消费者小程序工作入口"
       />
+      {arrivalNotice && (
+        <Alert
+          type="success"
+          showIcon
+          closable
+          onClose={() => setArrivalNotice(false)}
+          message="到货事实已登记"
+          description="配送已进入后续差异分配或领取准备流程。"
+          style={{ marginBottom: 16 }}
+        />
+      )}
       {!roles.includes("PICKUP_MANAGER") ? (
         <Alert
           type="warning"
@@ -2920,7 +3283,7 @@ function PointWorkbench({
           showIcon
           message="待确认到货加载失败"
           description={error}
-          action={<Button onClick={() => void reload()}>重新加载</Button>}
+          action={<Button onClick={() => void reload().catch(() => undefined)}>重新加载</Button>}
         />
       ) : pendingArrivals.length === 0 ? (
         <Card title="待确认到货">
@@ -3112,6 +3475,7 @@ function PointWorkbench({
         emergencyProxy={false}
         onClose={() => setArrival(null)}
         onConfirmed={refreshAfterArrival}
+        onSuccess={() => setArrivalNotice(true)}
       />
     </>
   );
@@ -3156,10 +3520,9 @@ function PickupWindowQueue({
       }
       setAction(null);
       form.resetFields();
-      await reload();
-      void message.success("领取窗口已更新");
+      await refreshAfterMutation(reload, message, "领取窗口已更新");
     } catch (caught) {
-      void message.error(caught instanceof Error ? caught.message : "领取窗口处理失败");
+      void message.error(mutationErrorText(caught));
     } finally {
       setSubmitting(false);
     }
@@ -3296,10 +3659,9 @@ function Service({
           qualityAction.note,
         );
       setQualityAction(null);
-      await reload();
-      void message.success("品质售后已更新");
+      await refreshAfterMutation(reload, message, "品质售后已更新");
     } catch (caught) {
-      void message.error(caught instanceof Error ? caught.message : "品质售后处理失败");
+      void message.error(mutationErrorText(caught));
     } finally {
       setSubmitting(false);
     }
@@ -3314,10 +3676,9 @@ function Service({
         cancellationAction.note,
       );
       setCancellationAction(null);
-      await reload();
-      void message.success("取消申请已更新");
+      await refreshAfterMutation(reload, message, "取消申请已更新");
     } catch (caught) {
-      void message.error(caught instanceof Error ? caught.message : "取消申请处理失败");
+      void message.error(mutationErrorText(caught));
     } finally {
       setSubmitting(false);
     }
@@ -3337,7 +3698,7 @@ function Service({
           showIcon
           message="售后队列加载失败"
           description={error}
-          action={<Button size="small" onClick={() => void reload()}>重试</Button>}
+          action={<Button size="small" onClick={() => void reload().catch(() => undefined)}>重试</Button>}
         />
       )}
       <Typography.Title level={4}>品质售后</Typography.Title>
@@ -3356,7 +3717,7 @@ function Service({
                 )
                 .join("；"),
           },
-          { title: "申报时间", dataIndex: "registeredAt" },
+          { title: "申报时间", render: (_, value) => dateTime(value.registeredAt) },
           { title: "受理说明", render: (_, value) => value.acceptanceNote ?? "—" },
           { title: "决定说明", render: (_, value) => value.decisionNote ?? "—" },
           { title: "状态", render: (_, v) => <Status value={v.status} /> },
@@ -3579,10 +3940,9 @@ function Finance({
       await api.refundException(refundDraft.exception.id, refundDraft.note);
       setRefundDraft(null);
       setRefundTarget(null);
-      await reload();
-      void message.success("差异退款已提交，已刷新退款与账本状态");
+      await refreshAfterMutation(reload, message, "差异退款已提交，已刷新退款与账本状态");
     } catch (caught) {
-      void message.error(caught instanceof Error ? caught.message : "差异退款提交失败");
+      void message.error(mutationErrorText(caught));
     } finally {
       setSubmitting(false);
     }
@@ -3593,10 +3953,9 @@ function Finance({
     try {
       await api.executePickupRefund(pickupRefundTarget.orderId);
       setPickupRefundTarget(null);
-      await reload();
-      void message.success("逾期领取退款已提交，已刷新退款与账本状态");
+      await refreshAfterMutation(reload, message, "逾期领取退款已提交，已刷新退款与账本状态");
     } catch (caught) {
-      void message.error(caught instanceof Error ? caught.message : "逾期退款提交失败");
+      void message.error(mutationErrorText(caught));
     } finally {
       setSubmitting(false);
     }
@@ -3611,14 +3970,15 @@ function Finance({
       // cannot leave a stale financial action available for the same case.
       onQualityRefunded(result);
       setQualityRefundTarget(null);
-      await reload();
-      void message.success(
+      await refreshAfterMutation(
+        reload,
+        message,
         result.status === "RESOLVED"
           ? "品质退款已完成，退款与账本状态已收敛"
           : "品质退款已提交，系统正在同步退款与账本状态",
       );
     } catch (caught) {
-      void message.error(caught instanceof Error ? caught.message : "品质退款提交失败");
+      void message.error(mutationErrorText(caught));
     } finally {
       setSubmitting(false);
     }
@@ -3632,14 +3992,15 @@ function Finance({
       );
       onCancellationRefunded(result);
       setCancellationRefundTarget(null);
-      await reload();
-      void message.success(
+      await refreshAfterMutation(
+        reload,
+        message,
         result.status === "REFUNDED"
           ? "取消退款已完成，退款与账本状态已收敛"
           : "取消退款已提交，系统正在同步退款与账本状态",
       );
     } catch (caught) {
-      void message.error(caught instanceof Error ? caught.message : "取消退款提交失败");
+      void message.error(mutationErrorText(caught));
     } finally {
       setSubmitting(false);
     }
@@ -3654,7 +4015,7 @@ function Finance({
           showIcon
           message="财务数据加载失败"
           description={error}
-          action={<Button size="small" onClick={() => void reload()}>重试</Button>}
+          action={<Button size="small" onClick={() => void reload().catch(() => undefined)}>重试</Button>}
         />
       )}
       <Table
@@ -3887,6 +4248,7 @@ function Settings({
   points: PickupPoint[];
   reload: () => Promise<void>;
 }) {
+  const { message } = AntApp.useApp();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<InternalStaff | null>(null);
   const [sensitive, setSensitive] = useState<{
@@ -3894,6 +4256,7 @@ function Settings({
     kind: "suspend" | "restore" | "reset";
   } | null>(null);
   const [credential, setCredential] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const create = async (value: {
     displayName: string;
     username: string;
@@ -3901,16 +4264,21 @@ function Settings({
     role: InternalStaff["role"];
     pickupPointIds?: string[];
   }) => {
-    const result = await api.createStaff({
-      ...value,
-      pickupPointIds: value.pickupPointIds ?? [],
-    });
-    setOpen(false);
-    await reload();
-    // The credential is shown only after the staff list has the new employee,
-    // so closing this one-time dialog never leaves the administrator on stale
-    // lifecycle data.
-    setCredential(result.initialCredential);
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      const result = await api.createStaff({
+        ...value,
+        pickupPointIds: value.pickupPointIds ?? [],
+      });
+      setOpen(false);
+      setCredential(result.initialCredential);
+      await refreshAfterMutation(reload, message, "员工已创建，一次性凭据仅显示一次");
+    } catch (error) {
+      message.error(mutationErrorText(error));
+    } finally {
+      setSubmitting(false);
+    }
   };
   const update = async (value: {
     displayName: string;
@@ -3920,6 +4288,7 @@ function Settings({
     reason?: string;
   }) => {
     if (!editing) return;
+    if (submitting) return;
     const currentPointIds = [...editing.pickupPointIds].sort();
     const nextPointIds = [
       ...(value.role === "PICKUP_MANAGER" ? value.pickupPointIds ?? [] : []),
@@ -3948,26 +4317,49 @@ function Settings({
       setEditing(null);
       return;
     }
-    await api.updateStaff(editing.userId, patch);
-    setEditing(null);
-    await reload();
+    setSubmitting(true);
+    try {
+      await api.updateStaff(editing.userId, patch);
+      setEditing(null);
+      await refreshAfterMutation(reload, message, "员工权限已更新");
+    } catch (error) {
+      message.error(mutationErrorText(error));
+    } finally {
+      setSubmitting(false);
+    }
   };
   const runSensitive = async (value: { reason: string }) => {
     if (!sensitive) return;
-    if (sensitive.kind === "reset") {
-      const result = await api.resetStaffCredential(
-        sensitive.staff.userId,
-        value.reason,
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      if (sensitive.kind === "reset") {
+        const result = await api.resetStaffCredential(
+          sensitive.staff.userId,
+          value.reason,
+        );
+        setCredential(result.initialCredential);
+      } else {
+        await api.updateStaff(sensitive.staff.userId, {
+          status: sensitive.kind === "suspend" ? "SUSPENDED" : "ACTIVE",
+          reason: value.reason,
+        });
+      }
+      setSensitive(null);
+      await refreshAfterMutation(
+        reload,
+        message,
+        sensitive.kind === "reset"
+          ? "一次性凭据已重置"
+          : sensitive.kind === "suspend"
+            ? "员工已停用"
+            : "员工已恢复",
       );
-      setCredential(result.initialCredential);
-    } else {
-      await api.updateStaff(sensitive.staff.userId, {
-        status: sensitive.kind === "suspend" ? "SUSPENDED" : "ACTIVE",
-        reason: value.reason,
-      });
+    } catch (error) {
+      message.error(mutationErrorText(error));
+    } finally {
+      setSubmitting(false);
     }
-    setSensitive(null);
-    await reload();
   };
   const pointOptions = points
     .filter((v) => v.status === "ACTIVE")
@@ -4086,7 +4478,7 @@ function Settings({
               ) : null
             }
           </Form.Item>
-          <Button type="primary" htmlType="submit">
+          <Button type="primary" htmlType="submit" loading={submitting}>
             创建账号
           </Button>
         </Form>
@@ -4140,7 +4532,7 @@ function Settings({
           <Form.Item name="reason" label="变更原因">
             <Input.TextArea rows={2} placeholder="角色或点位变更时必填" />
           </Form.Item>
-          <Button type="primary" htmlType="submit">保存并使旧会话失效</Button>
+          <Button type="primary" htmlType="submit" loading={submitting}>保存并使旧会话失效</Button>
         </Form>
       </Modal>
       <Modal
@@ -4160,7 +4552,7 @@ function Settings({
           <Form.Item name="reason" label="操作原因" rules={[{ required: true, min: 2 }]}>
             <Input.TextArea rows={3} />
           </Form.Item>
-          <Button danger={sensitive?.kind === "suspend"} type="primary" htmlType="submit">
+          <Button danger={sensitive?.kind === "suspend"} type="primary" htmlType="submit" loading={submitting}>
             确认执行
           </Button>
         </Form>
@@ -4190,10 +4582,15 @@ export function App() {
   // therefore receives a strictly newer generation; only its own response may
   // commit page data, loading, or an error state.
   const reloadGeneration = useRef(0);
+  const storedRoles = auth.roles();
   const [authenticated, setAuthenticated] = useState(
-    !requiresLogin || !!auth.token(),
+    !requiresLogin || (!!auth.token() && storedRoles.length > 0),
   );
-  const roles = auth.roles().length ? auth.roles() : ["SUPER_ADMIN"];
+  const roles = requiresLogin
+    ? storedRoles
+    : storedRoles.length
+      ? storedRoles
+      : ["SUPER_ADMIN"];
   const defaultPage = getDefaultAdminPage(roles);
   const [page, setPage] = useState<AdminPage>(
     () => defaultPage ?? "settings",
@@ -4203,6 +4600,7 @@ export function App() {
   const [areas, setAreas] = useState<ServiceArea[]>([]),
     [points, setPoints] = useState<PickupPoint[]>([]),
     [skus, setSkus] = useState<CatalogSku[]>([]),
+    [categories, setCategories] = useState<ProductCategory[]>([]),
     [campaigns, setCampaigns] = useState<Campaign[]>([]),
     [orders, setOrders] = useState<Order[]>([]),
     [plans, setPlans] = useState<DeliveryPlan[]>([]),
@@ -4251,6 +4649,7 @@ export function App() {
     setAreas([]);
     setPoints([]);
     setSkus([]);
+    setCategories([]);
     setCampaigns([]);
     setOrders([]);
     setPlans([]);
@@ -4271,7 +4670,14 @@ export function App() {
     setPage(nextPage);
   }, []);
   const establishSession = useCallback(() => {
-    const nextDefault = getDefaultAdminPage(auth.roles());
+    const nextRoles = auth.roles();
+    const nextDefault = getDefaultAdminPage(nextRoles);
+    if (requiresLogin && !nextDefault) {
+      auth.clear();
+      clearWorkspace();
+      setAuthenticated(false);
+      return;
+    }
     clearWorkspace(nextDefault ?? "settings");
     setAuthenticated(true);
   }, [clearWorkspace]);
@@ -4296,7 +4702,11 @@ export function App() {
           api.campaigns().then(commit(setCampaigns)),
           api.orders().then(commit(setOrders)),
         );
-      if (currentPage === "products") work.push(api.skus().then(commit(setSkus)));
+      if (currentPage === "products")
+        work.push(
+          api.skus().then(commit(setSkus)),
+          api.categories(true).then(commit(setCategories)),
+        );
       if (currentPage === "campaigns")
         work.push(
           api.areas().then(commit(setAreas)),
@@ -4325,11 +4735,15 @@ export function App() {
         work.push(api.staff().then(commit(setStaff)), api.points().then(commit(setPoints)));
       if (currentPage === "service")
         work.push(
-          Promise.all([api.quality(), api.cancellations(), api.exceptions()]).then(
-            ([nextQuality, nextCancellations, nextExceptions]) => {
-              commit(setQuality)(nextQuality);
-              commit(setCancellations)(nextCancellations);
-              commit(setExceptions)(nextExceptions);
+          Promise.allSettled([api.quality(), api.cancellations(), api.exceptions()]).then(
+            ([qualityResult, cancellationResult, exceptionResult]) => {
+              if (qualityResult.status === "fulfilled") commit(setQuality)(qualityResult.value);
+              if (cancellationResult.status === "fulfilled") commit(setCancellations)(cancellationResult.value);
+              if (exceptionResult.status === "fulfilled") commit(setExceptions)(exceptionResult.value);
+              const failed = [qualityResult, cancellationResult, exceptionResult].find(
+                (result): result is PromiseRejectedResult => result.status === "rejected",
+              );
+              if (failed) throw failed.reason;
             },
           ),
         );
@@ -4352,33 +4766,32 @@ export function App() {
         );
       if (currentPage === "finance")
         work.push(
-          Promise.all([
+          Promise.allSettled([
             api.finance(),
             api.ledger(),
             api.exceptions(),
             api.pickupWindows(),
             api.quality(),
             api.cancellations(),
-          ]).then(([
-            nextRefunds,
-            nextLedger,
-            nextExceptions,
-            nextWindows,
-            nextQuality,
-            nextCancellations,
-          ]) => {
-            commit(setRefunds)(nextRefunds);
-            commit(setLedger)(nextLedger);
-            commit(setExceptions)(nextExceptions);
-            commit(setPickupWindows)(nextWindows);
-            commit(setQuality)(nextQuality);
-            commit(setCancellations)(nextCancellations);
+          ]).then((results) => {
+            const [nextRefunds, nextLedger, nextExceptions, nextWindows, nextQuality, nextCancellations] = results;
+            if (nextRefunds.status === "fulfilled") commit(setRefunds)(nextRefunds.value);
+            if (nextLedger.status === "fulfilled") commit(setLedger)(nextLedger.value);
+            if (nextExceptions.status === "fulfilled") commit(setExceptions)(nextExceptions.value);
+            if (nextWindows.status === "fulfilled") commit(setPickupWindows)(nextWindows.value);
+            if (nextQuality.status === "fulfilled") commit(setQuality)(nextQuality.value);
+            if (nextCancellations.status === "fulfilled") commit(setCancellations)(nextCancellations.value);
+            const failed = results.find(
+              (result): result is PromiseRejectedResult => result.status === "rejected",
+            );
+            if (failed) throw failed.reason;
           }),
         );
       if (currentPage === "audit") work.push(api.audits().then(commit(setAudits)));
       await Promise.all(work);
     } catch (caught) {
       if (isCurrentReload()) setLoadError(adminLoadErrorText(caught));
+      throw caught;
     } finally {
       if (isCurrentReload()) setLoading(false);
     }
@@ -4401,7 +4814,7 @@ export function App() {
       setPage(defaultPage);
       return () => window.removeEventListener("admin-auth-expired", expired);
     }
-    void reload();
+    void reload().catch(() => undefined);
     return () => window.removeEventListener("admin-auth-expired", expired);
   }, [authenticated, page, roles.join(","), clearWorkspace]);
   if (!authenticated)
@@ -4410,11 +4823,17 @@ export function App() {
         <Login done={establishSession} />
       </AntApp>
     );
-  const content =
-    currentPage === "dashboard" ? (
+  const mainPageLoadFailed =
+    Boolean(loadError) &&
+    ["dashboard", "products", "campaigns", "orders", "pickup-points", "settings"].includes(
+      currentPage,
+    );
+  const pageContent = mainPageLoadFailed ? (
+    <PageLoadError page={currentPage} reload={reload} />
+  ) : currentPage === "dashboard" ? (
       <Dashboard {...{ areas, points, campaigns, orders }} />
     ) : currentPage === "products" ? (
-      <Products values={skus} reload={reload} />
+      <Products values={skus} categories={categories} reload={reload} />
     ) : currentPage === "campaigns" ? (
       <Campaigns values={campaigns} {...{ areas, points, skus, reload }} />
     ) : currentPage === "orders" ? (
@@ -4511,6 +4930,19 @@ export function App() {
     ) : (
       <Settings {...{ staff, points, reload }} />
     );
+  const content = (
+    <>
+      {loading && (
+        <Alert
+          type="info"
+          showIcon
+          icon={<ReloadOutlined spin />}
+          message="正在加载数据…"
+        />
+      )}
+      {pageContent}
+    </>
+  );
   return (
     <AntApp>
       <Layout className="app-shell">
@@ -4547,7 +4979,7 @@ export function App() {
               <Button
                 icon={<ReloadOutlined />}
                 loading={loading}
-                onClick={() => void reload()}
+                onClick={() => void reload().catch(() => undefined)}
               >
                 刷新
               </Button>

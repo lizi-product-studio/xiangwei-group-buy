@@ -87,7 +87,9 @@ describe("checkout page guest/auth handoff", () => {
     vi.resetModules();
   });
 
-  async function loadPage() {
+  async function loadPage(
+    options: { createFailure?: boolean; paymentFailure?: boolean } = {},
+  ) {
     const campaign = validCampaign();
     const requests: RequestOption[] = [];
     const navigateTo = vi.fn(() => Promise.resolve());
@@ -140,6 +142,10 @@ describe("checkout page guest/auth handoff", () => {
             capacityPerDay: null,
           }] } });
         } else if (request.method === "POST" && path === "/api/v1/orders") {
+          if (options.createFailure) {
+            request.fail?.({ errMsg: "create service unavailable" });
+            return;
+          }
           request.success?.({ statusCode: 200, data: { data: {
             id: "order-1",
             orderNo: "NO-1",
@@ -157,6 +163,10 @@ describe("checkout page guest/auth handoff", () => {
             items: [],
           } } });
         } else if (path === "/api/v1/orders/order-1/pay") {
+          if (options.paymentFailure) {
+            request.fail?.({ errMsg: "payment provider unavailable" });
+            return;
+          }
           request.success?.({ statusCode: 200, data: { data: {
             provider: "mock",
             status: "READY",
@@ -206,7 +216,15 @@ describe("checkout page guest/auth handoff", () => {
       status: "ACTIVE",
       capacityPerDay: null,
     });
-    return { app, requests, navigateTo, redirectTo, showModal, page, instance };
+    return {
+      app,
+      requests,
+      navigateTo,
+      redirectTo,
+      showModal,
+      page,
+      instance,
+    };
   }
 
   async function settle() {
@@ -253,5 +271,56 @@ describe("checkout page guest/auth handoff", () => {
     expect(writes.filter((request) => request.url.endsWith("/pay/mock-confirm"))).toHaveLength(1);
     expect(showModal).toHaveBeenCalledWith(expect.objectContaining({ title: "订单已提交" }));
     expect(redirectTo).toHaveBeenCalledWith({ url: "/pages/order-detail/index?id=order-1" });
+  });
+
+  it("keeps the created order and draft when payment fails, then opens that order", async () => {
+    const { page, instance, requests, redirectTo, showModal } = await loadPage({
+      paymentFailure: true,
+    });
+    storage.set("hometown-demo-customer-session", true);
+    storage.set("standardCart", { ...validDraft(), source: "cart" });
+    await page.loadCheckout.call(instance);
+    await settle();
+
+    await page.submitOrder.call(instance);
+    await settle();
+
+    expect(requests.filter((request) => request.method === "POST" && request.url.endsWith("/api/v1/orders"))).toHaveLength(1);
+    expect(requests.filter((request) => request.method === "POST" && request.url.endsWith("/pay"))).toHaveLength(1);
+    expect(requests.filter((request) => request.method === "POST" && request.url.endsWith("/pay/mock-confirm"))).toHaveLength(0);
+    expect(storage.has("checkoutDraft")).toBe(true);
+    expect(storage.has("standardCart")).toBe(true);
+    expect(showModal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "订单已创建，支付暂未完成",
+        showCancel: true,
+        confirmText: "查看订单",
+        cancelText: "稍后处理",
+      }),
+    );
+    expect(redirectTo).toHaveBeenCalledWith({ url: "/pages/order-detail/index?id=order-1" });
+  });
+
+  it("uses a creation-specific recoverable message and no order redirect when creation fails", async () => {
+    const { page, instance, requests, redirectTo, showModal } = await loadPage({
+      createFailure: true,
+    });
+    storage.set("hometown-demo-customer-session", true);
+    await page.loadCheckout.call(instance);
+    await settle();
+
+    await page.submitOrder.call(instance);
+    await settle();
+
+    expect(requests.filter((request) => request.method === "POST" && request.url.endsWith("/api/v1/orders"))).toHaveLength(1);
+    expect(requests.filter((request) => request.method === "POST" && request.url.endsWith("/pay"))).toHaveLength(0);
+    expect(showModal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "订单提交失败",
+        content: "订单提交失败，请稍后重试。",
+        showCancel: false,
+      }),
+    );
+    expect(redirectTo).not.toHaveBeenCalled();
   });
 });

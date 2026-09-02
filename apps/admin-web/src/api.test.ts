@@ -1,7 +1,29 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { api } from "./api.ts";
+import { adminErrorText, api, auth, isValidStaffRoles } from "./api.ts";
 
 describe("community admin API", () => {
+  it("maps browser/network and structured API failures to recoverable Chinese copy", () => {
+    expect(adminErrorText(new TypeError("Load failed"))).toContain("后台服务暂时无法连接");
+    expect(adminErrorText({ statusCode: 403, code: "FORBIDDEN" })).toBe(
+      "当前账号没有执行此操作的权限",
+    );
+    expect(
+      adminErrorText({
+        statusCode: 400,
+        code: "VALIDATION_ERROR",
+        details: [{ path: ["category"], message: "String must contain at least 2 character(s)" }],
+      }),
+    ).toContain("分类");
+  });
+
+  it("wraps a rejected fetch before any page can render it as an empty response", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+    await expect(api.skus()).rejects.toMatchObject({ code: "NETWORK_UNAVAILABLE" });
+    expect(adminErrorText(await api.skus().catch((error) => error))).toContain(
+      "后台服务暂时无法连接",
+    );
+  });
+
   beforeEach(() => {
     vi.stubGlobal(
       "fetch",
@@ -36,6 +58,26 @@ describe("community admin API", () => {
       expect.any(Object),
     );
   });
+
+  it("fails closed for malformed bearer role arrays while accepting the staff role enum", () => {
+    expect(isValidStaffRoles(["SUPER_ADMIN", "FINANCE"])).toBe(true);
+    expect(isValidStaffRoles([])).toBe(false);
+    expect(isValidStaffRoles(["SUPER_ADMIN", 123])).toBe(false);
+    expect(isValidStaffRoles(["SUPER_ADMIN", "ROOT"])).toBe(false);
+
+    const values = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    });
+    localStorage.setItem("community-admin-roles", JSON.stringify(["SUPER_ADMIN", 123]));
+    expect(auth.roles()).toEqual([]);
+    localStorage.setItem("community-admin-roles", JSON.stringify(["PICKUP_MANAGER"]));
+    expect(auth.roles()).toEqual(["PICKUP_MANAGER"]);
+    auth.clear();
+  });
+
   it("updates launch-critical pickup point details with PATCH", async () => {
     const body = {
       name: "东门社区点",

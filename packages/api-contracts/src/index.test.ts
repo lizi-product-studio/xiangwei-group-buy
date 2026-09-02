@@ -9,9 +9,30 @@ import {
   createInternalStaffSchema,
   notificationManualCompletionSchema,
   wechatLoginSchema,
+  productCategorySchema,
+  catalogSkuSchema,
 } from "./index.js";
 
 describe("public API contracts", () => {
+  it("requires valid product category names and sortable lifecycle values", () => {
+    expect(productCategorySchema.safeParse({ name: "蔬菜" }).success).toBe(true);
+    expect(productCategorySchema.safeParse({ name: "A" }).success).toBe(false);
+    expect(productCategorySchema.safeParse({ name: "蔬菜", sortOrder: -1 }).success).toBe(false);
+  });
+
+  it("accepts a category reference on a catalog SKU without changing the one-SKU shape", () => {
+    expect(
+      catalogSkuSchema.safeParse({
+        title: "本地时蔬",
+        category: "蔬菜",
+        categoryId: "category-1",
+        origin: "本地农场",
+        skuName: "500克/袋",
+        retailPriceCents: 1990,
+        defaultSellableQuantity: 20,
+      }).success,
+    ).toBe(true);
+  });
   it("does not allow an unanswered contact attempt to close a notification", () => {
     const evidence = {
       note: "已通过批准渠道联系",

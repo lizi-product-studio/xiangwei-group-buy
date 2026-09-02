@@ -132,6 +132,11 @@ async function request<T>(
   options: ClientRequestOptions,
 ): Promise<T> {
   const requestEpoch = sessionEpoch;
+  const method = (options.method ?? "GET").toUpperCase();
+  // The API's JSON parser expects an object for every JSON POST, including
+  // command endpoints whose contract has no request fields. Sending an empty
+  // body makes those otherwise valid commands fail before routing.
+  const data = method === "POST" && options.data === undefined ? {} : options.data;
   const header: Record<string, string> = {
     "content-type": "application/json",
     ...(options.header as Record<string, string> | undefined),
@@ -152,6 +157,7 @@ async function request<T>(
   return new Promise<T>((resolve, reject) => {
     wx.request<Envelope<T>>({
       ...options,
+      ...(data === undefined ? {} : { data }),
       header,
       url: `${app.globalData.apiBaseUrl}${options.url}`,
       success(response) {
@@ -432,6 +438,7 @@ export const customerAuth = {
           url: `${app.globalData.apiBaseUrl}/api/v1/auth/logout`,
           method: "POST",
           header: { authorization: `Bearer ${token}` },
+          data: {},
           complete: () => resolve(),
         });
       });

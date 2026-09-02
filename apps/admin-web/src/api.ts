@@ -49,6 +49,7 @@ export interface RegionDirectoryEntry {
 export interface CatalogSku {
   id: string;
   productId: string;
+  categoryId?: string | null;
   name: string;
   retailPriceCents: number;
   defaultSellableQuantity: number;
@@ -60,6 +61,14 @@ export interface CatalogSku {
     imageUrl: string | null;
     status: string;
   };
+}
+export interface ProductCategory {
+  id: string;
+  name: string;
+  sortOrder: number;
+  status: "ACTIVE" | "INACTIVE";
+  createdAt: string;
+  updatedAt: string;
 }
 export interface Campaign {
   id: string;
@@ -77,6 +86,8 @@ export interface Campaign {
     skuId: string;
     title: string;
     skuName: string;
+    category?: string;
+    origin?: string;
     unitPriceCents: number;
     stock: number;
     soldQuantity: number;
@@ -408,8 +419,124 @@ interface ErrorEnvelope {
   requestId?: string;
   details?: unknown;
 }
+export class AdminApiError extends Error {
+  readonly code?: string;
+  readonly requestId?: string;
+  readonly details?: unknown;
+  readonly statusCode?: number;
+  constructor(
+    message: string,
+    options: {
+      code?: string;
+      requestId?: string;
+      details?: unknown;
+      statusCode?: number;
+    } = {},
+  ) {
+    super(message);
+    this.name = "AdminApiError";
+    Object.assign(this, options);
+  }
+}
+
+const validationFieldNames: Record<string, string> = {
+  category: "分类",
+  title: "商品名称",
+  origin: "产地",
+  skuName: "销售规格（包装单位）",
+  retailPriceCents: "售价",
+  defaultSellableQuantity: "默认团期可售量",
+  regionCode: "服务区域",
+  serviceAreaId: "服务区域",
+  pickupPointId: "自提点",
+  dispatchAt: "计划发车时间",
+  cutoffAt: "截单时间",
+  estimatedArrivalStartAt: "预计到货开始时间",
+  estimatedArrivalEndAt: "预计到货结束时间",
+  name: "分类名称",
+  sortOrder: "分类排序",
+  categoryId: "分类",
+};
+function translateOperatorValidation(field: string, message: string): string {
+  const min = message.match(/at least (\d+) character/i)?.[1];
+  if (min) return `${field}至少 ${min} 个字符`;
+  const max = message.match(/at most (\d+) character/i)?.[1];
+  if (max) return `${field}不能超过 ${max} 个字符`;
+  if (/invalid input/i.test(message)) return `${field}格式不正确`;
+  return message;
+}
+function formatOperatorDetails(details: unknown): string | null {
+  if (!Array.isArray(details)) return null;
+  const messages = details
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const value = item as { path?: unknown; message?: unknown };
+      if (typeof value.message !== "string" || !value.message) return null;
+      const path = Array.isArray(value.path) ? value.path : [];
+      const field = typeof path[0] === "string" ? validationFieldNames[path[0]] : undefined;
+      const readable = translateOperatorValidation(field ?? "该字段", value.message);
+      return field ? `${field}：${readable}` : readable;
+    })
+    .filter((value): value is string => Boolean(value));
+  return messages.length ? [...new Set(messages)].join("；") : null;
+}
+export function adminErrorText(error: unknown): string {
+  const value = error as {
+    message?: unknown;
+    code?: unknown;
+    details?: unknown;
+    statusCode?: unknown;
+  };
+  const message = typeof value?.message === "string" ? value.message : "";
+  const statusCode = typeof value?.statusCode === "number" ? value.statusCode : 0;
+  const validation = formatOperatorDetails(value?.details);
+  if (validation) return validation;
+  const businessMessage = [
+    "商品仍有进行中团期或未完成订单，不能停用",
+    "区域仍有进行中团期或未完成订单，不能暂停下单",
+    "自提点仍有进行中团期、配送或授权负责人，不能停用",
+    "存在进行中履约或有效点位负责人授权，不能停用自提点",
+    "分类仍被商品引用，只能停用，不能删除",
+  ].find((candidate) => message.includes(candidate));
+  if (businessMessage) return businessMessage;
+  if (
+    value?.code === "NETWORK_UNAVAILABLE" ||
+    /failed to fetch|load failed|networkerror|network request failed|econnrefused|fetch failed/i.test(
+      message,
+    )
+  )
+    return "后台服务暂时无法连接，已保留填写内容，请启动服务后重试";
+  if (statusCode === 401 || value?.code === "AUTHENTICATION_REQUIRED")
+    return "登录状态已失效，请重新登录后再试";
+  if (statusCode === 403 || value?.code === "FORBIDDEN")
+    return "当前账号没有执行此操作的权限";
+  if (statusCode === 404) return "未找到要操作的数据，请刷新后重试";
+  if (statusCode === 409 || value?.code === "RESOURCE_IN_USE")
+    return "当前数据状态已变化或仍被使用，请刷新后重试";
+  if (statusCode >= 500) return "后台服务暂时不可用，请稍后重试";
+  if (value?.code === "VALIDATION_ERROR") return "请检查标有提示的字段后重试";
+  return "操作未完成，请检查填写内容后重试";
+}
 const TOKEN = "community-admin-token",
   ROLES = "community-admin-roles";
+const ALLOWED_STAFF_ROLES = new Set<StaffRole>([
+  "SUPER_ADMIN",
+  "OPERATOR",
+  "CUSTOMER_SERVICE",
+  "FINANCE",
+  "PICKUP_MANAGER",
+]);
+export function isValidStaffRoles(value: unknown): value is StaffRole[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every(
+      (role) =>
+        typeof role === "string" &&
+        ALLOWED_STAFF_ROLES.has(role as StaffRole),
+    )
+  );
+}
 export const requiresLogin =
   import.meta.env.PROD || import.meta.env.VITE_AUTH_MODE === "bearer";
 export const auth = {
@@ -417,8 +544,13 @@ export const auth = {
   roles: (): string[] => {
     try {
       const v = JSON.parse(localStorage.getItem(ROLES) ?? "[]");
-      return Array.isArray(v) ? v : [];
+      if (!isValidStaffRoles(v)) {
+        if (requiresLogin && auth.token()) auth.clear();
+        return [];
+      }
+      return v;
     } catch {
+      if (requiresLogin && auth.token()) auth.clear();
       return [];
     }
   },
@@ -444,21 +576,28 @@ function headers(json = true): Record<string, string> {
   return value;
 }
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(path, {
-    ...init,
-    headers: { ...headers(init.body !== undefined), ...(init.headers ?? {}) },
-  });
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      ...init,
+      headers: { ...headers(init.body !== undefined), ...(init.headers ?? {}) },
+    });
+  } catch (error) {
+    throw new AdminApiError(
+      "后台服务暂时无法连接，已保留填写内容，请启动服务后重试",
+      { code: "NETWORK_UNAVAILABLE", details: error },
+    );
+  }
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as ErrorEnvelope;
     if (response.status === 401) {
       auth.clear();
       window.dispatchEvent(new Event("admin-auth-expired"));
     }
-    const error = new Error(body.message ?? `请求失败（${response.status}）`);
-    Object.assign(error, {
-      code: body.code,
-      requestId: body.requestId,
-      details: body.details,
+    const error = new AdminApiError(body.message ?? "后台请求未完成", {
+      ...(body.code ? { code: body.code } : {}),
+      ...(body.requestId ? { requestId: body.requestId } : {}),
+      ...(body.details !== undefined ? { details: body.details } : {}),
       statusCode: response.status,
     });
     throw error;
@@ -516,6 +655,20 @@ export const api = {
       orderEnabled,
     }),
   points: () => request<PickupPoint[]>("/api/v1/admin/pickup-points"),
+  categories: (includeInactive = false) =>
+    request<ProductCategory[]>(
+      `/api/v1/admin/catalog/categories?includeInactive=${includeInactive ? "true" : "false"}`,
+    ),
+  saveCategory: (body: {
+    id?: string;
+    name: string;
+    sortOrder?: number;
+    status?: "ACTIVE" | "INACTIVE";
+  }) => post<ProductCategory>("/api/v1/admin/catalog/categories", body),
+  deleteCategory: (id: string) =>
+    request<{ deleted: boolean }>(`/api/v1/admin/catalog/categories/${id}`, {
+      method: "DELETE",
+    }),
   createPoint: (body: {
     serviceAreaId: string;
     name: string;
@@ -547,6 +700,7 @@ export const api = {
   saveSku: (body: {
     id?: string;
     productId?: string;
+    categoryId?: string | null;
     title: string;
     category: string;
     origin: string;

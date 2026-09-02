@@ -31,7 +31,7 @@ export function AuditPage({
             仅显示安全脱敏后的变更快照，可按 requestId 追溯操作。
           </Typography.Paragraph>
         </div>
-        <Button loading={loading} onClick={() => void reload()}>
+        <Button loading={loading} onClick={() => void reload().catch(() => undefined)}>
           刷新记录
         </Button>
       </header>
@@ -42,7 +42,7 @@ export function AuditPage({
           showIcon
           message="审计记录加载失败"
           description={error}
-          action={<Button size="small" onClick={() => void reload()}>重试</Button>}
+          action={<Button size="small" onClick={() => void reload().catch(() => undefined)}>重试</Button>}
         />
       )}
       <Table

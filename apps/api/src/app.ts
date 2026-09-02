@@ -9,6 +9,7 @@ import {
   campaignCancelSchema,
   campaignCloseSchema,
   catalogSkuSchema,
+  productCategorySchema,
   communityCampaignSchema,
   communityQualityAcceptanceSchema,
   communityQualityCaseSchema,
@@ -55,6 +56,7 @@ import { MemoryStore, type CommerceStore } from "./modules/core/store.js";
 import type {
   Campaign,
   CatalogSku,
+  ProductCategory,
   DeliveryPlan,
   PickupPoint,
 } from "./modules/core/types.js";
@@ -1004,11 +1006,12 @@ export async function buildApp(
           };
       if (after.status === "ACTIVE") createPickupPointSchema.parse(after);
       if (before.status === "ACTIVE" && after.status === "INACTIVE") {
-        const [campaigns, plans, staff, assignments] = await Promise.all([
+        const [campaigns, plans, staff, assignments, orders] = await Promise.all([
           transactionStore.listCampaigns(),
           transactionStore.listDeliveryPlans(),
           transactionStore.listInternalStaff(),
           transactionStore.listStaffPickupPointAssignments(),
+          transactionStore.listOrders(Number.MAX_SAFE_INTEGER),
         ]);
         const campaignById = new Map(
           campaigns.map((campaign) => [campaign.id, campaign]),
@@ -1038,14 +1041,22 @@ export async function buildApp(
             assignment.pickupPointId === id &&
             activeStaffIds.has(assignment.staffUserId),
         );
-        if (inProgressPlans.length || hasActiveManager)
+        const unfinishedOrders = orders.filter(
+          (order) =>
+            order.pickupPointId === id &&
+            !["CANCELLED", "REFUNDED", "PICKED_UP", "COMPLETED"].includes(
+              order.status,
+            ),
+        );
+        if (inProgressPlans.length || hasActiveManager || unfinishedOrders.length)
           throw new BusinessError(
             "INVALID_STATE_TRANSITION",
-            "存在进行中履约或有效点位负责人授权，不能停用自提点",
+            "存在未完成订单、进行中履约或有效点位负责人授权，不能停用自提点",
             409,
             {
               deliveryPlanCount: inProgressPlans.length,
               activeManagerCount: hasActiveManager ? 1 : 0,
+              unfinishedOrderCount: unfinishedOrders.length,
             },
           );
       }
@@ -1149,6 +1160,72 @@ export async function buildApp(
     requireActor(request, ["OPERATOR", "SUPER_ADMIN"]);
     return { data: await store.listCatalogSkus() };
   });
+  app.get("/api/v1/admin/catalog/categories", async (request) => {
+    requireActor(request, ["OPERATOR", "SUPER_ADMIN"]);
+    const query = request.query as { includeInactive?: string };
+    return {
+      data: await store.listProductCategories(query.includeInactive === "true"),
+    };
+  });
+  app.post("/api/v1/admin/catalog/categories", async (request, reply) => {
+    const actor = requireActor(request, ["OPERATOR", "SUPER_ADMIN"]);
+    const input = productCategorySchema.parse(request.body);
+    const value = await store.transaction(async (transactionStore) => {
+      const existing = await transactionStore.listProductCategories(true);
+      if (existing.some((item) => item.name === input.name && item.id !== input.id))
+        throw new BusinessError("RESOURCE_IN_USE", "分类名称已存在", 409);
+      const now = new Date().toISOString();
+      const category: ProductCategory = {
+        id: input.id ?? randomUUID(),
+        name: input.name,
+        sortOrder: input.sortOrder,
+        status: input.status,
+        createdAt: existing.find((item) => item.id === input.id)?.createdAt ?? now,
+        updatedAt: now,
+      };
+      await transactionStore.saveProductCategory(category);
+      await auditInTransaction(
+        transactionStore,
+        request,
+        actor.userId,
+        "PRODUCT_CATEGORY_SAVED",
+        "PRODUCT_CATEGORY",
+        category.id,
+        existing.find((item) => item.id === category.id) ?? null,
+        category,
+      );
+      return category;
+    });
+    return reply.status(input.id ? 200 : 201).send({ data: value });
+  });
+  app.delete("/api/v1/admin/catalog/categories/:id", async (request, reply) => {
+    const actor = requireActor(request, ["OPERATOR", "SUPER_ADMIN"]);
+    const { id } = request.params as { id: string };
+    const category = await store.getProductCategory(id);
+    if (!category)
+      throw new BusinessError("RESOURCE_NOT_FOUND", "分类不存在", 404);
+    const deleted = await store.transaction(async (transactionStore) => {
+      const ok = await transactionStore.deleteProductCategory(id);
+      if (!ok)
+        throw new BusinessError(
+          "RESOURCE_IN_USE",
+          "分类仍被商品引用，只能停用，不能删除",
+          409,
+        );
+      await auditInTransaction(
+        transactionStore,
+        request,
+        actor.userId,
+        "PRODUCT_CATEGORY_DELETED",
+        "PRODUCT_CATEGORY",
+        id,
+        category,
+        null,
+      );
+      return ok;
+    });
+    return reply.send({ data: { deleted } });
+  });
   app.post("/api/v1/admin/catalog/skus", async (request, reply) => {
     const actor = requireActor(request, ["OPERATOR", "SUPER_ADMIN"]);
     const input = catalogSkuSchema.parse(request.body);
@@ -1161,6 +1238,10 @@ export async function buildApp(
         const value: CatalogSku = {
           id: input.id ?? randomUUID(),
           productId: input.productId ?? randomUUID(),
+          categoryId:
+            input.categoryId === undefined
+              ? existing?.categoryId ?? null
+              : input.categoryId,
           name: input.skuName,
           retailPriceCents: moneyCents(input.retailPriceCents),
           defaultSellableQuantity: input.defaultSellableQuantity,
@@ -1177,6 +1258,20 @@ export async function buildApp(
           createdAt: existing?.createdAt ?? now,
           updatedAt: now,
         };
+        if (input.categoryId) {
+          const category = await transactionStore.getProductCategory(input.categoryId);
+          if (!category || category.status !== "ACTIVE")
+            throw new BusinessError(
+              "VALIDATION_ERROR",
+              "请选择有效的启用分类",
+              409,
+            );
+          value.categoryId = category.id;
+          value.product.category = category.name;
+        } else if (input.categoryId === undefined && existing?.categoryId) {
+          const category = await transactionStore.getProductCategory(existing.categoryId);
+          if (category) value.product.category = category.name;
+        }
         value.productId = value.product.id;
         if (existing?.status === "ACTIVE" && value.status === "INACTIVE") {
           const [campaigns, orders] = await Promise.all([

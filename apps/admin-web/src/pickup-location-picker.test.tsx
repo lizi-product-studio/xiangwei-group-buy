@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { isPickupLocationSubmissionBlocked } from "./pickup-location-picker.tsx";
+import {
+  isLocationServiceUnconfigured,
+  isPickupLocationSubmissionBlocked,
+} from "./pickup-location-picker.tsx";
 
 describe("pickup location submission guard", () => {
   it("blocks a new or changed location until reverse confirmation succeeds", () => {
@@ -12,5 +15,11 @@ describe("pickup location submission guard", () => {
   it("keeps a pure non-location edit available when the map is unavailable", () => {
     expect(isPickupLocationSubmissionBlocked(false, "FAILED")).toBe(false);
     expect(isPickupLocationSubmissionBlocked(false, "UNCONFIRMED")).toBe(false);
+  });
+
+  it("identifies the single missing-location-service block without exposing provider details", () => {
+    expect(isLocationServiceUnconfigured({ code: "LOCATION_VERIFICATION_NOT_CONFIGURED" })).toBe(true);
+    expect(isLocationServiceUnconfigured({ code: "LOCATION_PROVIDER_UNAVAILABLE" })).toBe(false);
+    expect(isLocationServiceUnconfigured(new Error("Load failed"))).toBe(false);
   });
 });

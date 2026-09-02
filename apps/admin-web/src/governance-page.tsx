@@ -1,4 +1,5 @@
 import { useState } from "react";
+import dayjs from "dayjs";
 import {
   Alert,
   App as AntApp,
@@ -13,6 +14,7 @@ import {
   Typography,
 } from "antd";
 import {
+  adminErrorText,
   api,
   type Notification,
   type ServiceAreaInterest,
@@ -38,6 +40,20 @@ const InterestStatus = ({ value }: { value: string }) => (
     {displayLabel(value)}
   </Tag>
 );
+const displayDateTime = (value: string | null | undefined) =>
+  value ? dayjs(value).format("YYYY-MM-DD HH:mm") : "—";
+const refreshAfterMutation = async (
+  reload: () => Promise<void>,
+  message: { success: (content: string) => unknown; warning: (content: string) => unknown },
+  successText: string,
+) => {
+  try {
+    await reload();
+    message.success(successText);
+  } catch {
+    message.warning("已保存，列表刷新失败，请刷新");
+  }
+};
 
 type PendingNotificationAction =
   | { notification: Notification; stage: "retry-confirm" }
@@ -88,10 +104,9 @@ export function GovernancePage({
     try {
       await api.retryNotification(notificationAction.notification.id);
       setNotificationAction(null);
-      await reload();
-      void message.success("通知已重新进入系统重试队列");
+      await refreshAfterMutation(reload, message, "通知已重新进入系统重试队列");
     } catch (caught) {
-      void message.error(caught instanceof Error ? caught.message : "通知重试失败");
+      void message.error(adminErrorText(caught));
     } finally {
       setSubmitting(false);
     }
@@ -111,10 +126,9 @@ export function GovernancePage({
         },
       );
       setNotificationAction(null);
-      await reload();
-      void message.success("已记录人工处理结果");
+      await refreshAfterMutation(reload, message, "已记录人工处理结果");
     } catch (caught) {
-      void message.error(caught instanceof Error ? caught.message : "人工完成失败");
+      void message.error(adminErrorText(caught));
     } finally {
       setSubmitting(false);
     }
@@ -129,10 +143,9 @@ export function GovernancePage({
         note: interestAction.note,
       });
       setInterestAction(null);
-      await reload();
-      void message.success("区域开通意向已更新");
+      await refreshAfterMutation(reload, message, "区域开通意向已更新");
     } catch (caught) {
-      void message.error(caught instanceof Error ? caught.message : "意向状态更新失败");
+      void message.error(adminErrorText(caught));
     } finally {
       setSubmitting(false);
     }
@@ -147,7 +160,7 @@ export function GovernancePage({
             处理通知失败与开通意向；仅记录合规渠道的处理结果。
           </Typography.Paragraph>
         </div>
-        <Button loading={loading} onClick={() => void reload()}>
+        <Button loading={loading} onClick={() => void reload().catch(() => undefined)}>
           刷新队列
         </Button>
       </header>
@@ -158,7 +171,7 @@ export function GovernancePage({
           showIcon
           message="治理队列加载失败"
           description={error}
-          action={<Button size="small" onClick={() => void reload()}>重试</Button>}
+          action={<Button size="small" onClick={() => void reload().catch(() => undefined)}>重试</Button>}
         />
       )}
 
@@ -181,7 +194,7 @@ export function GovernancePage({
             { title: "用户标识", dataIndex: "userDisplay" },
             { title: "失败原因", render: (_, value: Notification) => value.lastDeliveryError ?? "—" },
             { title: "尝试次数", dataIndex: "deliveryAttempts" },
-            { title: "最近时间", dataIndex: "lastActivityAt" },
+            { title: "最近时间", render: (_, value: Notification) => displayDateTime(value.lastActivityAt) },
             { title: "状态", render: (_, value: Notification) => <NotificationStatus value={value.status} /> },
             {
               title: "操作",
@@ -260,10 +273,10 @@ export function GovernancePage({
             { title: "区域", dataIndex: "regionText" },
             { title: "联系人", dataIndex: "contactName" },
             { title: "联系电话", dataIndex: "maskedContactPhone" },
-            { title: "隐私同意时间", dataIndex: "privacyConsentedAt" },
+            { title: "隐私同意时间", render: (_, value: ServiceAreaInterest) => displayDateTime(value.privacyConsentedAt) },
             { title: "状态", render: (_, value: ServiceAreaInterest) => <InterestStatus value={value.status} /> },
             { title: "处理说明", render: (_, value: ServiceAreaInterest) => value.statusNote ?? "—" },
-            { title: "最近处理", render: (_, value: ServiceAreaInterest) => value.statusChangedAt ?? value.createdAt },
+            { title: "最近处理", render: (_, value: ServiceAreaInterest) => displayDateTime(value.statusChangedAt ?? value.createdAt) },
             {
               title: "操作",
               render: (_, value: ServiceAreaInterest) => {

@@ -1,5 +1,5 @@
 export const apiUnavailableMessage =
-  "后台服务不可用，数据加载失败。请确认已在项目根目录执行 pnpm dev（或分别启动 pnpm dev:api 与 pnpm dev:admin），然后点击“重试”。";
+  "后台服务不可用，数据加载失败。请确认已在项目根目录执行 pnpm dev（或分别启动 pnpm dev:api 与 pnpm dev:admin）后点击“重试”。后台服务暂时无法连接，已保留填写内容。";
 
 export const recoverableLoadErrorMessage =
   "数据加载失败，请点击“重试”再试。";

@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { MemoryStore } from "./modules/core/store.js";
+import type { Order, PickupPoint, ServiceArea } from "./modules/core/types.js";
 import type { ReverseLocationAdapter } from "./modules/service-areas/pickup-location-validation.js";
 
 const admin = { "x-demo-user-id": "admin", "x-demo-role": "SUPER_ADMIN" };
@@ -187,6 +188,28 @@ describe("single community application surface", () => {
         arrivalEndAt: "2027-08-22T16:00:00+08:00",
       },
     });
+    const duplicateCampaignSku = await app.inject({
+      method: "POST",
+      url: "/api/v1/admin/campaigns",
+      headers: admin,
+      payload: {
+        title: "重复商品团期",
+        serviceAreaId: areaId,
+        pickupPointId: pointId,
+        cutoffAt: "2027-08-23T10:00:00+08:00",
+        dispatchAt: "2027-08-23T12:00:00+08:00",
+        estimatedArrivalStartAt: "2027-08-23T14:00:00+08:00",
+        estimatedArrivalEndAt: "2027-08-23T16:00:00+08:00",
+        minTotalQuantity: 1,
+        failureAction: "CANCEL_AND_REFUND",
+        items: [
+          { catalogSkuId: sku.json().data.id, retailPriceCents: 1890, sellableQuantity: 10 },
+          { catalogSkuId: sku.json().data.id, retailPriceCents: 1890, sellableQuantity: 10 },
+        ],
+      },
+    });
+    expect(duplicateCampaignSku.statusCode, duplicateCampaignSku.body).toBe(400);
+    expect(duplicateCampaignSku.json()).toMatchObject({ code: "VALIDATION_ERROR" });
     expect(
       (
         await app.inject({
@@ -205,6 +228,84 @@ describe("single community application surface", () => {
         })
       ).statusCode,
     ).toBe(404);
+  });
+
+  it("blocks pickup-point deactivation while an unfinished order remains", async () => {
+    const store = new MemoryStore(false);
+    const now = new Date().toISOString();
+    const area: ServiceArea = {
+      id: "area-unfinished-order",
+      regionCode: "110101",
+      name: "北京市东城区",
+      status: "ENABLED",
+      orderEnabled: true,
+      createdAt: now,
+    };
+    const point: PickupPoint = {
+      id: "point-unfinished-order",
+      serviceAreaId: area.id,
+      name: "东门自提点",
+      address: "东门服务站",
+      businessHours: "09:00-20:00",
+      pickupInstructions: "出示领取码",
+      latitude: 39.9042,
+      longitude: 116.4074,
+      contactName: "张店长",
+      contactPhone: "13800000000",
+      status: "ACTIVE",
+      capacityPerDay: null,
+      createdAt: now,
+    };
+    const order: Order = {
+      id: "order-unfinished-point",
+      orderNo: "CG-UNFINISHED-POINT",
+      userId: "customer",
+      campaignId: "campaign-finished-for-point-guard",
+      serviceAreaId: area.id,
+      pickupPointId: point.id,
+      deliveryPlanId: "delivery-finished-for-point-guard",
+      status: "PAID_WAITING_CLOSE",
+      totalCents: 1990,
+      items: [
+        {
+          orderLineId: null,
+          skuId: "sku-unfinished-point",
+          productId: "product-unfinished-point",
+          name: "时蔬",
+          quantity: 1,
+          unitPriceCents: 1990,
+          amountCents: 1990,
+          fulfilledQuantity: 0,
+          pickedUpQuantity: 0,
+          exceptionQuantity: 0,
+          refundedQuantity: 0,
+          refundedAmountCents: 0,
+        },
+      ],
+      createdAt: now,
+      expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
+      paidAt: now,
+      pickedUpAt: null,
+    };
+    await store.saveServiceArea(area);
+    await store.savePickupPoint(point);
+    await store.saveOrder(order);
+    app = await buildApp({ config: loadConfig({ NODE_ENV: "test" }), store });
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/admin/pickup-points/${point.id}`,
+      headers: admin,
+      payload: { status: "INACTIVE" },
+    });
+    expect(response.statusCode, response.body).toBe(409);
+    expect(response.json()).toMatchObject({
+      code: "INVALID_STATE_TRANSITION",
+      details: { unfinishedOrderCount: 1 },
+    });
+    expect((await store.listPickupPoints()).find((value) => value.id === point.id)?.status).toBe(
+      "ACTIVE",
+    );
   });
 
   it("keeps a pickup manager inside assigned web workbench routes", async () => {
@@ -574,5 +675,89 @@ describe("single community application surface", () => {
       "PICKUP_POINT_DUPLICATE_OVERRIDDEN",
     );
 
+  });
+
+  it("manages categories and protects referenced categories from deletion", async () => {
+    const store = new MemoryStore(false);
+    app = await buildApp({ config: loadConfig({ NODE_ENV: "test" }), store });
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/v1/admin/catalog/categories",
+      headers: admin,
+      payload: { name: "蔬菜", sortOrder: 1 },
+    });
+    expect(created.statusCode, created.body).toBe(201);
+    const categoryId = created.json().data.id as string;
+    expect((await app.inject({ method: "GET", url: "/api/v1/admin/catalog/categories", headers: admin })).json().data).toHaveLength(1);
+    const renamed = await app.inject({
+      method: "POST",
+      url: "/api/v1/admin/catalog/categories",
+      headers: admin,
+      payload: { id: categoryId, name: "叶菜", sortOrder: 2 },
+    });
+    expect(renamed.statusCode, renamed.body).toBe(200);
+    expect(renamed.json().data).toMatchObject({ id: categoryId, name: "叶菜", sortOrder: 2 });
+    const sku = await app.inject({
+      method: "POST",
+      url: "/api/v1/admin/catalog/skus",
+      headers: admin,
+      payload: {
+        title: "时蔬",
+        category: "蔬菜",
+        categoryId,
+        origin: "本地农场",
+        skuName: "500克/袋",
+        retailPriceCents: 1990,
+        defaultSellableQuantity: 20,
+      },
+    });
+    expect(sku.statusCode, sku.body).toBe(201);
+    expect(sku.json().data).toMatchObject({ categoryId, product: { category: "叶菜" } });
+    const disabledSku = await app.inject({
+      method: "POST",
+      url: "/api/v1/admin/catalog/skus",
+      headers: admin,
+      payload: {
+        id: sku.json().data.id,
+        productId: sku.json().data.productId,
+        title: "时蔬",
+        category: "叶菜",
+        origin: "本地农场",
+        skuName: "500克/袋",
+        retailPriceCents: 1990,
+        defaultSellableQuantity: 20,
+        status: "INACTIVE",
+      },
+    });
+    expect(disabledSku.statusCode, disabledSku.body).toBe(200);
+    expect(disabledSku.json().data.categoryId).toBe(categoryId);
+    const deleted = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/admin/catalog/categories/${categoryId}`,
+      headers: admin,
+    });
+    expect(deleted.statusCode, deleted.body).toBe(409);
+    const disabled = await app.inject({
+      method: "POST",
+      url: "/api/v1/admin/catalog/categories",
+      headers: admin,
+      payload: { id: categoryId, name: "蔬菜", sortOrder: 1, status: "INACTIVE" },
+    });
+    expect(disabled.statusCode, disabled.body).toBe(200);
+    const rejectedSku = await app.inject({
+      method: "POST",
+      url: "/api/v1/admin/catalog/skus",
+      headers: admin,
+      payload: {
+        title: "时蔬二号",
+        category: "蔬菜",
+        categoryId,
+        origin: "本地农场",
+        skuName: "500克/袋",
+        retailPriceCents: 1990,
+        defaultSellableQuantity: 20,
+      },
+    });
+    expect(rejectedSku.statusCode, rejectedSku.body).toBe(409);
   });
 });
