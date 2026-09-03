@@ -19,6 +19,7 @@ export type AdminNavigationItem = {
 };
 
 export type AdminNavigationGroup = {
+  key: string;
   label: string;
   items: readonly AdminNavigationItem[];
 };
@@ -27,6 +28,7 @@ const globalRoles = ["OPERATOR", "SUPER_ADMIN", "FINANCE", "CUSTOMER_SERVICE"];
 
 const mainNavigation: readonly AdminNavigationGroup[] = [
   {
+    key: "operations",
     label: "日常运营",
     items: [
       { key: "dashboard", label: "工作台", roles: ["OPERATOR"] },
@@ -40,6 +42,7 @@ const mainNavigation: readonly AdminNavigationGroup[] = [
     ],
   },
   {
+    key: "fulfillment",
     label: "履约管理",
     items: [
       { key: "logistics", label: "配送与到货", roles: ["OPERATOR"] },
@@ -47,6 +50,7 @@ const mainNavigation: readonly AdminNavigationGroup[] = [
     ],
   },
   {
+    key: "customers-finance",
     label: "客户与资金",
     items: [
       {
@@ -63,6 +67,7 @@ const mainNavigation: readonly AdminNavigationGroup[] = [
     ],
   },
   {
+    key: "access-audit",
     label: "权限与审计",
     items: [
       { key: "audit", label: "审计记录", roles: ["SUPER_ADMIN"] },
@@ -84,6 +89,7 @@ export function getAdminNavigation(
   if (isPointWorkbenchUser(roles)) {
     return [
       {
+        key: "point-workbench",
         label: "点位工作台",
         items: [
           {
@@ -98,6 +104,7 @@ export function getAdminNavigation(
   const isSuperAdmin = roles.includes("SUPER_ADMIN");
   return mainNavigation
     .map((group) => ({
+      key: group.key,
       label: group.label,
       items: group.items.filter(
         (item) =>
@@ -123,4 +130,21 @@ export function isAllowedAdminPage(
   return getAdminNavigation(roles).some((group) =>
     group.items.some((item) => item.key === page),
   );
+}
+
+export function getAdminNavigationPath(
+  roles: readonly string[],
+  page: AdminPage,
+): { groupKey: string; groupLabel: string; pageLabel: string } | null {
+  for (const group of getAdminNavigation(roles)) {
+    const item = group.items.find((candidate) => candidate.key === page);
+    if (item) {
+      return {
+        groupKey: group.key,
+        groupLabel: group.label,
+        pageLabel: item.label,
+      };
+    }
+  }
+  return null;
 }

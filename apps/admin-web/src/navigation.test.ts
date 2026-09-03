@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   getAdminNavigation,
+  getAdminNavigationPath,
   getDefaultAdminPage,
   isAllowedAdminPage,
 } from "./navigation.ts";
@@ -52,6 +53,7 @@ describe("admin navigation", () => {
   it("keeps a pickup manager in the isolated point workbench", () => {
     expect(getAdminNavigation(["PICKUP_MANAGER"])).toEqual([
       {
+        key: "point-workbench",
         label: "点位工作台",
         items: [
           {
@@ -77,5 +79,18 @@ describe("admin navigation", () => {
 
   it("never gives a consumer an admin default page", () => {
     expect(getDefaultAdminPage(["USER"])).toBeNull();
+  });
+
+  it("resolves a stable parent and child path for the active page", () => {
+    expect(getAdminNavigationPath(["SUPER_ADMIN"], "audit")).toEqual({
+      groupKey: "access-audit",
+      groupLabel: "权限与审计",
+      pageLabel: "审计记录",
+    });
+    expect(getAdminNavigationPath(["PICKUP_MANAGER"], "point-workbench")).toEqual({
+      groupKey: "point-workbench",
+      groupLabel: "点位工作台",
+      pageLabel: "我的点位工作台",
+    });
   });
 });

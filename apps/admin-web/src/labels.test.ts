@@ -22,6 +22,12 @@ describe("displayLabel", () => {
     expect(displayLabel("CURRENT_AUDIT")).toBe("CURRENT_AUDIT");
     expect(displayLabel(null)).toBe("—");
   });
+
+  it("shows business Chinese for administrator audit actions", () => {
+    expect(displayLabel("STAFF_PASSWORD_CHANGED")).toBe("修改登录密码");
+    expect(displayLabel("BOOTSTRAP_ADMIN_ROTATED")).toBe("更新管理员凭据");
+    expect(displayLabel("BOOTSTRAP_ADMIN_CREATED")).toBe("创建管理员账号");
+  });
 });
 
 describe("STAFF_ROLE_OPTIONS", () => {

@@ -1,5 +1,6 @@
-import { Alert, Button, Descriptions, Table, Typography } from "antd";
-import type { AuditLog } from "./api.ts";
+import { Alert, Button, Descriptions, Table, Tooltip, Typography } from "antd";
+import type { AuditLog, InternalStaff } from "./api.ts";
+import { formatAuditTime, resolveAuditActor, shortAuditId } from "./audit-display.ts";
 import { displayLabel } from "./labels.ts";
 
 function renderSnapshot(value: unknown) {
@@ -13,11 +14,13 @@ function renderSnapshot(value: unknown) {
 
 export function AuditPage({
   audits,
+  staff,
   loading,
   error,
   reload,
 }: {
   audits: AuditLog[];
+  staff: InternalStaff[];
   loading: boolean;
   error: string | null;
   reload: () => Promise<void>;
@@ -46,9 +49,12 @@ export function AuditPage({
         />
       )}
       <Table
+        className="audit-table"
         rowKey="id"
         dataSource={audits}
         locale={{ emptyText: "暂无审计记录" }}
+        scroll={{ x: 1040 }}
+        pagination={{ showSizeChanger: false, showTotal: (total) => `共 ${total} 条` }}
         expandable={{
           expandedRowRender: (value) => (
             <Descriptions bordered size="small" column={1}>
@@ -62,11 +68,62 @@ export function AuditPage({
           ),
         }}
         columns={[
-          { title: "操作者", dataIndex: "actorId" },
-          { title: "动作", render: (_, value) => displayLabel(value.action) },
-          { title: "资源", render: (_, value) => `${displayLabel(value.resourceType)} / ${value.resourceId}` },
-          { title: "请求 ID", dataIndex: "requestId" },
-          { title: "时间", dataIndex: "createdAt" },
+          {
+            title: "操作者",
+            width: 190,
+            render: (_, value) => {
+              const actor = resolveAuditActor(value.actorId, staff);
+              return (
+                <div className="audit-primary-cell">
+                  <strong>{actor.name}</strong>
+                  <span>{actor.secondary}</span>
+                </div>
+              );
+            },
+          },
+          {
+            title: "操作内容",
+            width: 190,
+            render: (_, value) => {
+              const label = displayLabel(value.action);
+              return label === value.action ? (
+                <div className="audit-primary-cell">
+                  <strong>系统操作</strong>
+                  <span className="audit-technical-code">{value.action}</span>
+                </div>
+              ) : label;
+            },
+          },
+          {
+            title: "操作对象",
+            width: 220,
+            render: (_, value) => (
+              <div className="audit-primary-cell">
+                <strong>{displayLabel(value.resourceType)}</strong>
+                <Tooltip title={value.resourceId}>
+                  <span className="audit-ellipsized-id">{value.resourceId}</span>
+                </Tooltip>
+              </div>
+            ),
+          },
+          {
+            title: "追踪编号",
+            width: 190,
+            render: (_, value) => (
+              <Typography.Text
+                className="audit-copy-id"
+                copyable={{ text: value.requestId, tooltips: ["复制完整编号", "已复制"] }}
+                ellipsis={{ tooltip: value.requestId }}
+              >
+                {shortAuditId(value.requestId)}
+              </Typography.Text>
+            ),
+          },
+          {
+            title: "操作时间",
+            width: 180,
+            render: (_, value) => <span className="audit-time">{formatAuditTime(value.createdAt)}</span>,
+          },
         ]}
       />
     </>

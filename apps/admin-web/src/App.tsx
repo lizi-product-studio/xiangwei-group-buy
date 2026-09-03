@@ -9,6 +9,8 @@ import {
 import {
   Alert,
   App as AntApp,
+  Avatar,
+  Breadcrumb,
   Button,
   Card,
   DatePicker,
@@ -29,13 +31,17 @@ import {
   Typography,
 } from "antd";
 import {
+  AppstoreOutlined,
+  CarOutlined,
   EyeInvisibleOutlined,
   EyeOutlined,
   BranchesOutlined,
   LockOutlined,
   PlusOutlined,
   ReloadOutlined,
+  SafetyCertificateOutlined,
   UserOutlined,
+  UsergroupAddOutlined,
   DownOutlined,
 } from "@ant-design/icons";
 import dayjs from "dayjs";
@@ -66,6 +72,7 @@ import {
 } from "./api.ts";
 import {
   getAdminNavigation,
+  getAdminNavigationPath,
   getDefaultAdminPage,
   isAllowedAdminPage,
   type AdminPage,
@@ -669,20 +676,42 @@ function AccountMenu({
   return (
     <Dropdown
       trigger={["click"]}
+      overlayClassName="account-dropdown"
       menu={{
         items: [
-          { key: "identity", label: <span aria-label="当前账号信息">{label} · {displayLabel(role)}</span>, disabled: true },
+          {
+            key: "identity",
+            label: (
+              <div className="account-dropdown__identity" aria-label="当前账号信息">
+                <strong>{label}</strong>
+                <span>{displayLabel(role)}</span>
+              </div>
+            ),
+            disabled: true,
+          },
           { type: "divider" },
           { key: "change-password", label: <ChangeOwnPasswordButton /> },
           { key: "logout", label: "退出登录", danger: true, onClick: onLogout },
         ],
       }}
     >
-      <Button type="text" aria-label="打开账号菜单">
-        <UserOutlined /> {label}（{displayLabel(role)}） <DownOutlined />
+      <Button type="text" className="account-trigger" aria-label="打开账号菜单">
+        <Avatar size={34} icon={<UserOutlined />} />
+        <span className="account-trigger__copy">
+          <strong>{label}</strong>
+          <small>{displayLabel(role)}</small>
+        </span>
+        <DownOutlined className="account-trigger__chevron" />
       </Button>
     </Dropdown>
   );
+}
+
+function navigationGroupIcon(groupKey: string) {
+  if (groupKey === "operations") return <AppstoreOutlined />;
+  if (groupKey === "fulfillment") return <CarOutlined />;
+  if (groupKey === "customers-finance") return <UsergroupAddOutlined />;
+  return <SafetyCertificateOutlined />;
 }
 
 function Dashboard({
@@ -5171,7 +5200,11 @@ export function App() {
             if (failed) throw failed.reason;
           }),
         );
-      if (currentPage === "audit") work.push(api.audits().then(commit(setAudits)));
+      if (currentPage === "audit")
+        work.push(
+          api.audits().then(commit(setAudits)),
+          api.staff().then(commit(setStaff)),
+        );
       await Promise.all(work);
     } catch (caught) {
       if (isCurrentReload()) setLoadError(adminLoadErrorText(caught));
@@ -5311,7 +5344,7 @@ export function App() {
         }}
       />
     ) : currentPage === "audit" ? (
-      <AuditPage audits={audits} loading={loading} error={loadError} reload={reload} />
+      <AuditPage audits={audits} staff={staff} loading={loading} error={loadError} reload={reload} />
     ) : (
       <Settings {...{ staff, points, reload }} currentUserId={auth.userId()} />
     );
@@ -5328,12 +5361,13 @@ export function App() {
       {pageContent}
     </>
   );
+  const navigationPath = getAdminNavigationPath(roles, currentPage);
   return (
     <AntApp>
       <Layout className="app-shell">
         <Sider
           className="app-sider"
-          width={230}
+          width={248}
           theme="light"
           breakpoint="md"
           collapsedWidth={0}
@@ -5346,9 +5380,11 @@ export function App() {
           <Menu
             mode="inline"
             selectedKeys={[currentPage]}
+            defaultOpenKeys={navigation.map((group) => `section:${group.key}`)}
             onClick={({ key }) => setPage(key as AdminPage)}
             items={navigation.map((group) => ({
-              type: "group",
+              key: `section:${group.key}`,
+              icon: navigationGroupIcon(group.key),
               label: group.label,
               children: group.items.map((item) => ({
                 key: item.key,
@@ -5359,9 +5395,18 @@ export function App() {
         </Sider>
         <Layout>
           <Header className="topbar">
-            <span>单一社区团购运营系统</span>
-            <Space>
+            <div className="topbar__context">
+              <Breadcrumb
+                aria-label="当前位置"
+                items={[
+                  { title: navigationPath?.groupLabel ?? "运营后台" },
+                  { title: navigationPath?.pageLabel ?? "当前页面" },
+                ]}
+              />
+            </div>
+            <Space className="topbar__actions" size={12}>
               <Button
+                className="topbar__refresh"
                 icon={<ReloadOutlined />}
                 loading={loading}
                 onClick={() => void reload().catch(() => undefined)}

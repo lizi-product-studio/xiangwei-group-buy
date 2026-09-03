@@ -38,7 +38,10 @@ async function createStaff(
   });
   expect(response.status).toBe(201);
   const payload = (await response.json()) as { data: { temporaryPassword: string } };
-  const context = await browser.newContext({ baseURL: adminBase });
+  const context = await browser.newContext({
+    baseURL: adminBase,
+    viewport: { width: 1440, height: 900 },
+  });
   const page = await context.newPage();
   const failures = watch(page);
   await page.goto("/");
@@ -90,4 +93,65 @@ test("五个内部角色仅加载其默认页与可见菜单，USER 被后台拒
     headers: { "x-demo-user-id": "p1a-user", "x-demo-role": "USER" },
   });
   expect(userDenied.status()).toBe(403);
+});
+
+test("后台框架提供高对比账号入口、可展开分组和运营可读审计表", async ({ browser }, testInfo) => {
+  const session = await createStaff(browser, "SUPER_ADMIN");
+  const topbar = session.page.locator("header.topbar");
+  await expect(topbar).toHaveCSS("background-color", "rgba(255, 255, 255, 0.98)");
+  const account = session.page.getByRole("button", { name: "打开账号菜单" });
+  await expect(account).toBeVisible();
+  await expect(account).toHaveCSS("color", "rgb(23, 38, 58)");
+  await expect(account.locator("small")).toHaveCSS("color", "rgb(95, 104, 117)");
+
+  const accessGroup = session.page.getByRole("menuitem", { name: "权限与审计" });
+  await expect(accessGroup).toHaveAttribute("aria-expanded", "true");
+  await expect(session.page.getByRole("menuitem", { name: "人员与权限" })).toBeVisible();
+  await session.page.getByRole("menuitem", { name: "审计记录" }).click();
+  await expect(session.page.getByLabel("当前位置")).toContainText("权限与审计");
+  await expect(session.page.getByLabel("当前位置")).toContainText("审计记录");
+  await expect(session.page.getByRole("columnheader", { name: "操作内容" })).toBeVisible();
+  await expect(session.page.getByRole("columnheader", { name: "追踪编号" })).toBeVisible();
+  await expect(session.page.getByText("创建员工", { exact: true }).first()).toBeVisible();
+  await expect(session.page.getByText(/^STAFF_/)).toHaveCount(0);
+  await expect(session.page.locator(".audit-primary-cell span").first()).toHaveCSS(
+    "color",
+    "rgb(95, 104, 117)",
+  );
+  await session.page.evaluate(() => {
+    const host = document.createElement("div");
+    host.className = "audit-primary-cell";
+    const fallback = document.createElement("span");
+    fallback.className = "audit-technical-code";
+    fallback.textContent = "UNKNOWN_AUDIT_ACTION";
+    fallback.dataset.testid = "audit-technical-code";
+    host.append(fallback);
+    document.body.append(host);
+  });
+  await expect(session.page.getByTestId("audit-technical-code")).toHaveCSS(
+    "color",
+    "rgb(95, 104, 117)",
+  );
+  await expect(session.page.getByText("密码已设置，请继续使用")).toBeHidden({ timeout: 10_000 });
+  await session.page.screenshot({ path: testInfo.outputPath("audit-shell.png") });
+
+  await account.click();
+  const accountIdentity = session.page.getByLabel("当前账号信息");
+  await expect(accountIdentity).toBeVisible();
+  await expect(session.page.getByRole("menuitem", { name: "退出登录" })).toBeVisible();
+  await session.page.screenshot({ path: testInfo.outputPath("account-menu.png") });
+  await account.click();
+  await expect(accountIdentity).toBeHidden();
+  const operationsGroup = session.page.getByRole("menuitem", { name: "日常运营" });
+  const operationsSubmenu = operationsGroup.locator("xpath=..");
+  await operationsGroup.click();
+  await expect(operationsGroup).toHaveAttribute("aria-expanded", "false");
+  await expect(operationsSubmenu.getByRole("menuitem", { name: "工作台" })).toBeHidden();
+  await expect(operationsSubmenu.getByRole("menuitem", { name: "商品管理" })).toBeHidden();
+  await expect(operationsSubmenu.getByRole("menuitem", { name: "团期管理" })).toBeHidden();
+  await expect(operationsSubmenu.getByRole("menuitem", { name: "订单管理" })).toBeHidden();
+  await expect(operationsSubmenu.locator(".ant-menu-sub")).toBeHidden();
+  await session.page.screenshot({ path: testInfo.outputPath("sidebar-collapsed-group.png") });
+  expect(session.failures).toEqual([]);
+  await session.context.close();
 });
