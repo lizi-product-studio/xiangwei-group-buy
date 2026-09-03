@@ -41,7 +41,7 @@ test("超管通过网页复核运输、发车、紧急纠正、订单详情和�
   });
 
   const suffix = `closure-${Date.now()}`;
-  const admin = await post<{ initialCredential: string }>(
+  const admin = await post<{ temporaryPassword: string }>(
     request,
     "/api/v1/admin/staff",
     {
@@ -132,11 +132,13 @@ test("超管通过网页复核运输、发车、紧急纠正、订单详情和�
     .toBe(200);
 
   await page.goto("/");
-  await page.getByRole("button", { name: "首次激活账号" }).click();
   await page.getByLabel("账号").fill(`closure.admin.${suffix}`);
-  await page.getByLabel("一次性初始凭据").fill(admin.initialCredential);
-  await page.getByLabel("新密码").fill("closure admin password");
-  await page.getByRole("button", { name: "完成首次激活" }).click();
+  await page.getByLabel("密码").fill(admin.temporaryPassword);
+  await page.getByRole("button", { name: /登\s*录/ }).click();
+  await expect(page.getByText("请先设置新密码", { exact: true })).toBeVisible();
+  await page.getByLabel("新密码", { exact: true }).fill("closure admin password");
+  await page.getByLabel("确认新密码").fill("closure admin password");
+  await page.getByRole("button", { name: "保存新密码" }).click();
   await expect(page.getByRole("heading", { name: "系统设置" })).toBeVisible();
 
   await page.getByRole("menuitem", { name: "配送与到货" }).click();

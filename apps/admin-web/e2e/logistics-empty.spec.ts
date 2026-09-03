@@ -26,19 +26,28 @@ async function activatePreviewAdmin(
   });
   expect(created.status(), await created.text()).toBe(201);
   const createdBody = (await created.json()) as {
-    data: { initialCredential: string };
+    data: { temporaryPassword: string };
   };
   const password = "logistics empty state password";
-  const activated = await request.fetch(
-    `${apiBase}/api/v1/auth/admin/activate`,
+  const login = await request.fetch(
+    `${apiBase}/api/v1/auth/admin/login`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },
       data: {
         username,
-        initialCredential: createdBody.data.initialCredential,
-        newPassword: password,
+        password: createdBody.data.temporaryPassword,
       },
+    },
+  );
+  expect(login.status(), await login.text()).toBe(200);
+  const challenge = (await login.json()).data.passwordChangeToken as string;
+  const activated = await request.fetch(
+    `${apiBase}/api/v1/auth/admin/complete-password-change`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      data: { passwordChangeToken: challenge, newPassword: password },
     },
   );
   expect(activated.status(), await activated.text()).toBe(200);

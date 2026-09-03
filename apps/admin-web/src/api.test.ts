@@ -1,9 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { adminErrorText, api, auth, isValidStaffRoles } from "./api.ts";
+import {
+  adminErrorText,
+  api,
+  auth,
+  isValidStaffRoles,
+  loginRetryMessage,
+  loginRetryRemainingSeconds,
+  parseRetryAfterSeconds,
+} from "./api.ts";
 
 describe("community admin API", () => {
   it("maps browser/network and structured API failures to recoverable Chinese copy", () => {
-    expect(adminErrorText(new TypeError("Load failed"))).toContain("后台服务暂时无法连接");
+    expect(adminErrorText(new TypeError("Load failed"))).toContain("暂时无法连接后台服务");
     expect(adminErrorText({ statusCode: 403, code: "FORBIDDEN" })).toBe(
       "当前账号没有执行此操作的权限",
     );
@@ -20,8 +28,38 @@ describe("community admin API", () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
     await expect(api.skus()).rejects.toMatchObject({ code: "NETWORK_UNAVAILABLE" });
     expect(adminErrorText(await api.skus().catch((error) => error))).toContain(
-      "后台服务暂时无法连接",
+      "暂时无法连接后台服务",
     );
+  });
+
+  it("parses Retry-After and exposes a controlled login countdown", () => {
+    const now = Date.parse("2026-09-03T00:00:00.000Z");
+    expect(parseRetryAfterSeconds("321", now)).toBe(321);
+    expect(parseRetryAfterSeconds("Thu, 03 Sep 2026 00:05:21 GMT", now)).toBe(321);
+    expect(parseRetryAfterSeconds("invalid", now)).toBeUndefined();
+    const until = now + 321_000;
+    expect(loginRetryRemainingSeconds(until, now)).toBe(321);
+    expect(loginRetryRemainingSeconds(until, now + 321_000)).toBe(0);
+    expect(loginRetryMessage(321)).toBe(
+      "登录尝试过于频繁，请在 5 分 21 秒后重试；持续失败请联系超级管理员",
+    );
+  });
+
+  it("keeps the response Retry-After value on login rate-limit errors", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({ code: "LOGIN_RATE_LIMITED", message: "登录尝试过于频繁" }),
+          { status: 429, headers: { "content-type": "application/json", "retry-after": "42" } },
+        ),
+      ),
+    );
+    await expect(api.login("ops.admin", "not a real password")).rejects.toMatchObject({
+      code: "LOGIN_RATE_LIMITED",
+      statusCode: 429,
+      retryAfterSeconds: 42,
+    });
   });
 
   beforeEach(() => {

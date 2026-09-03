@@ -705,7 +705,7 @@ describe("P1-C governance API contracts", () => {
         driverPhone: "13800000000",
         token: "secret-token",
       },
-      afterData: { nested: { openId: "openid-user", initialCredential: "secret" } },
+      afterData: { nested: { openId: "openid-user", temporaryPassword: "secret" } },
       createdAt: new Date().toISOString(),
     });
     const audits = await app.inject({

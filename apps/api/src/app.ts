@@ -3,6 +3,7 @@ import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
+import { Redis } from "ioredis";
 import {
   batchCreatePickupPointsSchema,
   bookVehicleSchema,
@@ -39,7 +40,12 @@ import { BusinessError, moneyCents } from "@hometown/domain";
 import type { AppConfig } from "./config.js";
 import { AdminAuthService } from "./modules/auth/admin-auth.js";
 import { readDemoActor, requireActor } from "./modules/auth/auth.js";
+import {
+  createLoginRateLimiter,
+  type LoginRateLimiter,
+} from "./modules/auth/login-rate-limiter.js";
 import { StaffService } from "./modules/auth/staff-service.js";
+import { runWithInternalWriteActor } from "./modules/auth/internal-write-context.js";
 import {
   AuthService,
   WechatApiCodeExchange,
@@ -108,6 +114,7 @@ const sensitiveAuditKeys = new Set([
   "tokenhash",
   "authorization",
   "initialcredential",
+  "temporarypassword",
   "credential",
   "wechatopenid",
   "openid",
@@ -163,6 +170,30 @@ export interface AppDependencies {
   wechatCodeExchange?: WechatCodeExchange;
   subscriptionMessageProvider?: SubscriptionMessageProvider;
   paymentProvider?: PaymentProvider;
+  loginRateLimiter?: LoginRateLimiter;
+}
+
+export async function hasReadyAdminBootstrap(store: CommerceStore): Promise<boolean> {
+  return (
+    await Promise.all(
+      (await store.listInternalStaff()).map(async (staff) => {
+        if (staff.status !== "ACTIVE" || staff.role !== "SUPER_ADMIN") return false;
+        const [user, credential] = await Promise.all([
+          store.getUser(staff.userId),
+          store.findAdminCredentialByUserId(staff.userId),
+        ]);
+        return Boolean(
+          user?.status === "ACTIVE" &&
+            credential &&
+            credential.legacyDisabled !== true &&
+            !credential.mustChangePassword &&
+            credential.roles.length === 1 &&
+            credential.roles[0] === "SUPER_ADMIN" &&
+            credential.authorizationVersion === staff.authorizationVersion,
+        );
+      }),
+    )
+  ).some(Boolean);
 }
 
 /**
@@ -303,6 +334,15 @@ export async function buildApp(
     store,
     config.AUTH_SESSION_TTL_SECONDS,
   );
+  const loginRateLimitRedis = !dependencies.loginRateLimiter && config.REDIS_URL
+    ? new Redis(config.REDIS_URL)
+    : null;
+  const loginRateLimiter =
+    dependencies.loginRateLimiter ??
+    createLoginRateLimiter(
+      loginRateLimitRedis,
+      config.NODE_ENV === "production",
+    );
   const staffService = new StaffService(store);
 
   const audit = (
@@ -558,14 +598,41 @@ export async function buildApp(
           426,
         );
     });
-  app.addHook("onRequest", async (request) => {
-    request.actor =
-      (await adminAuthService.authenticate(request.headers.authorization)) ??
-      (config.AUTH_PROVIDER === "demo"
-        ? readDemoActor(request)
-        : await authService!.authenticate(request.headers.authorization));
+  app.addHook("onRequest", (request, _reply, done) => {
+    void adminAuthService
+      .authenticate(request.headers.authorization)
+      .then(
+        async (adminActor) =>
+          adminActor ??
+          (config.AUTH_PROVIDER === "demo"
+            ? readDemoActor(request)
+            : await authService!.authenticate(request.headers.authorization)),
+      )
+      .then(
+        (actor) => {
+          request.actor = actor;
+          runWithInternalWriteActor(actor, done);
+        },
+        (error: Error) => done(error),
+      );
   });
   app.setErrorHandler((error, request, reply) => {
+    if (error instanceof BusinessError && error.code === "LOGIN_RATE_LIMITED") {
+      const retryAfterSeconds =
+        error.details &&
+        typeof error.details === "object" &&
+        "retryAfterSeconds" in error.details &&
+        typeof error.details.retryAfterSeconds === "number"
+          ? Math.max(1, Math.ceil(error.details.retryAfterSeconds))
+          : 900;
+      reply.header("Retry-After", String(retryAfterSeconds));
+      return reply.status(429).send({
+        code: error.code,
+        message: error.message,
+        requestId: request.id,
+        ...(error.details === undefined ? {} : { details: error.details }),
+      });
+    }
     // @fastify/rate-limit throws a framework error rather than a BusinessError.
     // Preserve its protocol status at the product boundary instead of allowing
     // the generic handler below to turn normal back-pressure into a 500.
@@ -574,12 +641,17 @@ export async function buildApp(
       error !== null &&
       "statusCode" in error &&
       error.statusCode === 429
-    )
+    ) {
+      const isAdminLogin = request.url.startsWith("/api/v1/auth/admin/login");
+      reply.header("Retry-After", isAdminLogin ? "900" : "60");
       return reply.status(429).send({
-        code: "RATE_LIMITED",
-        message: "请求过于频繁，请稍后再试",
+        code: isAdminLogin ? "LOGIN_RATE_LIMITED" : "RATE_LIMITED",
+        message: isAdminLogin
+          ? "登录尝试过于频繁，请 15 分钟后再试"
+          : "请求过于频繁，请稍后再试",
         requestId: request.id,
       });
+    }
     if (error instanceof BusinessError)
       return reply
         .status(error.statusCode)
@@ -615,10 +687,28 @@ export async function buildApp(
     const dependencies = {
       dataStore: await store.health(),
       queue: await scheduler.health(),
+      loginProtection: await loginRateLimiter.health(),
       reconciliation:
         lastReconciliationError || reconciliationStale ? "degraded" : "ok",
     };
-    if (lastReconciliationError || reconciliationStale)
+    if (config.NODE_ENV === "production") {
+      const managedSuperAdmin = await hasReadyAdminBootstrap(store);
+      Object.assign(dependencies, {
+        adminBootstrap: managedSuperAdmin ? "ok" : "degraded",
+      });
+      if (!managedSuperAdmin)
+        return reply.status(503).send({
+          status: "degraded",
+          code: "ADMIN_BOOTSTRAP_REQUIRED",
+          message: "尚未配置受管的 ACTIVE 超级管理员",
+          dependencies,
+        });
+    }
+    if (
+      dependencies.loginProtection !== "ok" ||
+      lastReconciliationError ||
+      reconciliationStale
+    )
       return reply.status(503).send({ status: "degraded", dependencies });
     return { status: "ok", dependencies };
   });
@@ -626,7 +716,7 @@ export async function buildApp(
   registerAuthRoutes(app, {
     authService,
     adminAuthService,
-    staffService,
+    loginRateLimiter,
     privacyNoticeVersion: config.PRIVACY_NOTICE_VERSION,
   });
   registerPublicCatalogRoutes(app, {
@@ -1544,7 +1634,7 @@ export async function buildApp(
       .send({
         data: {
           staff: staffView(value.staff),
-          initialCredential: value.initialCredential,
+          temporaryPassword: value.temporaryPassword,
         },
       });
   });
@@ -1561,7 +1651,7 @@ export async function buildApp(
       ),
     };
   });
-  app.post("/api/v1/admin/staff/:id/reset-credential", async (request) => {
+  app.post("/api/v1/admin/staff/:id/reset-password", async (request) => {
     const actor = requireActor(request, ["SUPER_ADMIN"]);
     const { reason } = resetInternalStaffCredentialSchema.parse(request.body);
     const value = await staffService.resetCredential(
@@ -1573,7 +1663,7 @@ export async function buildApp(
     return {
       data: {
         staff: staffView(value.staff),
-        initialCredential: value.initialCredential,
+        temporaryPassword: value.temporaryPassword,
       },
     };
   });
@@ -2257,6 +2347,7 @@ export async function buildApp(
   app.addHook("onClose", async () => {
     clearInterval(timer);
     await scheduler.close();
+    await loginRateLimiter.close();
     await store.close();
   });
   return app;

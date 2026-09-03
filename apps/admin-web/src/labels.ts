@@ -7,7 +7,7 @@ const LABELS: Record<string, string> = {
   FINANCE: "财务",
   PICKUP_MANAGER: "点位负责人",
 
-  PENDING_ACTIVATION: "待激活",
+  PASSWORD_SETUP_REQUIRED: "待首次改密",
   ACTIVE: "启用",
   SUSPENDED: "已停用",
   INACTIVE: "已停用",
@@ -111,7 +111,6 @@ const LABELS: Record<string, string> = {
   STAFF_ROLE_CHANGED: "变更角色",
   STAFF_PICKUP_SCOPE_CHANGED: "变更点位授权",
   STAFF_CREDENTIAL_RESET: "重置凭据",
-  STAFF_ACTIVATED: "激活员工",
   SERVICE_AREA_STATUS_UPDATED: "区域接单状态变更",
   SERVICE_AREA_INTEREST_STATUS_UPDATED: "区域意向状态变更",
   ORDER_NOTIFICATION_MANUAL_COMPLETED: "通知人工完成",

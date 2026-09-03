@@ -197,7 +197,7 @@ export interface InternalStaff {
   displayName: string;
   phone: string;
   role: StaffRole;
-  status: "PENDING_ACTIVATION" | "ACTIVE" | "SUSPENDED";
+  status: "PASSWORD_SETUP_REQUIRED" | "ACTIVE" | "SUSPENDED";
   pickupPointIds: string[];
   createdAt: string;
 }
@@ -424,6 +424,7 @@ export class AdminApiError extends Error {
   readonly requestId?: string;
   readonly details?: unknown;
   readonly statusCode?: number;
+  readonly retryAfterSeconds?: number;
   constructor(
     message: string,
     options: {
@@ -431,12 +432,33 @@ export class AdminApiError extends Error {
       requestId?: string;
       details?: unknown;
       statusCode?: number;
+      retryAfterSeconds?: number;
     } = {},
   ) {
     super(message);
     this.name = "AdminApiError";
     Object.assign(this, options);
   }
+}
+
+export function parseRetryAfterSeconds(
+  value: string | null,
+  now = Date.now(),
+): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.max(1, Math.ceil(seconds));
+  const date = Date.parse(value);
+  if (!Number.isFinite(date) || date <= now) return undefined;
+  return Math.max(1, Math.ceil((date - now) / 1_000));
+}
+
+export function loginRetryRemainingSeconds(until: number | null, now = Date.now()): number {
+  return until ? Math.max(0, Math.ceil((until - now) / 1_000)) : 0;
+}
+
+export function loginRetryMessage(seconds: number): string {
+  return `登录尝试过于频繁，请在 ${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒后重试；持续失败请联系超级管理员`;
 }
 
 const validationFieldNames: Record<string, string> = {
@@ -505,9 +527,17 @@ export function adminErrorText(error: unknown): string {
       message,
     )
   )
-    return "后台服务暂时无法连接，已保留填写内容，请启动服务后重试";
+    return "暂时无法连接后台服务，请稍后重试；持续失败请联系超级管理员";
+  if (statusCode === 401 && value?.code === "INVALID_CREDENTIALS")
+    return "账号或密码不正确";
   if (statusCode === 401 || value?.code === "AUTHENTICATION_REQUIRED")
     return "登录状态已失效，请重新登录后再试";
+  if (statusCode === 403 && value?.code === "ACCOUNT_DISABLED")
+    return "该账号已停用，请联系超级管理员";
+  if (statusCode === 403 && value?.code === "PASSWORD_SETUP_REQUIRED")
+    return "该账号需要超级管理员重置临时密码";
+  if (statusCode === 429 || value?.code === "LOGIN_RATE_LIMITED")
+    return "登录尝试过于频繁，请稍后再试";
   if (statusCode === 403 || value?.code === "FORBIDDEN")
     return "当前账号没有执行此操作的权限";
   if (statusCode === 404) return "未找到要操作的数据，请刷新后重试";
@@ -584,21 +614,29 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     });
   } catch (error) {
     throw new AdminApiError(
-      "后台服务暂时无法连接，已保留填写内容，请启动服务后重试",
+      "暂时无法连接后台服务，请稍后重试；持续失败请联系超级管理员",
       { code: "NETWORK_UNAVAILABLE", details: error },
     );
   }
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as ErrorEnvelope;
-    if (response.status === 401) {
+    const publicAuthEndpoint =
+      path === "/api/v1/auth/admin/login" ||
+      path === "/api/v1/auth/admin/complete-password-change";
+    if (response.status === 401 && !publicAuthEndpoint) {
       auth.clear();
       window.dispatchEvent(new Event("admin-auth-expired"));
     }
+    const retryAfterSeconds =
+      response.status === 429
+        ? parseRetryAfterSeconds(response.headers.get("retry-after"))
+        : undefined;
     const error = new AdminApiError(body.message ?? "后台请求未完成", {
       ...(body.code ? { code: body.code } : {}),
       ...(body.requestId ? { requestId: body.requestId } : {}),
       ...(body.details !== undefined ? { details: body.details } : {}),
       statusCode: response.status,
+      ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
     });
     throw error;
   }
@@ -615,25 +653,32 @@ const patch = <T>(path: string, body: unknown) =>
 
 export const api = {
   login: async (username: string, password: string) => {
-    const v = await post<{ accessToken: string; roles: string[] }>(
+    const v = await post<
+      | { nextAction: "LOGIN"; accessToken: string; roles: string[] }
+      | { nextAction: "CHANGE_PASSWORD"; passwordChangeToken: string; roles: string[] }
+    >(
       "/api/v1/auth/admin/login",
       { username, password },
     );
-    auth.save(v.accessToken, v.roles);
+    if (v.nextAction === "LOGIN") auth.save(v.accessToken, v.roles);
     return v;
   },
-  activateStaff: async (
-    username: string,
-    initialCredential: string,
-    newPassword: string,
-  ) => {
-    const v = await post<{ accessToken: string; roles: string[] }>(
-      "/api/v1/auth/admin/activate",
-      { username, initialCredential, newPassword },
+  completePasswordChange: async (passwordChangeToken: string, newPassword: string) => {
+    const v = await post<{ nextAction: "LOGIN"; accessToken: string; roles: string[] }>(
+      "/api/v1/auth/admin/complete-password-change",
+      { passwordChangeToken, newPassword },
     );
     auth.save(v.accessToken, v.roles);
     return v;
   },
+  changeOwnPassword: (currentPassword: string, newPassword: string) =>
+    post<{ nextAction: "LOGIN"; accessToken: string; roles: string[] }>(
+      "/api/v1/admin/me/change-password",
+      { currentPassword, newPassword },
+    ).then((v) => {
+      auth.save(v.accessToken, v.roles);
+      return v;
+    }),
   logout: () => post<void>("/api/v1/auth/logout"),
   areas: () => request<ServiceArea[]>("/api/v1/admin/service-areas"),
   regions: (query = "") =>
@@ -813,7 +858,7 @@ export const api = {
     role: StaffRole;
     pickupPointIds: string[];
   }) =>
-    post<{ staff: InternalStaff; initialCredential: string }>(
+    post<{ staff: InternalStaff; temporaryPassword: string }>(
       "/api/v1/admin/staff",
       body,
     ),
@@ -831,8 +876,8 @@ export const api = {
       body: JSON.stringify(body),
     }),
   resetStaffCredential: (id: string, reason: string) =>
-    post<{ staff: InternalStaff; initialCredential: string }>(
-      `/api/v1/admin/staff/${id}/reset-credential`,
+    post<{ staff: InternalStaff; temporaryPassword: string }>(
+      `/api/v1/admin/staff/${id}/reset-password`,
       { reason },
     ),
   quality: () => request<QualityCase[]>("/api/v1/admin/quality-cases"),

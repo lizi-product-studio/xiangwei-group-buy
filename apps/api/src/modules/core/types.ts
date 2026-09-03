@@ -171,7 +171,10 @@ export type Role =
   | "FINANCE"
   | "PICKUP_MANAGER";
 export type InternalStaffRole = Exclude<Role, "USER">;
-export type InternalStaffStatus = "PENDING_ACTIVATION" | "ACTIVE" | "SUSPENDED";
+export type InternalStaffStatus =
+  | "PASSWORD_SETUP_REQUIRED"
+  | "ACTIVE"
+  | "SUSPENDED";
 export interface User {
   id: string;
   wechatOpenId: string | null;
@@ -194,6 +197,14 @@ export interface AuthSession {
    */
   authorizationVersion: number;
   expiresAt: string;
+}
+/** Short-lived, single-use challenge issued after a valid temporary password. */
+export interface PasswordChangeToken {
+  tokenHash: string;
+  userId: string;
+  authorizationVersion: number;
+  expiresAt: string;
+  createdAt: string;
 }
 export interface InternalStaff {
   userId: string;
@@ -223,6 +234,8 @@ export interface AdminCredential {
   passwordSalt: string;
   passwordHash: string;
   mustChangePassword: boolean;
+  /** Set only by the one-time legacy activation migration. */
+  legacyDisabled?: boolean;
   roles: Role[];
   authorizationVersion: number;
   createdAt: string;

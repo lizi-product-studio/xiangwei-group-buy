@@ -37,17 +37,19 @@ async function createStaff(
     }),
   });
   expect(response.status).toBe(201);
-  const payload = (await response.json()) as { data: { initialCredential: string } };
+  const payload = (await response.json()) as { data: { temporaryPassword: string } };
   const context = await browser.newContext({ baseURL: adminBase });
   const page = await context.newPage();
   const failures = watch(page);
   await page.goto("/");
-  await page.getByRole("button", { name: "首次激活账号" }).click();
   const username = `role.${role.toLowerCase()}.${value}`;
   await page.getByLabel("账号").fill(username);
-  await page.getByLabel("一次性初始凭据").fill(payload.data.initialCredential);
-  await page.getByLabel("新密码").fill("role default activation password");
-  await page.getByRole("button", { name: "完成首次激活" }).click();
+  await page.getByLabel("密码").fill(payload.data.temporaryPassword);
+  await page.getByRole("button", { name: /登\s*录/ }).click();
+  await expect(page.getByText("请先设置新密码", { exact: true })).toBeVisible();
+  await page.getByLabel("新密码", { exact: true }).fill("role default setup password");
+  await page.getByLabel("确认新密码").fill("role default setup password");
+  await page.getByRole("button", { name: "保存新密码" }).click();
   return { context, page, failures };
 }
 

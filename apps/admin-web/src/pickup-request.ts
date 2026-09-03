@@ -20,7 +20,6 @@ const PREFIX = "hometown-community-pickup-v2";
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TERMINAL_CODES = new Set([
-  "ACTIVATION_REQUIRED",
   "FORBIDDEN",
   "VALIDATION_ERROR",
   "RESOURCE_NOT_FOUND",

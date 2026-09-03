@@ -32,6 +32,49 @@ function watchBrowser(page: Page, expectedInvalidation = () => false): string[] 
   return failures;
 }
 
+test("登录密码显隐可键盘操作，429 按 Retry-After 倒计时恢复", async ({ page }) => {
+  let releaseLogin!: () => void;
+  const loginGate = new Promise<void>((resolve) => {
+    releaseLogin = resolve;
+  });
+  await page.route("**/api/v1/auth/admin/login", async (route) => {
+    await loginGate;
+    await route.fulfill({
+      status: 429,
+      headers: { "content-type": "application/json", "retry-after": "2" },
+      body: JSON.stringify({
+        code: "LOGIN_RATE_LIMITED",
+        message: "登录尝试过于频繁，请稍后再试",
+      }),
+    });
+  });
+  await page.goto("/");
+  const username = page.getByLabel("账号");
+  const password = page.getByLabel("密码");
+  const visibility = page.getByRole("button", { name: "显示凭据内容" });
+  const login = page.getByRole("button", { name: /登\s*录/ });
+  await username.focus();
+  await page.keyboard.press("Tab");
+  await expect(password).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(visibility).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(login).toBeFocused();
+  await username.fill("rate.limit.admin");
+  await password.fill("rate limit password");
+  const responsePending = login.click();
+  await expect(visibility).toBeDisabled();
+  await expect(page.getByRole("button", { name: /忘记密码/ })).toBeDisabled();
+  releaseLogin();
+  await responsePending;
+  await expect(page.getByRole("alert")).toContainText("登录尝试过于频繁，请在 0 分");
+  await expect(login).toBeDisabled();
+  await expect(login).toHaveCSS("background-color", "rgb(215, 219, 224)");
+  await login.hover();
+  await expect(login).toHaveCSS("background-color", "rgb(215, 219, 224)");
+  await expect(login).toBeEnabled({ timeout: 4_000 });
+});
+
 async function findStaffRow(page: Page, displayName: string) {
   const row = page.getByRole("row").filter({ hasText: displayName });
   while ((await row.count()) === 0) {
@@ -57,7 +100,7 @@ async function findLedgerReference(page: Page, referenceId: string) {
   return reference;
 }
 
-test("超管从网页开通员工，首次激活与撤权后的默认页可恢复", async ({
+test("超管从网页创建员工，临时密码改密与撤权后的默认页可恢复", async ({
   page,
   browser,
   request,
@@ -79,7 +122,7 @@ test("超管从网页开通员工，首次激活与撤权后的默认页可恢�
     contactPhone: "13800138009",
     capacityPerDay: 10,
   });
-  const bootstrap = await post<{ initialCredential: string }>(request, "/api/v1/admin/staff", {
+  const bootstrap = await post<{ temporaryPassword: string }>(request, "/api/v1/admin/staff", {
     displayName: "P1-A 超管",
     username: `p1a.admin.${suffix}`,
     phone: `137${suffix.slice(-8)}`,
@@ -88,12 +131,49 @@ test("超管从网页开通员工，首次激活与撤权后的默认页可恢�
   });
 
   await page.goto("/");
-  await page.getByRole("button", { name: "首次激活账号" }).click();
   await page.getByLabel("账号").fill(`p1a.admin.${suffix}`);
-  await page.getByLabel("一次性初始凭据").fill(bootstrap.initialCredential);
-  await page.getByLabel("新密码").fill("p1a admin activation password");
-  await page.getByRole("button", { name: "完成首次激活" }).click();
+  await page.getByLabel("密码").fill(bootstrap.temporaryPassword);
+  await page.getByRole("button", { name: /登\s*录/ }).click();
+  await expect(page.getByText("请先设置新密码", { exact: true })).toBeVisible();
+  await page.getByLabel("新密码", { exact: true }).fill("p1a admin setup password");
+  await page.getByLabel("确认新密码").fill("p1a admin setup password");
+  await page.getByRole("button", { name: "保存新密码" }).click();
   await expect(page.getByRole("heading", { name: "系统设置" })).toBeVisible();
+
+  await page.getByRole("button", { name: "修改密码" }).click();
+  const ownPasswordDialog = page.getByRole("dialog", { name: "修改密码" });
+  await ownPasswordDialog
+    .getByLabel("当前密码")
+    .fill("p1a admin setup password");
+  await ownPasswordDialog
+    .getByLabel("新密码", { exact: true })
+    .fill("p1a admin profile password");
+  await ownPasswordDialog
+    .getByLabel("确认新密码")
+    .fill("p1a admin profile password");
+  await ownPasswordDialog.getByRole("button", { name: "保存新密码" }).click();
+  await expect(ownPasswordDialog).toHaveCount(0);
+  await expect(page.getByText("密码已修改，其他旧会话已失效")).toBeVisible();
+  const oldPasswordLogin = await request.post(
+    `${apiBase}/api/v1/auth/admin/login`,
+    {
+      data: {
+        username: `p1a.admin.${suffix}`,
+        password: "p1a admin setup password",
+      },
+    },
+  );
+  expect(oldPasswordLogin.status()).toBe(401);
+  const newPasswordLogin = await request.post(
+    `${apiBase}/api/v1/auth/admin/login`,
+    {
+      data: {
+        username: `p1a.admin.${suffix}`,
+        password: "p1a admin profile password",
+      },
+    },
+  );
+  expect(newPasswordLogin.status(), await newPasswordLogin.text()).toBe(200);
 
   await page.getByRole("button", { name: "新增员工" }).click();
   await page.getByLabel("姓名").fill("P1-A 点位负责人");
@@ -112,7 +192,7 @@ test("超管从网页开通员工，首次激活与撤权后的默认页可恢�
     .click();
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "创建账号" }).click();
-  const credentialDialog = page.getByRole("dialog", { name: /一次性初始凭据/ });
+  const credentialDialog = page.getByRole("dialog", { name: /临时密码/ });
   await expect(credentialDialog).toBeVisible();
   const managerCredential = await credentialDialog.locator("code").textContent();
   expect(managerCredential).toBeTruthy();
@@ -124,11 +204,17 @@ test("超管从网页开通员工，首次激活与撤权后的默认页可恢�
   const managerPage = await managerContext.newPage();
   const managerFailures = watchBrowser(managerPage, () => invalidated);
   await managerPage.goto("/");
-  await managerPage.getByRole("button", { name: "首次激活账号" }).click();
   await managerPage.getByLabel("账号").fill(`p1a.manager.${suffix}`);
-  await managerPage.getByLabel("一次性初始凭据").fill(managerCredential!);
-  await managerPage.getByLabel("新密码").fill("p1a manager activation password");
-  await managerPage.getByRole("button", { name: "完成首次激活" }).click();
+  await managerPage.getByLabel("密码").fill(managerCredential!);
+  await managerPage.getByRole("button", { name: /登\s*录/ }).click();
+  await expect(managerPage.getByText("请先设置新密码", { exact: true })).toBeVisible();
+  await managerPage
+    .getByLabel("新密码", { exact: true })
+    .fill("p1a manager setup password");
+  await managerPage
+    .getByLabel("确认新密码")
+    .fill("p1a manager setup password");
+  await managerPage.getByRole("button", { name: "保存新密码" }).click();
   await expect(managerPage.getByRole("heading", { name: "我的点位工作台" })).toBeVisible();
   await expect(managerPage.getByText("商品管理", { exact: true })).toHaveCount(0);
   await expect(managerPage.getByText(`P1-A 授权点 ${suffix}`, { exact: true })).toHaveCount(0);
@@ -160,11 +246,11 @@ test("超管从网页开通员工，首次激活与撤权后的默认页可恢�
   confirm = page.getByRole("dialog", { name: "确认恢复员工" });
   await confirm.getByLabel("操作原因").fill("完成交接后恢复");
   await confirm.getByRole("button", { name: "确认执行" }).click();
-  await staffRow.getByRole("button", { name: "重置凭据" }).click();
-  confirm = page.getByRole("dialog", { name: "重置一次性凭据" });
+  await staffRow.getByRole("button", { name: "重置密码" }).click();
+  confirm = page.getByRole("dialog", { name: "重置临时密码" });
   await confirm.getByLabel("操作原因").fill("密码轮换");
   await confirm.getByRole("button", { name: "确认执行" }).click();
-  const resetCredentialDialog = page.getByRole("dialog", { name: /一次性初始凭据/ });
+  const resetCredentialDialog = page.getByRole("dialog", { name: /临时密码/ });
   await expect(resetCredentialDialog).toBeVisible();
   await resetCredentialDialog.getByRole("button", { name: "我已安全保存" }).click();
 
@@ -219,7 +305,7 @@ test("同一标签切换账号会清空旧工作区，客服和财务刷新只�
   ) => {
     accountSequence += 1;
     const username = `switch.${role.toLowerCase()}.${suffix}.${accountSequence}`;
-    const result = await post<{ initialCredential: string }>(
+    const result = await post<{ temporaryPassword: string }>(
       request,
       "/api/v1/admin/staff",
       {
@@ -230,18 +316,24 @@ test("同一标签切换账号会清空旧工作区，客服和财务刷新只�
         pickupPointIds,
       },
     );
-    return { username, initialCredential: result.initialCredential };
+    return { username, temporaryPassword: result.temporaryPassword };
   };
   const managerA = await create("PICKUP_MANAGER", [pointA.id]);
   const managerB = await create("PICKUP_MANAGER", [pointB.id]);
   const customerService = await create("CUSTOMER_SERVICE");
   const finance = await create("FINANCE");
-  const activate = async (account: { username: string; initialCredential: string }) => {
-    await page.getByRole("button", { name: "首次激活账号" }).click();
+  const loginWithTemporaryPassword = async (account: { username: string; temporaryPassword: string }) => {
     await page.getByLabel("账号").fill(account.username);
-    await page.getByLabel("一次性初始凭据").fill(account.initialCredential);
-    await page.getByLabel("新密码").fill("switch account activation password");
-    await page.getByRole("button", { name: "完成首次激活" }).click();
+    await page.getByLabel("密码").fill(account.temporaryPassword);
+    await page.getByRole("button", { name: /登\s*录/ }).click();
+    await expect(page.getByText("请先设置新密码", { exact: true })).toBeVisible();
+    await page
+      .getByLabel("新密码", { exact: true })
+      .fill("switch account setup password");
+    await page
+      .getByLabel("确认新密码")
+      .fill("switch account setup password");
+    await page.getByRole("button", { name: "保存新密码" }).click();
   };
   const logout = async () => {
     await page.getByRole("button", { name: /退\s*出/ }).click();
@@ -249,11 +341,11 @@ test("同一标签切换账号会清空旧工作区，客服和财务刷新只�
   };
 
   await page.goto("/");
-  await activate(managerA);
+  await loginWithTemporaryPassword(managerA);
   await expect(page.getByRole("heading", { name: "我的点位工作台" })).toBeVisible();
   await logout();
   await expect(page.getByRole("heading", { name: "我的点位工作台" })).toHaveCount(0);
-  await activate(managerB);
+  await loginWithTemporaryPassword(managerB);
   await expect(page.getByRole("heading", { name: "我的点位工作台" })).toBeVisible();
   await expect(page.getByText(`换号点位 A ${suffix}`, { exact: true })).toHaveCount(0);
 
@@ -271,7 +363,7 @@ test("同一标签切换账号会清空旧工作区，客服和财务刷新只�
       serviceReads.push(response.url());
     }
   });
-  await activate(customerService);
+  await loginWithTemporaryPassword(customerService);
   await expect(page.getByRole("heading", { name: "售后与异常" })).toBeVisible();
   await expect.poll(() => serviceReads.length).toBeGreaterThanOrEqual(3);
   const serviceBeforeRefresh = serviceReads.length;
@@ -290,7 +382,7 @@ test("同一标签切换账号会清空旧工作区，客服和财务刷新只�
       financeReads.push(response.url());
     }
   });
-  await activate(finance);
+  await loginWithTemporaryPassword(finance);
   await expect(page.getByRole("heading", { name: "财务管理" })).toBeVisible();
   await expect.poll(() => financeReads.length).toBeGreaterThanOrEqual(2);
   // Create a payment after the finance page's initial read.  The only way it

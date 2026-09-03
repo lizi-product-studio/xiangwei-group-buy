@@ -9,6 +9,7 @@ const privacyNoticeVersionSchema = z
   .string()
   .trim()
   .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/);
+export const adminPasswordSchema = z.string().min(8).max(128);
 
 export const wechatLoginSchema = z.object({
   code: z.string().trim().min(6).max(128),
@@ -20,7 +21,15 @@ export const adminLoginSchema = z.object({
     .string()
     .trim()
     .regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{2,63}$/),
-  password: z.string().min(12).max(128),
+  password: adminPasswordSchema,
+});
+export const adminPasswordChangeSchema = z.object({
+  currentPassword: adminPasswordSchema,
+  newPassword: adminPasswordSchema,
+});
+export const completeAdminPasswordChangeSchema = z.object({
+  passwordChangeToken: z.string().trim().min(32).max(128),
+  newPassword: adminPasswordSchema,
 });
 export const internalStaffRoleSchema = z.enum([
   "SUPER_ADMIN",
@@ -30,7 +39,7 @@ export const internalStaffRoleSchema = z.enum([
   "PICKUP_MANAGER",
 ]);
 export const internalStaffStatusSchema = z.enum([
-  "PENDING_ACTIVATION",
+  "PASSWORD_SETUP_REQUIRED",
   "ACTIVE",
   "SUSPENDED",
 ]);
@@ -45,16 +54,14 @@ export const createInternalStaffSchema = internalStaffBaseSchema.extend({
     .string()
     .trim()
     .regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{2,63}$/),
-  status: z
-    .enum(["PENDING_ACTIVATION", "SUSPENDED"])
-    .default("PENDING_ACTIVATION"),
+  status: z.enum(["ACTIVE", "SUSPENDED"]).default("ACTIVE"),
 });
 export const updateInternalStaffSchema = z
   .object({
     displayName: z.string().trim().min(2).max(80).optional(),
     phone: mainlandChinaMobileSchema.optional(),
     role: internalStaffRoleSchema.optional(),
-    status: internalStaffStatusSchema.optional(),
+    status: z.enum(["ACTIVE", "SUSPENDED"]).optional(),
     pickupPointIds: z.array(identifierSchema).max(100).optional(),
     reason: z.string().trim().min(2).max(500).optional(),
   })
@@ -63,14 +70,6 @@ export const updateInternalStaffSchema = z
   });
 export const resetInternalStaffCredentialSchema = z.object({
   reason: z.string().trim().min(2).max(500),
-});
-export const activateAdminStaffSchema = z.object({
-  username: z
-    .string()
-    .trim()
-    .regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{2,63}$/),
-  initialCredential: z.string().min(12).max(128),
-  newPassword: z.string().min(12).max(128),
 });
 export const internalStaffDirectoryQuerySchema = z.object({
   query: z.string().trim().max(80).optional(),

@@ -3,6 +3,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import mysql from "mysql2/promise";
+import { applyMigration } from "./migration-runner.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("运行数据库迁移前必须配置 DATABASE_URL");
@@ -47,25 +48,8 @@ try {
         );
       continue;
     }
-    try {
-      await connection.query(sql);
-      await connection.execute(
-        "INSERT INTO schema_migrations(name,checksum,state,error_message,applied_at) VALUES(?,?,'APPLIED',NULL,UTC_TIMESTAMP(3))",
-        [file, checksum],
-      );
-      process.stdout.write(`applied ${file}\n`);
-    } catch (error) {
-      const message = (
-        error instanceof Error ? error.message : String(error)
-      ).slice(0, 1000);
-      await connection
-        .execute(
-          "INSERT INTO schema_migrations(name,checksum,state,error_message,applied_at) VALUES(?,?,'FAILED',?,UTC_TIMESTAMP(3)) ON DUPLICATE KEY UPDATE checksum=VALUES(checksum),state='FAILED',error_message=VALUES(error_message),applied_at=VALUES(applied_at)",
-          [file, checksum, message],
-        )
-        .catch(() => undefined);
-      throw error;
-    }
+    await applyMigration(connection, file, checksum, sql);
+    process.stdout.write(`applied ${file}\n`);
   }
 } finally {
   if (locked)

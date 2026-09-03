@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
 const apiBase = process.env.E2E_API_BASE_URL ?? "http://127.0.0.1:3101";
 const superHeaders = {
@@ -20,6 +20,21 @@ async function call<T>(
   });
   expect(response.status(), await response.text()).toBeLessThan(300);
   return (await response.json()).data as T;
+}
+
+async function loginWithTemporaryPassword(
+  page: Page,
+  username: string,
+  temporaryPassword: string,
+  newPassword: string,
+): Promise<void> {
+  await page.getByLabel("账号").fill(username);
+  await page.getByLabel("密码").fill(temporaryPassword);
+  await page.getByRole("button", { name: /登\s*录/ }).click();
+  await expect(page.getByText("请先设置新密码", { exact: true })).toBeVisible();
+  await page.getByLabel("新密码", { exact: true }).fill(newPassword);
+  await page.getByLabel("确认新密码").fill(newPassword);
+  await page.getByRole("button", { name: "保存新密码" }).click();
 }
 
 test("运营后台只呈现社区主线，点位负责人只进入网页工作台", async ({
@@ -74,7 +89,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
       browserFailures.push(`http ${response.status()}: ${response.url()}`);
   });
   const suffix = Date.now().toString();
-  const admin = await call<{ initialCredential: string }>(
+  const admin = await call<{ temporaryPassword: string }>(
     request,
     "/api/v1/admin/staff",
     {
@@ -86,11 +101,12 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
     },
   );
   await page.goto("/");
-  await page.getByRole("button", { name: "首次激活账号" }).click();
-  await page.getByLabel("账号").fill(`admin.${suffix}`);
-  await page.getByLabel("一次性初始凭据").fill(admin.initialCredential);
-  await page.getByLabel("新密码").fill("community e2e admin password");
-  await page.getByRole("button", { name: "完成首次激活" }).click();
+  await loginWithTemporaryPassword(
+    page,
+    `admin.${suffix}`,
+    admin.temporaryPassword,
+    "community e2e admin password",
+  );
   await expect(page.getByRole("heading", { name: "系统设置" })).toBeVisible();
   const area = await call<{ id: string }>(
     request,
@@ -120,7 +136,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
       capacityPerDay: 100,
     },
   );
-  const manager = await call<{ initialCredential: string }>(
+  const manager = await call<{ temporaryPassword: string }>(
     request,
     "/api/v1/admin/staff",
     {
@@ -131,7 +147,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
       pickupPointIds: [point.id],
     },
   );
-  const operator = await call<{ initialCredential: string }>(
+  const operator = await call<{ temporaryPassword: string }>(
     request,
     "/api/v1/admin/staff",
     {
@@ -142,7 +158,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
       pickupPointIds: [],
     },
   );
-  const finance = await call<{ initialCredential: string }>(
+  const finance = await call<{ temporaryPassword: string }>(
     request,
     "/api/v1/admin/staff",
     {
@@ -514,12 +530,13 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   await expect(labelsDialog).toHaveCount(0);
 
   await page.getByRole("button", { name: /退\s*出/ }).click();
-  await expect(page.getByRole("button", { name: "首次激活账号" })).toBeVisible();
-  await page.getByRole("button", { name: "首次激活账号" }).click();
-  await page.getByLabel("账号").fill(`manager.${suffix}`);
-  await page.getByLabel("一次性初始凭据").fill(manager.initialCredential);
-  await page.getByLabel("新密码").fill("community e2e manager password");
-  await page.getByRole("button", { name: "完成首次激活" }).click();
+  await expect(page.getByRole("button", { name: /登\s*录/ })).toBeVisible();
+  await loginWithTemporaryPassword(
+    page,
+    `manager.${suffix}`,
+    manager.temporaryPassword,
+    "community e2e manager password",
+  );
   await expect(
     page.getByRole("heading", { name: "我的点位工作台" }),
   ).toBeVisible();
@@ -602,7 +619,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   expect((await completedPickupOrder.json()).data.status).toBe("PICKED_UP");
 
   await page.getByRole("button", { name: /退\s*出/ }).click();
-  await expect(page.getByRole("button", { name: "首次激活账号" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /登\s*录/ })).toBeVisible();
   await page.getByLabel("账号").fill(`admin.${suffix}`);
   await page.getByLabel("密码").fill("community e2e admin password");
   await page.getByRole("button", { name: /登\s*录/ }).click();
@@ -721,12 +738,13 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
     expect(expired.status(), await expired.text()).toBe(200);
   }
   await page.getByRole("button", { name: /退\s*出/ }).click();
-  await expect(page.getByRole("button", { name: "首次激活账号" })).toBeVisible();
-  await page.getByRole("button", { name: "首次激活账号" }).click();
-  await page.getByLabel("账号").fill(`operator.${suffix}`);
-  await page.getByLabel("一次性初始凭据").fill(operator.initialCredential);
-  await page.getByLabel("新密码").fill("community e2e operator password");
-  await page.getByRole("button", { name: "完成首次激活" }).click();
+  await expect(page.getByRole("button", { name: /登\s*录/ })).toBeVisible();
+  await loginWithTemporaryPassword(
+    page,
+    `operator.${suffix}`,
+    operator.temporaryPassword,
+    "community e2e operator password",
+  );
   await expect(page.getByRole("heading", { name: "工作台" })).toBeVisible();
   await page.getByText("团期管理", { exact: true }).click();
   const operatorPackingRow = page
@@ -845,12 +863,13 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   await expect(lossWindowRow.getByText("已关闭", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: /退\s*出/ }).click();
-  await expect(page.getByRole("button", { name: "首次激活账号" })).toBeVisible();
-  await page.getByRole("button", { name: "首次激活账号" }).click();
-  await page.getByLabel("账号").fill(`finance.${suffix}`);
-  await page.getByLabel("一次性初始凭据").fill(finance.initialCredential);
-  await page.getByLabel("新密码").fill("community e2e finance password");
-  await page.getByRole("button", { name: "完成首次激活" }).click();
+  await expect(page.getByRole("button", { name: /登\s*录/ })).toBeVisible();
+  await loginWithTemporaryPassword(
+    page,
+    `finance.${suffix}`,
+    finance.temporaryPassword,
+    "community e2e finance password",
+  );
   await expect(page.getByRole("heading", { name: "财务管理" })).toBeVisible();
   const exceptionRow = page.getByRole("row").filter({ hasText: emergencyOrder.orderNo });
   await expect(exceptionRow.getByRole("button", { name: "执行退款" })).toBeVisible();

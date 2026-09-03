@@ -62,7 +62,7 @@ test("同一身份的迟到员工列表响应不会覆盖创建后的最新刷�
     },
   });
   expect(bootstrap.status(), await bootstrap.text()).toBe(201);
-  const initialCredential = (await bootstrap.json()).data.initialCredential as string;
+  const temporaryPassword = (await bootstrap.json()).data.temporaryPassword as string;
 
   let firstStaffResponseHeld = false;
   let firstStaffResponseReleased = false;
@@ -79,11 +79,13 @@ test("同一身份的迟到员工列表响应不会覆盖创建后的最新刷�
   });
 
   await page.goto("/");
-  await page.getByRole("button", { name: "首次激活账号" }).click();
   await page.getByLabel("账号").fill(`reload.race.admin.${suffix}`);
-  await page.getByLabel("一次性初始凭据").fill(initialCredential);
-  await page.getByLabel("新密码").fill("reload race admin password");
-  await page.getByRole("button", { name: "完成首次激活" }).click();
+  await page.getByLabel("密码").fill(temporaryPassword);
+  await page.getByRole("button", { name: /登\s*录/ }).click();
+  await expect(page.getByText("请先设置新密码", { exact: true })).toBeVisible();
+  await page.getByLabel("新密码", { exact: true }).fill("reload race admin password");
+  await page.getByLabel("确认新密码").fill("reload race admin password");
+  await page.getByRole("button", { name: "保存新密码" }).click();
   await expect(page.getByRole("heading", { name: "系统设置" })).toBeVisible();
   await expect.poll(() => firstStaffResponseHeld).toBe(true);
 
@@ -101,7 +103,7 @@ test("同一身份的迟到员工列表响应不会覆盖创建后的最新刷�
   // before submitting the form.
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "创建账号" }).click();
-  const credentialDialog = page.getByRole("dialog", { name: /一次性初始凭据/ });
+  const credentialDialog = page.getByRole("dialog", { name: /临时密码/ });
   await expect(credentialDialog).toBeVisible();
   // The credential is intentionally modal and shown only once. Acknowledge it
   // before paging the table, just as a real administrator must do.

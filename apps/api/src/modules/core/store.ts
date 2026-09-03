@@ -24,6 +24,7 @@ import type {
   OrderRefund,
   PartialRefund,
   Payment,
+  PasswordChangeToken,
   PickupCredential,
   PickupPoint,
   ProductCategory,
@@ -34,6 +35,7 @@ import type {
   StaffPickupPointAssignment,
   User,
 } from "./types.js";
+import { getCurrentInternalWriteActor } from "../auth/internal-write-context.js";
 import { BusinessError, moneyCents } from "@hometown/domain";
 
 export interface IdempotencyRecord {
@@ -79,6 +81,9 @@ export interface CommerceStore {
   saveAuthSession(value: AuthSession): Promise<void>;
   deleteAuthSession(tokenHash: string): Promise<void>;
   deleteAuthSessionsByUser(userId: string): Promise<void>;
+  getPasswordChangeToken(tokenHash: string): Promise<PasswordChangeToken | null>;
+  savePasswordChangeToken(value: PasswordChangeToken): Promise<void>;
+  deletePasswordChangeToken(tokenHash: string): Promise<void>;
   findAdminCredential(username: string): Promise<AdminCredential | null>;
   findAdminCredentialByUserId(userId: string): Promise<AdminCredential | null>;
   saveAdminCredential(value: AdminCredential): Promise<void>;
@@ -419,6 +424,7 @@ interface MemoryState {
   users: Map<string, User>;
   privacy: Map<string, PrivacyConsent>;
   sessions: Map<string, AuthSession>;
+  passwordChangeTokens: Map<string, PasswordChangeToken>;
   credentials: Map<string, AdminCredential>;
   roles: Map<string, Role[]>;
   staff: Map<string, InternalStaff>;
@@ -457,6 +463,7 @@ const emptyState = (): MemoryState => ({
   users: new Map(),
   privacy: new Map(),
   sessions: new Map(),
+  passwordChangeTokens: new Map(),
   credentials: new Map(),
   roles: new Map(),
   staff: new Map(),
@@ -612,6 +619,36 @@ export class MemoryStore implements CommerceStore {
     await before;
     const snapshot = clone(this.data);
     try {
+      const actor = getCurrentInternalWriteActor();
+      if (actor) {
+        const [user, staff, credential] = await Promise.all([
+          this.getUser(actor.userId),
+          this.getInternalStaff(actor.userId),
+          this.findAdminCredentialByUserId(actor.userId),
+        ]);
+        const role = actor.roles.length === 1 ? actor.roles[0] : null;
+        if (
+          !user ||
+          user.status !== "ACTIVE" ||
+          !staff ||
+          staff.status !== "ACTIVE" ||
+          !credential ||
+          credential.legacyDisabled === true ||
+          credential.mustChangePassword ||
+          !role ||
+          role === "USER" ||
+          credential.roles.length !== 1 ||
+          credential.roles[0] !== role ||
+          staff.role !== role ||
+          actor.authorizationVersion !== staff.authorizationVersion ||
+          actor.authorizationVersion !== credential.authorizationVersion
+        )
+          throw new BusinessError(
+            "FORBIDDEN",
+            "员工权限已变化，请重新登录后再试",
+            403,
+          );
+      }
       return await work(this);
     } catch (error) {
       this.data = snapshot;
@@ -679,6 +716,21 @@ export class MemoryStore implements CommerceStore {
   public async deleteAuthSessionsByUser(userId: string) {
     for (const [key, v] of this.data.sessions)
       if (v.userId === userId) this.data.sessions.delete(key);
+  }
+  public async getPasswordChangeToken(hash: string) {
+    const value = this.data.passwordChangeTokens.get(hash);
+    if (!value) return null;
+    if (Date.parse(value.expiresAt) <= Date.parse(await this.databaseNow())) {
+      this.data.passwordChangeTokens.delete(hash);
+      return null;
+    }
+    return clone(value);
+  }
+  public async savePasswordChangeToken(value: PasswordChangeToken) {
+    this.data.passwordChangeTokens.set(value.tokenHash, clone(value));
+  }
+  public async deletePasswordChangeToken(hash: string) {
+    this.data.passwordChangeTokens.delete(hash);
   }
   public async findAdminCredential(username: string) {
     return clone(

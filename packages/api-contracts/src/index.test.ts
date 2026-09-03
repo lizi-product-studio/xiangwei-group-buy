@@ -7,6 +7,9 @@ import {
   postponeCampaignSchema,
   createServiceAreaInterestSchema,
   createInternalStaffSchema,
+  updateInternalStaffSchema,
+  adminLoginSchema,
+  completeAdminPasswordChangeSchema,
   notificationManualCompletionSchema,
   wechatLoginSchema,
   productCategorySchema,
@@ -14,6 +17,42 @@ import {
 } from "./index.js";
 
 describe("public API contracts", () => {
+  it("allows eight-character administrator passwords and validates password-change challenges", () => {
+    expect(
+      adminLoginSchema.safeParse({ username: "ops.admin", password: "Eight123" }).success,
+    ).toBe(true);
+    expect(
+      adminLoginSchema.safeParse({ username: "ops.admin", password: "Seven12" }).success,
+    ).toBe(false);
+    expect(
+      completeAdminPasswordChangeSchema.safeParse({
+        passwordChangeToken: "x".repeat(32),
+        newPassword: "Eight123",
+      }).success,
+    ).toBe(true);
+    expect(
+      completeAdminPasswordChangeSchema.safeParse({
+        passwordChangeToken: "x".repeat(31),
+        newPassword: "Eight123",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects historical and credential-owned employee states on current writes", () => {
+    const base = {
+      displayName: "测试员工",
+      username: "staff.test",
+      phone: "13800138000",
+      role: "OPERATOR",
+      pickupPointIds: [],
+    };
+    expect(createInternalStaffSchema.safeParse({ ...base, status: "PENDING_ACTIVATION" }).success).toBe(false);
+    expect(createInternalStaffSchema.safeParse({ ...base, status: "PASSWORD_SETUP_REQUIRED" }).success).toBe(false);
+    expect(updateInternalStaffSchema.safeParse({ status: "PENDING_ACTIVATION" }).success).toBe(false);
+    expect(updateInternalStaffSchema.safeParse({ status: "PASSWORD_SETUP_REQUIRED" }).success).toBe(false);
+    expect(updateInternalStaffSchema.safeParse({ status: "ACTIVE" }).success).toBe(true);
+  });
+
   it("requires valid product category names and sortable lifecycle values", () => {
     expect(productCategorySchema.safeParse({ name: "蔬菜" }).success).toBe(true);
     expect(productCategorySchema.safeParse({ name: "A" }).success).toBe(false);

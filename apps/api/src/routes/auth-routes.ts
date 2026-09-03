@@ -1,13 +1,14 @@
 import type { FastifyInstance } from "fastify";
 import {
-  activateAdminStaffSchema,
+  adminPasswordChangeSchema,
   adminLoginSchema,
+  completeAdminPasswordChangeSchema,
   wechatLoginSchema,
 } from "@hometown/api-contracts";
 import { BusinessError } from "@hometown/domain";
 import { requireActor } from "../modules/auth/auth.js";
 import type { AdminAuthService } from "../modules/auth/admin-auth.js";
-import type { StaffService } from "../modules/auth/staff-service.js";
+import type { LoginRateLimiter } from "../modules/auth/login-rate-limiter.js";
 import type { AuthService } from "../modules/auth/wechat-auth.js";
 
 // A browser matrix activates more than five isolated employees. Keep the
@@ -15,20 +16,24 @@ import type { AuthService } from "../modules/auth/wechat-auth.js";
 // exercise all roles in one deterministic run.
 const adminCredentialRateLimit =
   process.env.NODE_ENV === "test"
-    ? { max: 50, timeWindow: "5 minutes" }
-    : { max: 5, timeWindow: "5 minutes" };
+    ? { max: 50, timeWindow: "15 minutes" }
+    : { max: 5, timeWindow: "15 minutes" };
 
 export function registerAuthRoutes(
   app: FastifyInstance,
   dependencies: {
     authService: AuthService | null;
     adminAuthService: AdminAuthService;
-    staffService: StaffService;
+    loginRateLimiter: LoginRateLimiter;
     privacyNoticeVersion: string;
   },
 ): void {
-  const { authService, adminAuthService, staffService, privacyNoticeVersion } =
-    dependencies;
+  const {
+    authService,
+    adminAuthService,
+    loginRateLimiter,
+    privacyNoticeVersion,
+  } = dependencies;
   app.post(
     "/api/v1/auth/wechat/login",
     { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } },
@@ -52,27 +57,52 @@ export function registerAuthRoutes(
     { config: { rateLimit: adminCredentialRateLimit } },
     async (request) => {
       const input = adminLoginSchema.parse(request.body);
-      return {
-        data: await adminAuthService.login(input.username, input.password),
-      };
+      const attempt = await loginRateLimiter.claim(request.ip, input.username);
+      let data: Awaited<ReturnType<AdminAuthService["login"]>>;
+      try {
+        data = await adminAuthService.login(input.username, input.password);
+      } catch (error) {
+        if (error instanceof BusinessError && error.code === "INVALID_CREDENTIALS")
+          await loginRateLimiter.recordFailure(attempt);
+        else await loginRateLimiter.clearSuccessfulLogin(attempt);
+        throw error;
+      }
+      await loginRateLimiter.clearSuccessfulLogin(attempt);
+      return { data };
     },
   );
   app.post(
-    "/api/v1/auth/admin/activate",
+    "/api/v1/auth/admin/complete-password-change",
     { config: { rateLimit: adminCredentialRateLimit } },
     async (request) => {
-      const input = activateAdminStaffSchema.parse(request.body);
-      await staffService.activate(
-        input.username,
-        input.initialCredential,
-        input.newPassword,
-        request.id,
-      );
+      const input = completeAdminPasswordChangeSchema.parse(request.body);
       return {
-        data: await adminAuthService.login(input.username, input.newPassword),
+        data: await adminAuthService.changePasswordWithToken(
+          input.passwordChangeToken,
+          input.newPassword,
+          request.id,
+        ),
       };
     },
   );
+  app.post("/api/v1/admin/me/change-password", async (request) => {
+    const actor = requireActor(request, [
+      "OPERATOR",
+      "CUSTOMER_SERVICE",
+      "PICKUP_MANAGER",
+      "FINANCE",
+      "SUPER_ADMIN",
+    ]);
+    const input = adminPasswordChangeSchema.parse(request.body);
+    return {
+      data: await adminAuthService.changePassword(
+        actor,
+        input.currentPassword,
+        input.newPassword,
+        request.id,
+      ),
+    };
+  });
   app.post("/api/v1/auth/logout", async (request, reply) => {
     requireActor(request, [
       "USER",

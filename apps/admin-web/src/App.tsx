@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentProps,
+} from "react";
 import {
   Alert,
   App as AntApp,
@@ -20,12 +27,23 @@ import {
   Tag,
   Typography,
 } from "antd";
-import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
+import {
+  EyeInvisibleOutlined,
+  EyeOutlined,
+  BranchesOutlined,
+  LockOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+  UserOutlined,
+} from "@ant-design/icons";
 import dayjs from "dayjs";
 import {
   api,
   auth,
   adminErrorText,
+  AdminApiError,
+  loginRetryMessage,
+  loginRetryRemainingSeconds,
   requiresLogin,
   type Campaign,
   type CatalogSku,
@@ -222,106 +240,410 @@ const failureActionText = (value: CampaignDraftValues["failureAction"]) =>
 const dateTime = (value: string | dayjs.Dayjs) =>
   dayjs(value).format("YYYY-MM-DD HH:mm");
 
-function Login({ done }: { done: () => void }) {
+function AccessiblePasswordInput({
+  fieldLabel,
+  ...props
+}: Omit<ComponentProps<typeof Input>, "type" | "suffix"> & {
+  fieldLabel: string;
+}) {
+  const [visible, setVisible] = useState(false);
+  const accessibleField = fieldLabel.replace("密码", "凭据");
+  return (
+    <Input
+      {...props}
+      type={visible ? "text" : "password"}
+      suffix={
+        <button
+          type="button"
+          className="password-visibility-button"
+          aria-label={`${visible ? "隐藏" : "显示"}${accessibleField}内容`}
+          aria-pressed={visible}
+          disabled={props.disabled}
+          onClick={() => setVisible((current) => !current)}
+        >
+          {visible ? <EyeOutlined /> : <EyeInvisibleOutlined />}
+        </button>
+      }
+    />
+  );
+}
+
+function Login({
+  done,
+  notice,
+}: {
+  done: () => void;
+  notice?: string | null;
+}) {
   const { message } = AntApp.useApp();
   const [loading, setLoading] = useState(false);
-  const [activating, setActivating] = useState(false);
+  const [errorText, setErrorText] = useState<string | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [rateLimitUntil, setRateLimitUntil] = useState<number | null>(null);
+  const [clockNow, setClockNow] = useState(() => Date.now());
+  const [passwordChange, setPasswordChange] = useState<{
+    token: string;
+    username: string;
+  } | null>(null);
+  const [loginForm] = Form.useForm();
+  const [passwordChangeForm] = Form.useForm();
+  const rateLimitRemaining = loginRetryRemainingSeconds(rateLimitUntil, clockNow);
+  useEffect(() => {
+    if (!rateLimitUntil || rateLimitUntil <= Date.now()) return;
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      setClockNow(now);
+      if (now >= rateLimitUntil) window.clearInterval(timer);
+    }, 1_000);
+    return () => window.clearInterval(timer);
+  }, [rateLimitUntil]);
   const submit = async (value: { username: string; password: string }) => {
+    if (loading) return;
     setLoading(true);
+    setErrorText(null);
     try {
-      await api.login(value.username, value.password);
-      done();
+      const result = await api.login(value.username, value.password);
+      if (result.nextAction === "CHANGE_PASSWORD") {
+        setPasswordChange({ token: result.passwordChangeToken, username: value.username });
+        passwordChangeForm.resetFields();
+      } else {
+        done();
+      }
     } catch (error) {
-      void message.error(mutationErrorText(error));
+      if (error instanceof AdminApiError && error.code === "LOGIN_RATE_LIMITED") {
+        const seconds = error.retryAfterSeconds ?? 15 * 60;
+        const now = Date.now();
+        setClockNow(now);
+        setRateLimitUntil(now + seconds * 1_000);
+      } else {
+        setErrorText(mutationErrorText(error));
+      }
+      loginForm.setFieldValue("password", "");
     } finally {
       setLoading(false);
     }
   };
-  const activate = async (value: {
-    username: string;
-    initialCredential: string;
-    newPassword: string;
-  }) => {
+  const completePasswordChange = async (value: { newPassword: string }) => {
+    if (!passwordChange || loading) return;
     setLoading(true);
+    setErrorText(null);
     try {
-      await api.activateStaff(
-        value.username,
-        value.initialCredential,
-        value.newPassword,
-      );
-      void message.success("首次激活成功，已登录");
+      await api.completePasswordChange(passwordChange.token, value.newPassword);
+      void message.success("密码已设置，请继续使用");
       done();
     } catch (error) {
-      void message.error(
-        mutationErrorText(error),
-      );
+      setErrorText(mutationErrorText(error));
     } finally {
       setLoading(false);
     }
   };
   return (
     <main className="login-page">
-      <Card className="login-card">
-        <Typography.Title level={2}>社区团购运营后台</Typography.Title>
-        <Typography.Paragraph type="secondary">
-          运营、客服、财务与点位负责人使用各自账号登录。
-        </Typography.Paragraph>
-        {activating ? (
-          <Form layout="vertical" onFinish={(value) => void activate(value)}>
+      <section className="login-story" aria-label="社区团购运营后台">
+        <div className="login-brand">
+          <span className="login-brand__mark" aria-hidden="true">
+            <BranchesOutlined />
+          </span>
+          <strong>社区团购</strong>
+          <span>运营后台</span>
+        </div>
+        <div className="login-story__copy">
+          <span className="login-story__rule" aria-hidden="true" />
+          <Typography.Title level={1}>社区团购运营后台</Typography.Title>
+          <Typography.Paragraph className="login-story__description">
+            运营、客服、财务与点位负责人使用各自账号登录。
+          </Typography.Paragraph>
+        </div>
+      </section>
+      <section className="login-panel" aria-label="登录表单">
+        <div className="login-card">
+          <Typography.Title level={2}>
+            {passwordChange ? "请先设置新密码" : "社区团购运营后台"}
+          </Typography.Title>
+          <Typography.Paragraph className="login-card__intro">
+            {passwordChange
+              ? "为了继续使用后台，请先完成密码修改。"
+              : "运营、客服、财务与点位负责人使用各自账号登录。"}
+          </Typography.Paragraph>
+          {notice ? (
             <Alert
+              className="login-notice"
               type="info"
               showIcon
-              message="首次激活"
-              description="使用管理员一次性展示的初始凭据设置新密码。已激活或过期的凭据不能重复使用。"
+              role="status"
+              message={notice}
             />
-            <Form.Item name="username" label="账号" rules={[{ required: true }]}>
-              <Input autoComplete="username" />
-            </Form.Item>
-            <Form.Item
-              name="initialCredential"
-              label="一次性初始凭据"
-              rules={[{ required: true, min: 12 }]}
+          ) : null}
+          {rateLimitRemaining > 0 || errorText ? (
+            <Alert
+              className="login-error"
+              type="error"
+              showIcon
+              role="alert"
+              aria-live="polite"
+              message={
+                rateLimitRemaining > 0
+                  ? loginRetryMessage(rateLimitRemaining)
+                  : errorText
+              }
+            />
+          ) : null}
+          {passwordChange ? (
+            <Form
+              className="login-form"
+              form={passwordChangeForm}
+              layout="vertical"
+              onFinish={(value) => void completePasswordChange(value)}
             >
-              <Input.Password autoComplete="one-time-code" />
-            </Form.Item>
-            <Form.Item
-              name="newPassword"
-              label="新密码"
-              rules={[{ required: true, min: 12 }]}
+              <Form.Item label="账号">
+                <Input prefix={<UserOutlined />} value={passwordChange.username} disabled />
+              </Form.Item>
+              <Form.Item
+                name="newPassword"
+                label="新密码"
+                rules={[
+                  { required: true, message: "请输入新密码" },
+                  { min: 8, max: 128, message: "密码长度为 8–128 位" },
+                ]}
+              >
+                <AccessiblePasswordInput
+                  fieldLabel="新密码"
+                  prefix={<LockOutlined />}
+                  autoComplete="new-password"
+                  disabled={loading}
+                />
+              </Form.Item>
+              <Form.Item
+                name="confirmPassword"
+                label="确认新密码"
+                dependencies={["newPassword"]}
+                rules={[
+                  { required: true, message: "请再次输入新密码" },
+                  ({ getFieldValue }) => ({
+                    validator(_, value) {
+                      if (!value || value === getFieldValue("newPassword"))
+                        return Promise.resolve();
+                      return Promise.reject(new Error("两次输入的密码不一致"));
+                    },
+                  }),
+                ]}
+              >
+                <AccessiblePasswordInput
+                  fieldLabel="确认新密码"
+                  prefix={<LockOutlined />}
+                  autoComplete="new-password"
+                  disabled={loading}
+                />
+              </Form.Item>
+              <Space direction="vertical" className="login-actions">
+                <Button type="primary" htmlType="submit" block loading={loading}>
+                  {loading ? "保存中…" : "保存新密码"}
+                </Button>
+                <Button
+                  block
+                  disabled={loading}
+                  onClick={() => {
+                    setErrorText(null);
+                    setPasswordChange(null);
+                  }}
+                >
+                  退出并返回登录
+                </Button>
+              </Space>
+            </Form>
+          ) : (
+            <Form
+              className="login-form"
+              form={loginForm}
+              layout="vertical"
+              onFinish={(value) => void submit(value)}
             >
-              <Input.Password autoComplete="new-password" />
-            </Form.Item>
-            <Space direction="vertical" style={{ width: "100%" }}>
-              <Button type="primary" htmlType="submit" block loading={loading}>
-                完成首次激活
+              <Form.Item
+                name="username"
+                label="账号"
+                rules={[
+                  { required: true, message: "请输入账号" },
+                  { min: 3, max: 64, message: "账号长度为 3–64 位" },
+                ]}
+              >
+                <Input
+                  prefix={<UserOutlined />}
+                  placeholder="请输入账号"
+                  autoComplete="username"
+                  disabled={loading || rateLimitRemaining > 0}
+                />
+              </Form.Item>
+              <Form.Item
+                name="password"
+                label="密码"
+                rules={[
+                  { required: true, message: "请输入密码" },
+                  { min: 8, max: 128, message: "密码长度为 8–128 位" },
+                ]}
+              >
+                <AccessiblePasswordInput
+                  fieldLabel="密码"
+                  prefix={<LockOutlined />}
+                  placeholder="请输入密码"
+                  autoComplete="current-password"
+                  disabled={loading || rateLimitRemaining > 0}
+                />
+              </Form.Item>
+              <Button
+                type="primary"
+                htmlType="submit"
+                block
+                loading={loading}
+                disabled={rateLimitRemaining > 0}
+              >
+                {loading ? "登录中…" : "登录"}
               </Button>
-              <Button block onClick={() => setActivating(false)}>
-                返回登录
+              <Button
+                type="link"
+                className="login-help-link"
+                disabled={loading}
+                onClick={() => setHelpOpen(true)}
+              >
+                忘记密码？请联系超级管理员重置
               </Button>
-            </Space>
-          </Form>
-        ) : (
-        <Form layout="vertical" onFinish={(value) => void submit(value)}>
-          <Form.Item name="username" label="账号" rules={[{ required: true }]}>
-            <Input autoComplete="username" />
+            </Form>
+          )}
+        </div>
+      </section>
+      <Modal
+        open={helpOpen}
+        title="密码重置说明"
+        okText="返回登录"
+        cancelButtonProps={{ style: { display: "none" } }}
+        onOk={() => setHelpOpen(false)}
+        onCancel={() => setHelpOpen(false)}
+      >
+        <Typography.Paragraph>
+          当前页面不能自助找回密码，请联系超级管理员重置临时密码后再登录。
+        </Typography.Paragraph>
+      </Modal>
+    </main>
+  );
+}
+
+function ChangeOwnPasswordButton() {
+  const { message } = AntApp.useApp();
+  const [open, setOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [errorText, setErrorText] = useState<string | null>(null);
+  const [form] = Form.useForm();
+  const close = () => {
+    if (submitting) return;
+    setOpen(false);
+    setErrorText(null);
+    form.resetFields();
+  };
+  const submit = async (value: {
+    currentPassword: string;
+    newPassword: string;
+  }) => {
+    if (submitting) return;
+    setSubmitting(true);
+    setErrorText(null);
+    try {
+      await api.changeOwnPassword(value.currentPassword, value.newPassword);
+      setOpen(false);
+      form.resetFields();
+      void message.success("密码已修改，其他旧会话已失效");
+    } catch (error) {
+      setErrorText(mutationErrorText(error));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  return (
+    <>
+      <Button onClick={() => setOpen(true)}>修改密码</Button>
+      <Modal
+        open={open}
+        title="修改密码"
+        footer={null}
+        destroyOnHidden
+        maskClosable={!submitting}
+        closable={!submitting}
+        onCancel={close}
+      >
+        <Typography.Paragraph type="secondary">
+          修改成功后，其他设备和浏览器中的旧会话会立即失效。
+        </Typography.Paragraph>
+        {errorText ? (
+          <Alert
+            type="error"
+            showIcon
+            role="alert"
+            message={errorText}
+          />
+        ) : null}
+        <Form
+          form={form}
+          layout="vertical"
+          onFinish={(value) => void submit(value)}
+        >
+          <Form.Item
+            name="currentPassword"
+            label="当前密码"
+            rules={[
+              { required: true, message: "请输入当前密码" },
+              { min: 8, max: 128, message: "密码长度为 8–128 位" },
+            ]}
+          >
+            <AccessiblePasswordInput
+              fieldLabel="当前密码"
+              autoComplete="current-password"
+              disabled={submitting}
+            />
           </Form.Item>
           <Form.Item
-            name="password"
-            label="密码"
-            rules={[{ required: true, min: 12 }]}
+            name="newPassword"
+            label="新密码"
+            rules={[
+              { required: true, message: "请输入新密码" },
+              { min: 8, max: 128, message: "密码长度为 8–128 位" },
+            ]}
           >
-            <Input.Password autoComplete="current-password" />
+            <AccessiblePasswordInput
+              fieldLabel="新密码"
+              autoComplete="new-password"
+              disabled={submitting}
+            />
           </Form.Item>
-          <Button type="primary" htmlType="submit" block loading={loading}>
-            登录
-          </Button>
-          <Button type="link" block onClick={() => setActivating(true)}>
-            首次激活账号
-          </Button>
+          <Form.Item
+            name="confirmPassword"
+            label="确认新密码"
+            dependencies={["newPassword"]}
+            rules={[
+              { required: true, message: "请再次输入新密码" },
+              ({ getFieldValue }) => ({
+                validator(_, value) {
+                  if (!value || value === getFieldValue("newPassword"))
+                    return Promise.resolve();
+                  return Promise.reject(new Error("两次输入的密码不一致"));
+                },
+              }),
+            ]}
+          >
+            <AccessiblePasswordInput
+              fieldLabel="确认新密码"
+              autoComplete="new-password"
+              disabled={submitting}
+            />
+          </Form.Item>
+          <Space>
+            <Button onClick={close} disabled={submitting}>
+              取消
+            </Button>
+            <Button type="primary" htmlType="submit" loading={submitting}>
+              {submitting ? "保存中…" : "保存新密码"}
+            </Button>
+          </Space>
         </Form>
-        )}
-      </Card>
-    </main>
+      </Modal>
+    </>
   );
 }
 
@@ -4272,8 +4594,8 @@ function Settings({
         pickupPointIds: value.pickupPointIds ?? [],
       });
       setOpen(false);
-      setCredential(result.initialCredential);
-      await refreshAfterMutation(reload, message, "员工已创建，一次性凭据仅显示一次");
+      setCredential(result.temporaryPassword);
+      await refreshAfterMutation(reload, message, "员工已创建，临时密码仅显示一次");
     } catch (error) {
       message.error(mutationErrorText(error));
     } finally {
@@ -4338,7 +4660,7 @@ function Settings({
           sensitive.staff.userId,
           value.reason,
         );
-        setCredential(result.initialCredential);
+        setCredential(result.temporaryPassword);
       } else {
         await api.updateStaff(sensitive.staff.userId, {
           status: sensitive.kind === "suspend" ? "SUSPENDED" : "ACTIVE",
@@ -4350,7 +4672,7 @@ function Settings({
         reload,
         message,
         sensitive.kind === "reset"
-          ? "一次性凭据已重置"
+          ? "临时密码已重置"
           : sensitive.kind === "suspend"
             ? "员工已停用"
             : "员工已恢复",
@@ -4419,7 +4741,7 @@ function Settings({
                   type="link"
                   onClick={() => setSensitive({ staff: value, kind: "reset" })}
                 >
-                  重置凭据
+                  重置密码
                 </Button>
               </Space>
             ),
@@ -4537,7 +4859,7 @@ function Settings({
       </Modal>
       <Modal
         open={Boolean(sensitive)}
-        title={sensitive?.kind === "reset" ? "重置一次性凭据" : sensitive?.kind === "suspend" ? "确认停用员工" : "确认恢复员工"}
+        title={sensitive?.kind === "reset" ? "重置临时密码" : sensitive?.kind === "suspend" ? "确认停用员工" : "确认恢复员工"}
         footer={null}
         onCancel={() => setSensitive(null)}
         destroyOnHidden
@@ -4559,12 +4881,12 @@ function Settings({
       </Modal>
       <Modal
         open={Boolean(credential)}
-        title="一次性初始凭据（仅显示一次）"
+        title="临时密码（仅显示一次）"
         footer={<Button type="primary" onClick={() => setCredential("")}>我已安全保存</Button>}
         closable={false}
         maskClosable={false}
       >
-        <Alert type="warning" showIcon message="关闭后无法再次查看，请使用“重置凭据”重新生成。" />
+        <Alert type="warning" showIcon message="关闭后无法再次查看，请使用“重置密码”重新生成。" />
         <Typography.Paragraph>
           <Typography.Text copyable code>{credential}</Typography.Text>
         </Typography.Paragraph>
@@ -4597,6 +4919,7 @@ export function App() {
   );
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [loginNotice, setLoginNotice] = useState<string | null>(null);
   const [areas, setAreas] = useState<ServiceArea[]>([]),
     [points, setPoints] = useState<PickupPoint[]>([]),
     [skus, setSkus] = useState<CatalogSku[]>([]),
@@ -4666,6 +4989,7 @@ export function App() {
     setInterests([]);
     setAudits([]);
     setLoadError(null);
+    setLoginNotice(null);
     setLoading(false);
     setPage(nextPage);
   }, []);
@@ -4800,6 +5124,7 @@ export function App() {
     const expired = () => {
       auth.clear();
       clearWorkspace();
+      setLoginNotice("登录状态已失效，请重新登录。");
       setAuthenticated(false);
     };
     window.addEventListener("admin-auth-expired", expired);
@@ -4820,7 +5145,7 @@ export function App() {
   if (!authenticated)
     return (
       <AntApp>
-        <Login done={establishSession} />
+        <Login done={establishSession} notice={loginNotice} />
       </AntApp>
     );
   const mainPageLoadFailed =
@@ -4983,6 +5308,7 @@ export function App() {
               >
                 刷新
               </Button>
+              {requiresLogin && <ChangeOwnPasswordButton />}
               {requiresLogin && (
                 <Button
                   onClick={() =>

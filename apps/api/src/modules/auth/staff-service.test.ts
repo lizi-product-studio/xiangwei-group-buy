@@ -46,6 +46,27 @@ async function createBootstrap(store: MemoryStore): Promise<void> {
   );
 }
 
+async function completeTemporaryPassword(
+  auth: AdminAuthService,
+  username: string,
+  temporaryPassword: string,
+  newPassword: string,
+  requestId: string,
+) {
+  const challenge = await auth.login(username, temporaryPassword);
+  expect(challenge.nextAction).toBe("CHANGE_PASSWORD");
+  if (challenge.nextAction !== "CHANGE_PASSWORD")
+    throw new Error("missing password change challenge");
+  const result = await auth.changePasswordWithToken(
+    challenge.passwordChangeToken,
+    newPassword,
+    requestId,
+  );
+  expect(result.nextAction).toBe("LOGIN");
+  if (result.nextAction !== "LOGIN") throw new Error("password change failed");
+  return result;
+}
+
 describe("StaffService lifecycle and authorization revision", () => {
   it("requires a reason for sensitive changes and revokes the former session", async () => {
     const store = new MemoryStore();
@@ -58,22 +79,20 @@ describe("StaffService lifecycle and authorization revision", () => {
         username: "service.li",
         phone: "13800138001",
         role: "CUSTOMER_SERVICE",
-        status: "PENDING_ACTIVATION",
+        status: "ACTIVE",
         pickupPointIds: [],
       },
       bootstrapActor,
       "create-staff",
     );
 
-    await expect(
-      staff.activate(
-        "service.li",
-        created.initialCredential,
-        password,
-        "activate-staff",
-      ),
-    ).resolves.toMatchObject({ status: "ACTIVE", authorizationVersion: 2 });
-    const session = await auth.login("service.li", password);
+    const session = await completeTemporaryPassword(
+      auth,
+      "service.li",
+      created.temporaryPassword,
+      password,
+      "complete-password-staff",
+    );
 
     await expect(
       staff.update(
@@ -127,17 +146,18 @@ describe("StaffService lifecycle and authorization revision", () => {
         username: "service.chen",
         phone: "13800138004",
         role: "CUSTOMER_SERVICE",
-        status: "PENDING_ACTIVATION",
+        status: "ACTIVE",
         pickupPointIds: [],
       },
       bootstrapActor,
       "create-profile-staff",
     );
-    await staff.activate(
+    await completeTemporaryPassword(
+      auth,
       "service.chen",
-      created.initialCredential,
+      created.temporaryPassword,
       password,
-      "activate-profile-staff",
+      "complete-password-profile-staff",
     );
     const session = await auth.login("service.chen", password);
     const active = await staff.get(created.staff.userId);
@@ -189,19 +209,19 @@ describe("StaffService lifecycle and authorization revision", () => {
         username: "operator.he",
         phone: "13800138006",
         role: "OPERATOR",
-        status: "PENDING_ACTIVATION",
+        status: "ACTIVE",
         pickupPointIds: [],
       },
       bootstrapActor,
       "create-operator",
     );
-    await staff.activate(
+    const oldSession = await completeTemporaryPassword(
+      auth,
       "operator.he",
-      created.initialCredential,
+      created.temporaryPassword,
       password,
-      "activate-operator",
+      "complete-password-operator",
     );
-    const oldSession = await auth.login("operator.he", password);
     await staff.update(
       created.staff.userId,
       { status: "SUSPENDED", reason: "调岗交接" },
@@ -240,7 +260,7 @@ describe("StaffService lifecycle and authorization revision", () => {
         username: "operator.zhou",
         phone: "13800138002",
         role: "OPERATOR",
-        status: "PENDING_ACTIVATION",
+        status: "ACTIVE",
         pickupPointIds: [],
       },
       bootstrapActor,
@@ -269,7 +289,7 @@ describe("StaffService lifecycle and authorization revision", () => {
     });
   });
 
-  it("invalidates sessions on credential reset and forbids repeated activation", async () => {
+  it("invalidates sessions on credential reset and rejects a reused temporary password", async () => {
     const store = new MemoryStore();
     await createBootstrap(store);
     const staff = new StaffService(store);
@@ -280,21 +300,19 @@ describe("StaffService lifecycle and authorization revision", () => {
         username: "finance.wang",
         phone: "13800138003",
         role: "FINANCE",
-        status: "PENDING_ACTIVATION",
+        status: "ACTIVE",
         pickupPointIds: [],
       },
       bootstrapActor,
       "create-finance",
     );
-    await staff.activate(
+    await completeTemporaryPassword(
+      auth,
       "finance.wang",
-      created.initialCredential,
+      created.temporaryPassword,
       password,
-      "activate-finance",
+      "complete-password-finance",
     );
-    await expect(
-      staff.activate("finance.wang", created.initialCredential, password, "repeat"),
-    ).rejects.toMatchObject({ code: "AUTH_REQUIRED" });
     const session = await auth.login("finance.wang", password);
     const reset = await staff.resetCredential(
       created.staff.userId,
@@ -304,18 +322,15 @@ describe("StaffService lifecycle and authorization revision", () => {
     );
     await expect(auth.authenticate(`Bearer ${session.accessToken}`)).resolves.toBeNull();
     await expect(
-      auth.login("finance.wang", reset.initialCredential),
-    ).rejects.toMatchObject({
-      code: "ACTIVATION_REQUIRED",
-    });
-    await expect(
-      staff.activate(
-        "finance.wang",
-        reset.initialCredential,
-        "another correct password",
-        "activate-after-reset",
-      ),
-    ).resolves.toMatchObject({ status: "ACTIVE" });
+      auth.login("finance.wang", reset.temporaryPassword),
+    ).resolves.toMatchObject({ nextAction: "CHANGE_PASSWORD" });
+    await completeTemporaryPassword(
+      auth,
+      "finance.wang",
+      reset.temporaryPassword,
+      "another correct password",
+      "complete-password-after-reset",
+    );
   });
 
   it("copies the pickup manager contact onto authorized points", async () => {
@@ -344,7 +359,7 @@ describe("StaffService lifecycle and authorization revision", () => {
         username: "pickup.zhou",
         phone: "13800138008",
         role: "PICKUP_MANAGER",
-        status: "PENDING_ACTIVATION",
+        status: "ACTIVE",
         pickupPointIds: ["point-east"],
       },
       bootstrapActor,

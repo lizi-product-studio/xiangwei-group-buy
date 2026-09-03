@@ -40,15 +40,21 @@ async function createLogin(
     },
   });
   expect(created.status(), await created.text()).toBe(201);
-  const initialCredential = (await created.json()).data.initialCredential as string;
-  const activated = await request.fetch(`${apiBase}/api/v1/auth/admin/activate`, {
+  const temporaryPassword = (await created.json()).data.temporaryPassword as string;
+  const login = await request.fetch(`${apiBase}/api/v1/auth/admin/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     data: {
       username,
-      initialCredential,
-      newPassword: "governance reload password",
+      password: temporaryPassword,
     },
+  });
+  expect(login.status(), await login.text()).toBe(200);
+  const challenge = (await login.json()).data.passwordChangeToken as string;
+  const activated = await request.fetch(`${apiBase}/api/v1/auth/admin/complete-password-change`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    data: { passwordChangeToken: challenge, newPassword: "governance reload password" },
   });
   expect(activated.status(), await activated.text()).toBe(200);
   return { username, password: "governance reload password" };

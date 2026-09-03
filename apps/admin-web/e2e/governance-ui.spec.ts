@@ -47,17 +47,19 @@ async function post<T>(
   return (await response.json()).data as T;
 }
 
-async function activateInBrowser(
+async function completeTemporaryPasswordInBrowser(
   page: Page,
   username: string,
-  initialCredential: string,
+  temporaryPassword: string,
   password: string,
 ) {
-  await page.getByRole("button", { name: "首次激活账号" }).click();
   await page.getByLabel("账号").fill(username);
-  await page.getByLabel("一次性初始凭据").fill(initialCredential);
-  await page.getByLabel("新密码").fill(password);
-  await page.getByRole("button", { name: "完成首次激活" }).click();
+  await page.getByLabel("密码").fill(temporaryPassword);
+  await page.getByRole("button", { name: /登\s*录/ }).click();
+  await expect(page.getByText("请先设置新密码", { exact: true })).toBeVisible();
+  await page.getByLabel("新密码", { exact: true }).fill(password);
+  await page.getByLabel("确认新密码").fill(password);
+  await page.getByRole("button", { name: "保存新密码" }).click();
 }
 
 async function loginInBrowser(page: Page, username: string, password: string) {
@@ -103,7 +105,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
     pickupPointIds: string[] = [],
   ) => {
     const username = `p1c.${role.toLowerCase()}.${suffix}`;
-    const value = await post<{ initialCredential: string }>(
+    const value = await post<{ temporaryPassword: string }>(
       request,
       "/api/v1/admin/staff",
       {
@@ -114,7 +116,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
         pickupPointIds,
       },
     );
-    return { username, initialCredential: value.initialCredential };
+    return { username, temporaryPassword: value.temporaryPassword };
   };
 
   const area = await post<{ id: string }>(request, "/api/v1/admin/service-areas", {
@@ -150,25 +152,37 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
   const operator = await createStaff("OPERATOR");
   const finance = await createStaff("FINANCE");
 
-  const activateResponse = await request.fetch(`${apiBase}/api/v1/auth/admin/activate`, {
+  const superLogin = await request.fetch(`${apiBase}/api/v1/auth/admin/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     data: {
       username: superAdmin.username,
-      initialCredential: superAdmin.initialCredential,
+      password: superAdmin.temporaryPassword,
+    },
+  });
+  expect(superLogin.status(), await superLogin.text()).toBe(200);
+  const superChallenge = (await superLogin.json()).data.passwordChangeToken as string;
+  const activateResponse = await request.fetch(`${apiBase}/api/v1/auth/admin/complete-password-change`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    data: {
+      passwordChangeToken: superChallenge,
       newPassword: password,
     },
   });
   expect(activateResponse.status(), await activateResponse.text()).toBe(200);
   const superToken = (await activateResponse.json()).data.accessToken as string;
-  const managerActivation = await request.fetch(`${apiBase}/api/v1/auth/admin/activate`, {
+  const managerLogin = await request.fetch(`${apiBase}/api/v1/auth/admin/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    data: {
-      username: manager.username,
-      initialCredential: manager.initialCredential,
-      newPassword: password,
-    },
+    data: { username: manager.username, password: manager.temporaryPassword },
+  });
+  expect(managerLogin.status(), await managerLogin.text()).toBe(200);
+  const managerChallenge = (await managerLogin.json()).data.passwordChangeToken as string;
+  const managerActivation = await request.fetch(`${apiBase}/api/v1/auth/admin/complete-password-change`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    data: { passwordChangeToken: managerChallenge, newPassword: password },
   });
   expect(managerActivation.status(), await managerActivation.text()).toBe(200);
   const managerToken = (await managerActivation.json()).data.accessToken as string;
@@ -265,7 +279,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
   }
 
   await page.goto("/");
-  await activateInBrowser(page, operator.username, operator.initialCredential, password);
+  await completeTemporaryPasswordInBrowser(page, operator.username, operator.temporaryPassword, password);
   await expect(page.getByRole("heading", { name: "运营工作台" })).toBeVisible();
   await page.getByRole("menuitem", { name: "售后与异常" }).click();
   const cancelApproveRow = page.getByRole("row").filter({ hasText: cancelA.orderNo });
@@ -282,7 +296,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
   await expect(cancelRejectRow.getByText("已拒绝", { exact: true })).toBeVisible();
 
   await logout(page);
-  await activateInBrowser(page, finance.username, finance.initialCredential, password);
+  await completeTemporaryPasswordInBrowser(page, finance.username, finance.temporaryPassword, password);
   await expect(page.getByRole("heading", { name: "财务管理" })).toBeVisible();
   const financeCancellation = page.getByRole("region", { name: "截单后取消退款" }).getByRole("row").filter({ hasText: cancelA.orderNo });
   await expect(
@@ -380,7 +394,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
   const areaInterest = (await intent.json()).data as { id: string };
 
   await logout(page);
-  await activateInBrowser(page, customerService.username, customerService.initialCredential, password);
+  await completeTemporaryPasswordInBrowser(page, customerService.username, customerService.temporaryPassword, password);
   await expect(page.getByRole("heading", { name: "售后与异常" })).toBeVisible();
   for (const value of [qualityA, qualityB]) {
     const row = page.getByRole("row").filter({ hasText: value.orderNo });
