@@ -666,17 +666,23 @@ function AccountMenu({
   username,
   role,
   onLogout,
+  className,
+  placement = "topLeft",
 }: {
   displayName?: string | undefined;
   username?: string | null;
   role?: string | undefined;
   onLogout: () => void;
+  className?: string;
+  placement?: "topLeft" | "topCenter" | "topRight" | "bottomLeft" | "bottomCenter" | "bottomRight";
 }) {
   const label = displayName || username || "当前账号";
   return (
     <Dropdown
       trigger={["click"]}
       overlayClassName="account-dropdown"
+      placement={placement}
+      {...(className ? { className } : {})}
       menu={{
         items: [
           {
@@ -5392,6 +5398,22 @@ export function App() {
               })),
             }))}
           />
+          {requiresLogin && (
+            <div className="app-sider__account">
+              <AccountMenu
+                displayName={staff.find((value) => value.userId === auth.userId())?.displayName}
+                username={auth.username()}
+                role={roles[0]}
+                onLogout={() =>
+                  void api.logout().finally(() => {
+                    auth.clear();
+                    clearWorkspace();
+                    setAuthenticated(false);
+                  })
+                }
+              />
+            </div>
+          )}
         </Sider>
         <Layout>
           <Header className="topbar">
@@ -5414,18 +5436,20 @@ export function App() {
                 刷新
               </Button>
               {requiresLogin && (
-                <AccountMenu
-                  displayName={staff.find((value) => value.userId === auth.userId())?.displayName}
-                  username={auth.username()}
-                  role={roles[0]}
-                  onLogout={() =>
-                    void api.logout().finally(() => {
-                      auth.clear();
-                      clearWorkspace();
-                      setAuthenticated(false);
-                    })
-                  }
-                />
+                <div className="account-menu--mobile">
+                  <AccountMenu
+                    displayName={staff.find((value) => value.userId === auth.userId())?.displayName}
+                    username={auth.username()}
+                    role={roles[0]}
+                    onLogout={() =>
+                      void api.logout().finally(() => {
+                        auth.clear();
+                        clearWorkspace();
+                        setAuthenticated(false);
+                      })
+                    }
+                  />
+                </div>
               )}
             </Space>
           </Header>

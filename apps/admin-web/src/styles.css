@@ -49,7 +49,9 @@ nav { display: grid; gap: 16px; }
 .app-sider .brand { display: grid; flex: 0 0 72px; align-content: center; gap: 2px; margin: 0 18px; padding: 0 10px; border-bottom: 1px solid #eef0f3; }
 .app-sider .brand strong { color: #15243a; font-size: 18px; letter-spacing: .02em; }
 .app-sider .brand span { color: #7b8491; font-size: 12px; }
-.app-sider .ant-menu { padding: 14px 10px 24px; background: transparent; border-inline-end: 0 !important; }
+.app-sider .ant-menu { min-height: 0; flex: 1 1 auto; padding: 14px 10px 24px; background: transparent; border-inline-end: 0 !important; }
+.app-sider__account { flex: 0 0 auto; margin: 0 12px 16px; padding: 12px 0 0; border-top: 1px solid #eef0f3; }
+.app-sider__account .account-trigger { width: 100%; min-width: 0; }
 .app-sider .ant-menu-submenu { margin-bottom: 4px; }
 .app-sider .ant-menu-submenu-title { height: 44px !important; margin: 2px 0 !important; padding-inline: 14px !important; color: #465365; border-radius: 10px; font-size: 14px; font-weight: 700; line-height: 44px !important; }
 .app-sider .ant-menu-submenu-title .anticon { color: #6b7686; font-size: 17px; }
@@ -84,6 +86,7 @@ nav { display: grid; gap: 16px; }
 .topbar__context .ant-breadcrumb li:last-child { color: #17263a; font-weight: 700; }
 .topbar__actions { flex: 0 0 auto; }
 .topbar__refresh { min-width: 84px; height: 40px; border-color: #dfe3e8; color: #344256; background: #fff; }
+.account-menu--mobile { display: none; }
 .account-trigger { display: flex !important; min-width: 218px; height: 48px !important; align-items: center; justify-content: flex-start; gap: 10px; padding: 5px 10px !important; color: #17263a !important; border: 1px solid transparent !important; border-radius: 12px !important; line-height: normal !important; }
 .account-trigger:hover, .account-trigger:focus-visible { background: #f7f7f4 !important; border-color: #e3e6e9 !important; }
 .account-trigger:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
@@ -93,9 +96,21 @@ nav { display: grid; gap: 16px; }
 .account-trigger__copy small { color: #5f6875; font-size: 11px; }
 .account-trigger__chevron { flex: 0 0 auto; color: #7b8491; font-size: 11px; }
 .account-dropdown { min-width: 236px; }
+.account-dropdown .ant-dropdown-menu { min-width: 236px; padding: 8px; }
+.account-dropdown .ant-dropdown-menu-item { min-height: 40px; margin: 2px 0; padding-inline: 12px; text-align: left; }
+.account-dropdown .ant-dropdown-menu-item > .ant-dropdown-menu-title-content { width: 100%; text-align: left; }
+.account-dropdown .ant-dropdown-menu-item .ant-btn { display: flex; width: 100%; min-height: 40px; align-items: center; justify-content: flex-start; padding-inline: 0; text-align: left; }
+.account-dropdown .ant-dropdown-menu-item-divider { margin: 6px 0; }
 .account-dropdown__identity { display: grid; gap: 4px; padding: 4px 2px; }
 .account-dropdown__identity strong { color: #17263a; font-size: 14px; }
 .account-dropdown__identity span { color: #7b8491; font-size: 12px; }
+
+@media (max-width: 767px) {
+  .app-sider__account { display: none; }
+  .account-menu--mobile { display: block; }
+  .account-menu--mobile .account-trigger { min-width: 48px; width: 48px; padding-inline: 7px !important; }
+  .account-menu--mobile .account-trigger__copy, .account-menu--mobile .account-trigger__chevron { display: none; }
+}
 .workspace-header h1, .section-header h1, .topbar h1 { color: var(--ink); font-size: 25px; font-weight: 750; letter-spacing: -.03em; }
 .workspace-header p { margin-top: 5px; color: #8a919c; font-size: 12px; }
 .section-header p { margin-top: 6px; color: #7f8895; font-size: 12px; }

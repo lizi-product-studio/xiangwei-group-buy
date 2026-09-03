@@ -99,7 +99,13 @@ test("后台框架提供高对比账号入口、可展开分组和运营可读�
   const session = await createStaff(browser, "SUPER_ADMIN");
   const topbar = session.page.locator("header.topbar");
   await expect(topbar).toHaveCSS("background-color", "rgba(255, 255, 255, 0.98)");
-  const account = session.page.getByRole("button", { name: "打开账号菜单" });
+  const accountPanel = session.page.locator(".app-sider__account");
+  await expect(accountPanel).toBeVisible();
+  const accountBox = await accountPanel.boundingBox();
+  expect(accountBox).not.toBeNull();
+  expect(accountBox?.x ?? Number.POSITIVE_INFINITY).toBeLessThan(24);
+  expect(accountBox?.y ?? 0).toBeGreaterThan(500);
+  const account = accountPanel.getByRole("button", { name: "打开账号菜单" });
   await expect(account).toBeVisible();
   await expect(account).toHaveCSS("color", "rgb(23, 38, 58)");
   await expect(account.locator("small")).toHaveCSS("color", "rgb(95, 104, 117)");
