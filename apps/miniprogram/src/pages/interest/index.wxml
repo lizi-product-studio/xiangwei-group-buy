@@ -3,7 +3,9 @@
     <text>你所在的区县暂未开放？</text>
     <text>留下需求，我们优先评估收单、配送和集中领取条件。</text>
   </view>
-  <view wx:if="{{interests.length}}" class="form-card">
+  <view wx:if="{{loading}}" class="form-card"><text>正在加载意向记录…</text></view>
+  <view wx:elif="{{loadError}}" class="form-card"><text>{{loadError}}</text><button class="secondary-button" bindtap="loadInterests">重新加载</button></view>
+  <view wx:elif="{{interests.length}}" class="form-card">
     <text>我的开通意向</text>
     <view wx:for="{{interests}}" wx:key="id" class="interest-record">
       <view><text>{{item.regionText}}</text><text>{{item.statusText}}</text></view>

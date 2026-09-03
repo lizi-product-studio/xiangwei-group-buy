@@ -13,6 +13,7 @@ import {
   Card,
   DatePicker,
   Descriptions,
+  Dropdown,
   Empty,
   Form,
   Input,
@@ -35,6 +36,7 @@ import {
   PlusOutlined,
   ReloadOutlined,
   UserOutlined,
+  DownOutlined,
 } from "@ant-design/icons";
 import dayjs from "dayjs";
 import {
@@ -42,6 +44,7 @@ import {
   auth,
   adminErrorText,
   AdminApiError,
+  hasValidAdminSession,
   loginRetryMessage,
   loginRetryRemainingSeconds,
   requiresLogin,
@@ -328,7 +331,11 @@ function Login({
     setLoading(true);
     setErrorText(null);
     try {
-      await api.completePasswordChange(passwordChange.token, value.newPassword);
+      await api.completePasswordChange(
+        passwordChange.token,
+        value.newPassword,
+        passwordChange.username,
+      );
       void message.success("密码已设置，请继续使用");
       done();
     } catch (error) {
@@ -558,7 +565,7 @@ function ChangeOwnPasswordButton() {
   };
   return (
     <>
-      <Button onClick={() => setOpen(true)}>修改密码</Button>
+      <Button type="link" onClick={() => setOpen(true)}>修改我的密码</Button>
       <Modal
         open={open}
         title="修改密码"
@@ -644,6 +651,37 @@ function ChangeOwnPasswordButton() {
         </Form>
       </Modal>
     </>
+  );
+}
+
+function AccountMenu({
+  displayName,
+  username,
+  role,
+  onLogout,
+}: {
+  displayName?: string | undefined;
+  username?: string | null;
+  role?: string | undefined;
+  onLogout: () => void;
+}) {
+  const label = displayName || username || "当前账号";
+  return (
+    <Dropdown
+      trigger={["click"]}
+      menu={{
+        items: [
+          { key: "identity", label: <span aria-label="当前账号信息">{label} · {displayLabel(role)}</span>, disabled: true },
+          { type: "divider" },
+          { key: "change-password", label: <ChangeOwnPasswordButton /> },
+          { key: "logout", label: "退出登录", danger: true, onClick: onLogout },
+        ],
+      }}
+    >
+      <Button type="text" aria-label="打开账号菜单">
+        <UserOutlined /> {label}（{displayLabel(role)}） <DownOutlined />
+      </Button>
+    </Dropdown>
   );
 }
 
@@ -3133,7 +3171,7 @@ function Areas({
         }}
       >
         <Typography.Paragraph type="secondary" className="modal-note">
-          先选择服务区域，再填详细地址或地点名称并确认地图图钉。联系人不用在这里填，在「系统设置」创建点位负责人并授权自提点后会同步过来。
+            先选择服务区域，再填详细地址或地点名称并确认地图图钉。联系人不用在这里填，在「人员与权限」创建点位负责人并授权自提点后会同步过来。
         </Typography.Paragraph>
         {regionLoadError && (
           <Alert
@@ -4565,10 +4603,12 @@ function Settings({
   staff,
   points,
   reload,
+  currentUserId,
 }: {
   staff: InternalStaff[];
   points: PickupPoint[];
   reload: () => Promise<void>;
+  currentUserId: string | null;
 }) {
   const { message } = AntApp.useApp();
   const [open, setOpen] = useState(false);
@@ -4652,6 +4692,11 @@ function Settings({
   };
   const runSensitive = async (value: { reason: string }) => {
     if (!sensitive) return;
+    if (sensitive.staff.userId === currentUserId) {
+      message.error("不能停用自己或给自己发放临时密码");
+      setSensitive(null);
+      return;
+    }
     if (submitting) return;
     setSubmitting(true);
     try {
@@ -4689,8 +4734,8 @@ function Settings({
   return (
     <>
       <PageTitle
-        title="系统设置"
-        subtitle="后台开通员工账号、角色与点位权限；停用或变更后会话立即失效"
+        title="人员与权限"
+        subtitle="管理员工账号、角色与点位权限；停用或变更后会话立即失效"
         action={
           <Button type="primary" onClick={() => setOpen(true)}>
             新增员工
@@ -4706,7 +4751,8 @@ function Settings({
             render: (_, v) => (
               <>
                 <b>{v.displayName}</b>
-                <div>{v.staffNo}</div>
+                <div>员工编号：{v.staffNo}</div>
+                {v.userId === currentUserId ? <Tag color="blue">当前账号</Tag> : null}
               </>
             ),
           },
@@ -4732,6 +4778,7 @@ function Settings({
                   <Button
                     danger
                     type="link"
+                    disabled={value.userId === currentUserId}
                     onClick={() => setSensitive({ staff: value, kind: "suspend" })}
                   >
                     停用
@@ -4739,9 +4786,10 @@ function Settings({
                 )}
                 <Button
                   type="link"
+                  disabled={value.userId === currentUserId}
                   onClick={() => setSensitive({ staff: value, kind: "reset" })}
                 >
-                  重置密码
+                  发放新临时密码
                 </Button>
               </Space>
             ),
@@ -4859,7 +4907,7 @@ function Settings({
       </Modal>
       <Modal
         open={Boolean(sensitive)}
-        title={sensitive?.kind === "reset" ? "重置临时密码" : sensitive?.kind === "suspend" ? "确认停用员工" : "确认恢复员工"}
+        title={sensitive?.kind === "reset" ? "发放新临时密码" : sensitive?.kind === "suspend" ? "确认停用员工" : "确认恢复员工"}
         footer={null}
         onCancel={() => setSensitive(null)}
         destroyOnHidden
@@ -4868,7 +4916,9 @@ function Settings({
           type="warning"
           showIcon
           message="这是敏感操作"
-          description="请填写原因后确认。操作执行时将再次核验当前管理员权限，并立即撤销目标员工的旧会话。"
+          description={sensitive?.kind === "reset"
+            ? `目标：${sensitive.staff.displayName}（${sensitive.staff.phone}）。旧密码和旧会话将立即失效，员工下次登录必须修改密码。请填写原因后确认。`
+            : "请填写原因后确认。操作执行时将再次核验当前管理员权限，并立即撤销目标员工的旧会话。"}
         />
         <Form layout="vertical" onFinish={(value) => void runSensitive(value)}>
           <Form.Item name="reason" label="操作原因" rules={[{ required: true, min: 2 }]}>
@@ -4882,7 +4932,7 @@ function Settings({
       <Modal
         open={Boolean(credential)}
         title="临时密码（仅显示一次）"
-        footer={<Button type="primary" onClick={() => setCredential("")}>我已安全保存</Button>}
+        footer={<Button type="primary" onClick={() => setCredential("")}>我已安全交付给员工</Button>}
         closable={false}
         maskClosable={false}
       >
@@ -4905,9 +4955,19 @@ export function App() {
   // commit page data, loading, or an error state.
   const reloadGeneration = useRef(0);
   const storedRoles = auth.roles();
-  const [authenticated, setAuthenticated] = useState(
-    !requiresLogin || (!!auth.token() && storedRoles.length > 0),
-  );
+  const [authenticated, setAuthenticated] = useState(() => {
+    if (!requiresLogin) return true;
+    const token = auth.token();
+    const hasIdentity = hasValidAdminSession(
+      requiresLogin,
+      token,
+      storedRoles,
+      auth.userId(),
+      auth.username(),
+    );
+    if (token && !hasIdentity) auth.clear();
+    return hasIdentity;
+  });
   const roles = requiresLogin
     ? storedRoles
     : storedRoles.length
@@ -5253,7 +5313,7 @@ export function App() {
     ) : currentPage === "audit" ? (
       <AuditPage audits={audits} loading={loading} error={loadError} reload={reload} />
     ) : (
-      <Settings {...{ staff, points, reload }} />
+      <Settings {...{ staff, points, reload }} currentUserId={auth.userId()} />
     );
   const content = (
     <>
@@ -5308,19 +5368,19 @@ export function App() {
               >
                 刷新
               </Button>
-              {requiresLogin && <ChangeOwnPasswordButton />}
               {requiresLogin && (
-                <Button
-                  onClick={() =>
+                <AccountMenu
+                  displayName={staff.find((value) => value.userId === auth.userId())?.displayName}
+                  username={auth.username()}
+                  role={roles[0]}
+                  onLogout={() =>
                     void api.logout().finally(() => {
                       auth.clear();
                       clearWorkspace();
                       setAuthenticated(false);
                     })
                   }
-                >
-                  退出
-                </Button>
+                />
               )}
             </Space>
           </Header>

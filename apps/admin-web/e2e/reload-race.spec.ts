@@ -86,7 +86,7 @@ test("同一身份的迟到员工列表响应不会覆盖创建后的最新刷�
   await page.getByLabel("新密码", { exact: true }).fill("reload race admin password");
   await page.getByLabel("确认新密码").fill("reload race admin password");
   await page.getByRole("button", { name: "保存新密码" }).click();
-  await expect(page.getByRole("heading", { name: "系统设置" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "人员与权限" })).toBeVisible();
   await expect.poll(() => firstStaffResponseHeld).toBe(true);
 
   await page.getByRole("button", { name: "新增员工" }).click();
@@ -107,7 +107,7 @@ test("同一身份的迟到员工列表响应不会覆盖创建后的最新刷�
   await expect(credentialDialog).toBeVisible();
   // The credential is intentionally modal and shown only once. Acknowledge it
   // before paging the table, just as a real administrator must do.
-  await credentialDialog.getByRole("button", { name: "我已安全保存" }).click();
+  await credentialDialog.getByRole("button", { name: "我已安全交付给员工" }).click();
   const row = await findStaffRow(page, "迟到响应后仍存在的新员工");
   await expect(row).toBeVisible();
 

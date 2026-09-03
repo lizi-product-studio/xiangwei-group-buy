@@ -63,7 +63,8 @@ export class StaffService {
     ]);
     const actualVersion=credential?.authorizationVersion??0;
     const isActiveAdministrator=Boolean(
-      user?.status==='ACTIVE'&&credential?.roles.includes('SUPER_ADMIN')&&!credential.mustChangePassword&&
+      actor.roles.length===1&&actor.roles[0]==='SUPER_ADMIN'&&
+      user?.status==='ACTIVE'&&credential?.roles.length===1&&credential.roles[0]==='SUPER_ADMIN'&&!credential.mustChangePassword&&
       staff?.status==='ACTIVE'&&staff.role==='SUPER_ADMIN'&&staff.authorizationVersion===actualVersion,
     );
     if((actor.authorizationVersion!==undefined&&actor.authorizationVersion!==actualVersion)||!isActiveAdministrator)
@@ -151,6 +152,12 @@ export class StaffService {
       const statusChanged=requestedStatus!==before.status;
       const scopeChanged=!sameIds(pointIds,currentPointIds);
       const authorizationChanged=roleChanged||statusChanged||scopeChanged;
+      if(userId===actor.userId&&authorizationChanged)
+        throw new BusinessError('INVALID_STATE_TRANSITION','不能修改自己的角色、账号状态或自提点授权，请由其他超级管理员操作',409);
+      const isLastActiveSuperAdmin=before.role==='SUPER_ADMIN'&&before.status==='ACTIVE'&&
+        (await store.listInternalStaff()).filter((item)=>item.role==='SUPER_ADMIN'&&item.status==='ACTIVE').length===1;
+      if(isLastActiveSuperAdmin&&(nextRole!=='SUPER_ADMIN'||requestedStatus==='SUSPENDED'))
+        throw new BusinessError('INVALID_STATE_TRANSITION','系统至少需要保留一名启用中的超级管理员',409);
       this.requireSensitiveReason(authorizationChanged,input);
       const now=new Date().toISOString();
       const nextAuthorizationVersion=authorizationChanged?Math.max(before.authorizationVersion,credential.authorizationVersion)+1:before.authorizationVersion;
@@ -173,6 +180,8 @@ export class StaffService {
     return this.store.transaction(async(store)=>{
       await this.assertCurrentSuperAdmin(store,actor);
       if(!reason.trim())throw new BusinessError('VALIDATION_ERROR','重置凭据必须填写原因',400);
+      if(userId===actor.userId)
+        throw new BusinessError('INVALID_STATE_TRANSITION','不能向自己的账号发放临时密码，请使用“修改我的密码”',409);
       const before=await store.getInternalStaff(userId);
       if(!before)throw new BusinessError('RESOURCE_NOT_FOUND','员工不存在',404);
       const credential=await store.findAdminCredentialByUserId(userId);

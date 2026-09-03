@@ -10,6 +10,27 @@ const SCRYPT_OPTIONS = { N: 32_768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 } as co
 const DUMMY_SALT = '00000000000000000000000000000000';
 const sessionTokenHash = (token:string):string => createHash('sha256').update(token).digest('hex');
 
+/**
+ * Bootstrap input is supplied outside the HTTP schema, so validate its human
+ * display name before it can become an employee record. The checks are
+ * intentionally narrow: they reject values that cannot be a usable name,
+ * while allowing ordinary Chinese and international names.
+ */
+export function validateBootstrapAdminDisplayName(input: string): string {
+  const displayName = input.trim().normalize("NFC");
+  if (displayName.length < 2 || displayName.length > 80)
+    throw new BusinessError("VALIDATION_ERROR", "BOOTSTRAP_ADMIN_DISPLAY_NAME 长度必须为 2–80 个字符", 400);
+  if (/^[?？]+$/u.test(displayName))
+    throw new BusinessError("VALIDATION_ERROR", "BOOTSTRAP_ADMIN_DISPLAY_NAME 不能仅包含问号", 400);
+  if (/[\p{Cc}\p{Cf}]/u.test(displayName))
+    throw new BusinessError("VALIDATION_ERROR", "BOOTSTRAP_ADMIN_DISPLAY_NAME 不能包含控制字符", 400);
+  // A replacement character, or several adjacent UTF-8-as-Latin-1 fragments,
+  // is a strong signal that an operator pasted mojibake rather than a name.
+  if (/\uFFFD/u.test(displayName) || /(?:(?:Ã.|Â.|â..|ð..)){2,}/u.test(displayName))
+    throw new BusinessError("VALIDATION_ERROR", "BOOTSTRAP_ADMIN_DISPLAY_NAME 包含无法识别的乱码", 400);
+  return displayName;
+}
+
 function derivePassword(password:string,salt:string):Promise<Buffer>{
   return new Promise((resolve,reject)=>scrypt(password,salt,SCRYPT_KEY_LENGTH,SCRYPT_OPTIONS,(error,key)=>error?reject(error):resolve(key)));
 }

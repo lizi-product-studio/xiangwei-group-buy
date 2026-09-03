@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { createAdminCredential } from "../modules/auth/admin-auth.js";
+import { createAdminCredential, validateBootstrapAdminDisplayName } from "../modules/auth/admin-auth.js";
 import { MysqlStore } from "../modules/core/mysql-store.js";
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -13,6 +13,7 @@ if (!databaseUrl || !username || !password || !displayName || !phone)
     "请配置 DATABASE_URL、BOOTSTRAP_ADMIN_USERNAME、BOOTSTRAP_ADMIN_PASSWORD、BOOTSTRAP_ADMIN_DISPLAY_NAME 和 BOOTSTRAP_ADMIN_PHONE",
   );
 if (!/^1[3-9]\d{9}$/.test(phone)) throw new Error("BOOTSTRAP_ADMIN_PHONE 必须是有效中国大陆手机号");
+const validDisplayName = validateBootstrapAdminDisplayName(displayName);
 
 const store = MysqlStore.create(databaseUrl);
 try {
@@ -38,7 +39,7 @@ try {
     await transaction.saveInternalStaff({
       userId,
       staffNo: currentStaff?.staffNo ?? `BOOTSTRAP-${userId.slice(0, 12)}`,
-      displayName,
+      displayName: validDisplayName,
       phone,
       role: "SUPER_ADMIN",
       status: "ACTIVE",

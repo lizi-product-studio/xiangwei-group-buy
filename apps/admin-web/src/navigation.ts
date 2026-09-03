@@ -63,10 +63,10 @@ const mainNavigation: readonly AdminNavigationGroup[] = [
     ],
   },
   {
-    label: "系统",
+    label: "权限与审计",
     items: [
       { key: "audit", label: "审计记录", roles: ["SUPER_ADMIN"] },
-      { key: "settings", label: "系统设置", roles: ["SUPER_ADMIN"] },
+      { key: "settings", label: "人员与权限", roles: ["SUPER_ADMIN"] },
     ],
   },
 ];

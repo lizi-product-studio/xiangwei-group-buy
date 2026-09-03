@@ -333,6 +333,41 @@ describe("StaffService lifecycle and authorization revision", () => {
     );
   });
 
+  it("rejects self-suspension and self temporary-password issuance without writing state or audits", async () => {
+    const store = new MemoryStore();
+    await createBootstrap(store);
+    const staff = new StaffService(store);
+    const auth = new AdminAuthService(store, 3600);
+    const session = await auth.login("bootstrap.admin", password);
+    expect(session.nextAction).toBe("LOGIN");
+    if (session.nextAction !== "LOGIN") throw new Error("bootstrap login failed");
+    const before = await staff.get(bootstrapActor.userId);
+
+    await expect(
+      staff.update(
+        bootstrapActor.userId,
+        { status: "SUSPENDED", reason: "不应允许" },
+        bootstrapActor,
+        "self-suspend",
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_STATE_TRANSITION" });
+    await expect(
+      staff.resetCredential(
+        bootstrapActor.userId,
+        "不应允许",
+        bootstrapActor,
+        "self-temporary-password",
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_STATE_TRANSITION" });
+
+    await expect(staff.get(bootstrapActor.userId)).resolves.toMatchObject({
+      status: "ACTIVE",
+      authorizationVersion: before.authorizationVersion,
+    });
+    await expect(auth.authenticate(`Bearer ${session.accessToken}`)).resolves.toEqual(bootstrapActor);
+    await expect(store.listAuditLogs(20)).resolves.toEqual([]);
+  });
+
   it("copies the pickup manager contact onto authorized points", async () => {
     const store = new MemoryStore();
     await createBootstrap(store);

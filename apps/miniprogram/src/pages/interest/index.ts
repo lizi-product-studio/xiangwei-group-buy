@@ -1,4 +1,4 @@
-import { api, AuthExpiredError, customerAuth } from '../../utils/api';
+import { api, AuthExpiredError, customerAuth, customerErrorMessage } from '../../utils/api';
 import { PRIVACY_NOTICE_VERSION } from '../../config/legal';
 import { navigateToCustomerLogin } from '../../utils/auth-navigation';
 import { PageActionCoordinator, isOwnedAuthExpiry } from '../../utils/page-action-coordinator';
@@ -24,6 +24,7 @@ Page({
     privacyVersion: PRIVACY_NOTICE_VERSION,
     submitting: false,
     loading: false,
+    loadError: '',
     editingId: '',
     interests: [] as InterestView[],
   },
@@ -47,7 +48,7 @@ Page({
   async loadInterests() {
     const action = actionCoordinator.begin(customerAuth.captureSessionEpoch());
     const current = () => actionCoordinator.isCurrent(action, customerAuth.captureSessionEpoch()) && customerAuth.isLoggedIn();
-    this.setData({ loading: true });
+    this.setData({ loading: true, loadError: '' });
     try {
       const interests = await api.listOwnServiceAreaInterests();
       if (current()) this.setData({
@@ -69,7 +70,7 @@ Page({
           navigateToCustomerLogin('service-area-interest', '/pages/interest/index');
         return;
       }
-      if (current()) void wx.showToast({ title: error instanceof Error ? error.message : '意向记录加载失败', icon: 'none' });
+      if (current()) this.setData({ loading: false, loadError: customerErrorMessage(error, '意向记录加载失败，请稍后重试') });
     } finally {
       if (current()) this.setData({ loading: false });
     }
@@ -121,7 +122,7 @@ Page({
       void wx.showToast({ title: '意向已撤回', icon: 'success' });
     } catch (error) {
       if (!current()) return;
-      void wx.showToast({ title: error instanceof Error ? error.message : '撤回失败', icon: 'none' });
+      void wx.showToast({ title: customerErrorMessage(error, '撤回失败，请稍后重试'), icon: 'none' });
     }
   },
 
@@ -170,7 +171,7 @@ Page({
         return;
       }
       if (!current()) return;
-      void wx.showModal({ title: '暂时无法提交', content: error instanceof Error ? error.message : '请稍后再试', showCancel: false });
+      void wx.showModal({ title: '暂时无法提交', content: customerErrorMessage(error, '开通意向暂时无法提交，请稍后重试'), showCancel: false });
     } finally {
       if (current()) this.setData({ submitting: false });
     }

@@ -52,12 +52,39 @@ export class AuthExpiredError extends Error {
   }
 }
 
+const TECHNICAL_ERROR_PATTERN =
+  /(request:fail|errMsg|statuscode|status\s*code|fetch failed|econn|etimedout|socket|http:\/\/|https:\/\/|\b[45]\d{2}\b|(?:\b(?:GET|POST|PUT|PATCH|DELETE|OPTIONS)\s+)?\/api\/[^\s]+|(?:\b(?:GET|POST|PUT|PATCH|DELETE|OPTIONS)\s+)?\/v\d+\/[^\s]+)/i;
+const INTERNAL_CODE_PATTERN = /^(?:[A-Z][A-Z0-9_-]{1,31}|P\d{1,3})$/;
+
+/**
+ * Convert SDK/network/server failures into safe consumer-facing copy.  API
+ * route paths, HTTP status codes and WeChat's raw request:fail text are
+ * implementation details and must never reach a customer page.
+ */
+export function customerErrorMessage(
+  error: unknown,
+  fallback = "暂时无法完成请求，请稍后重试",
+): string {
+  if (error instanceof AuthExpiredError) return error.message;
+  const message = error instanceof Error ? error.message.trim() : "";
+  if (
+    !message ||
+    TECHNICAL_ERROR_PATTERN.test(message) ||
+    INTERNAL_CODE_PATTERN.test(message)
+  ) {
+    return isLocalDemoDeployment(app.globalData)
+      ? "本地服务未启动，请在项目根目录运行 pnpm dev 后重试"
+      : fallback;
+  }
+  return message;
+}
+
 function wxLogin(): Promise<string> {
   return new Promise((resolve, reject) => {
     wx.login({
       success: (result) =>
         result.code ? resolve(result.code) : reject(new Error("微信登录失败")),
-      fail: reject,
+      fail: (error) => reject(new Error(customerErrorMessage(error, "微信登录失败"))),
     });
   });
 }
@@ -77,12 +104,14 @@ function loginRequest(
           return resolve(response.data.data);
         reject(
           new Error(
-            (response.data as unknown as ErrorEnvelope).message ??
+            customerErrorMessage(
+              new Error((response.data as unknown as ErrorEnvelope).message ?? "微信登录失败"),
               "微信登录失败",
+            ),
           ),
         );
       },
-      fail: (error) => reject(new Error(error.errMsg || "网络连接失败")),
+      fail: (error) => reject(new Error(customerErrorMessage(error, "网络连接失败"))),
     });
   });
 }
@@ -169,14 +198,21 @@ async function request<T>(
           reject(new AuthExpiredError(requestEpoch, sessionWasCleared));
           return;
         }
+        const serverMessage = (response.data as unknown as ErrorEnvelope)?.message;
         reject(
           new Error(
-            (response.data as unknown as ErrorEnvelope).message ??
-              `服务请求失败（${response.statusCode}）`,
+            response.statusCode >= 500
+              ? customerErrorMessage(new Error(`HTTP ${response.statusCode}`))
+              : customerErrorMessage(
+                  new Error(serverMessage ?? "请求未完成，请稍后重试"),
+                  response.statusCode === 409
+                    ? "当前操作暂不可用，请刷新后重试"
+                    : "请求未完成，请稍后重试",
+                ),
           ),
         );
       },
-      fail: (error) => reject(new Error(error.errMsg || "网络连接失败")),
+      fail: (error) => reject(new Error(customerErrorMessage(error, "网络连接失败"))),
     });
   });
 }

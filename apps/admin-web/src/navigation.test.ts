@@ -30,7 +30,7 @@ describe("admin navigation", () => {
       "日常运营",
       "履约管理",
       "客户与资金",
-      "系统",
+      "权限与审计",
     ]);
     expect(
       groups.flatMap((group) => group.items.map((item) => item.label)),
@@ -45,7 +45,7 @@ describe("admin navigation", () => {
       "运营治理",
       "财务管理",
       "审计记录",
-      "系统设置",
+      "人员与权限",
     ]);
   });
 

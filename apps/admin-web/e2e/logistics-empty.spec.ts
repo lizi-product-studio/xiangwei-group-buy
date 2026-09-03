@@ -52,15 +52,17 @@ async function activatePreviewAdmin(
   );
   expect(activated.status(), await activated.text()).toBe(200);
   const activatedBody = (await activated.json()) as {
-    data: { accessToken: string; roles: string[] };
+    data: { accessToken: string; roles: string[]; userId: string };
   };
   await page.goto("/");
-  await page.evaluate(({ accessToken, roles }) => {
+  await page.evaluate(({ accessToken, roles, userId, username: loginUsername }) => {
     localStorage.setItem("community-admin-token", accessToken);
     localStorage.setItem("community-admin-roles", JSON.stringify(roles));
-  }, activatedBody.data);
+    localStorage.setItem("community-admin-user-id", userId);
+    localStorage.setItem("community-admin-username", loginUsername);
+  }, { ...activatedBody.data, username });
   await page.reload();
-  await expect(page.getByRole("heading", { name: "系统设置" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "人员与权限" })).toBeVisible();
 }
 
 test("配送 API 不可用时显示可恢复错误而不是空表", async ({ page, request }) => {

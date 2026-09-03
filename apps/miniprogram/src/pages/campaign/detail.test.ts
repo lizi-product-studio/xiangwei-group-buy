@@ -1,0 +1,124 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+type Deferred<T> = {
+  promise: Promise<T>;
+  resolve(value: T): void;
+  reject(error: unknown): void;
+};
+
+type CampaignDetailPage = {
+  data: Record<string, unknown>;
+  setData?: (patch: Record<string, unknown>) => void;
+  onLoad: (options: Record<string, string | undefined>) => void;
+  retryLoad: () => void;
+};
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+  return { promise, resolve, reject };
+}
+
+vi.mock("../../utils/api", () => ({
+  api: { getCampaign: vi.fn() },
+  customerAuth: { captureSessionEpoch: vi.fn(() => 0) },
+}));
+vi.mock("../../utils/service-area", () => ({
+  loadServiceAreaContext: vi.fn(async () => ({ selected: null })),
+}));
+vi.mock("../../utils/pickup-point", () => ({
+  loadPickupPoints: vi.fn(async () => ({ points: [] })),
+  readPickupPointSelection: vi.fn(() => null),
+}));
+vi.mock("../../utils/cart", () => ({
+  addCartLine: vi.fn(),
+  cartCount: vi.fn(() => 0),
+  clearCart: vi.fn(),
+  readCart: vi.fn(() => []),
+  saveCheckoutDraft: vi.fn(),
+}));
+
+describe("campaign detail loading", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.stubGlobal("getApp", () => ({ globalData: {} }));
+    vi.stubGlobal("wx", {
+      getStorageSync: vi.fn(),
+      setStorageSync: vi.fn(),
+      removeStorageSync: vi.fn(),
+      navigateTo: vi.fn(),
+      showToast: vi.fn(),
+      openLocation: vi.fn(),
+      makePhoneCall: vi.fn(),
+    });
+  });
+
+  it("keeps the latest retry result when an older request fails later", async () => {
+    const first = deferred<CampaignDto>();
+    const second = deferred<CampaignDto>();
+    const campaign: CampaignDto = {
+      id: "campaign-1",
+      title: "社区团购测试团期",
+      serviceAreaId: "area-1",
+      deliveryPlan: null,
+      pickupPoint: null,
+      cutoffAt: "2099-01-01T00:00:00.000Z",
+      dispatchAt: "2099-01-01T01:00:00.000Z",
+      estimatedArrivalStartAt: "2099-01-02T00:00:00.000Z",
+      estimatedArrivalEndAt: "2099-01-02T06:00:00.000Z",
+      paidQuantity: 0,
+      failureAction: "CANCEL_AND_REFUND",
+      minTotalQuantity: 1,
+      items: [
+        {
+          skuId: "sku-1",
+          title: "应季蔬菜",
+          category: "蔬菜",
+          origin: "本地",
+          skuName: "一份",
+          imageUrl: null,
+          unitPriceCents: 100,
+          stock: 10,
+          soldQuantity: 0,
+        },
+      ],
+      status: "CANCELLED",
+    };
+    const { api } = await import("../../utils/api");
+    vi.mocked(api.getCampaign)
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    let definition: CampaignDetailPage | undefined;
+    vi.stubGlobal("Page", (value: CampaignDetailPage) => {
+      definition = value;
+      return value;
+    });
+    await import("./detail");
+    if (!definition) throw new Error("campaign detail page was not registered");
+    definition.setData = (patch) => Object.assign(definition!.data, patch);
+
+    definition.onLoad.call(definition, { id: campaign.id, skuId: "sku-1" });
+    expect(definition.data.loading).toBe(true);
+    definition.retryLoad.call(definition);
+    expect(definition.data.loading).toBe(true);
+
+    second.resolve(campaign);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(definition.data.campaign).toMatchObject({ id: campaign.id });
+    expect(definition.data.error).toBe("");
+    expect(definition.data.loading).toBe(false);
+
+    first.reject(new Error("GET /api/v1/campaigns/campaign-1 failed"));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(definition.data.campaign).toMatchObject({ id: campaign.id });
+    expect(definition.data.error).toBe("");
+    expect(definition.data.loading).toBe(false);
+  });
+});

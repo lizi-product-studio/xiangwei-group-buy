@@ -69,7 +69,8 @@ async function loginInBrowser(page: Page, username: string, password: string) {
 }
 
 async function logout(page: Page) {
-  await page.getByRole("button", { name: /退\s*出/ }).click();
+  await page.getByRole("button", { name: "打开账号菜单" }).click();
+  await page.getByRole("menuitem", { name: "退出登录" }).click();
   await expect(page.getByRole("button", { name: /登\s*录/ })).toBeVisible();
 }
 

@@ -1,5 +1,5 @@
 import { clearCart, readCart } from '../../utils/cart';
-import { api } from '../../utils/api';
+import { api, customerErrorMessage } from '../../utils/api';
 import { loadServiceAreaContext, saveServiceAreaSelection, type ServiceAreaSelection } from '../../utils/service-area';
 import { loadPickupPoints, readPickupPointSelection, savePickupPointSelection, type PickupPointSelection } from '../../utils/pickup-point';
 
@@ -36,7 +36,7 @@ Page({
       const selected=readPickupPointSelection();
       this.setData({ areas: context.areas,selectedAreaId:area.id,points:allowed, selectedId: allowed.some((item)=>item.id===selected?.id)?selected?.id??'':'' });
     } catch (error) {
-      this.setData({ error: error instanceof Error ? error.message : '收货区域加载失败' });
+      this.setData({ error: customerErrorMessage(error, '收货区域加载失败，请稍后重试') });
     } finally {
       this.setData({ loading: false });
     }
@@ -53,8 +53,13 @@ Page({
       clearCart();
     }
     saveServiceAreaSelection(area);
-    const points=await loadPickupPoints(area.id);const selected=readPickupPointSelection();
-    this.setData({selectedAreaId:area.id,points:points.points,selectedId:points.points.some((item)=>item.id===selected?.id)?selected?.id??'':''});
+    try {
+      const points = await loadPickupPoints(area.id);
+      const selected = readPickupPointSelection();
+      this.setData({ selectedAreaId: area.id, points: points.points, selectedId: points.points.some((item) => item.id === selected?.id) ? selected?.id ?? '' : '', error: '' });
+    } catch (error) {
+      this.setData({ points: [], selectedId: '', error: customerErrorMessage(error, '自提点加载失败，请稍后重试') });
+    }
   },
 
   choosePoint(event:WechatMiniprogram.BaseEvent){const point=this.data.points.find((item)=>item.id===event.currentTarget.dataset.id);if(!point)return;savePickupPointSelection(point);this.setData({selectedId:point.id});void wx.navigateBack();},

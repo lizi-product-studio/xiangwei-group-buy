@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { AdminAuthService, createAdminCredential } from "./admin-auth.js";
+import { AdminAuthService, createAdminCredential, validateBootstrapAdminDisplayName } from "./admin-auth.js";
 import { StaffService } from "./staff-service.js";
 import { MemoryStore, type CommerceStore } from "../core/store.js";
 import { buildApp, hasReadyAdminBootstrap } from "../../app.js";
@@ -106,6 +106,14 @@ class TransactionBarrierStore extends MemoryStore {
     return super.transaction(work);
   }
 }
+
+describe("bootstrap administrator display-name validation", () => {
+  it("accepts an ordinary display name and rejects unusable bootstrap input", () => {
+    expect(validateBootstrapAdminDisplayName(" 系统管理员 ")).toBe("系统管理员");
+    for (const invalid of ["???", "？？？", "系统\u0000管理员", "Ã¥Â¼Â Ã¤Â¸Â‰", "\uFFFD管理员"])
+      expect(() => validateBootstrapAdminDisplayName(invalid)).toThrow();
+  });
+});
 
 describe("AdminAuthService", () => {
   it("requires an ACTIVE user and a non-legacy credential for bootstrap readiness", async () => {

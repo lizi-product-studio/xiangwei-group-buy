@@ -1,5 +1,5 @@
 import { formatDateTime, formatMoney } from "../../utils/format";
-import { api, AuthExpiredError, customerAuth } from "../../utils/api";
+import { api, AuthExpiredError, customerAuth, customerErrorMessage } from "../../utils/api";
 import { orderStatusCopy } from "../../utils/consumer-display";
 import { navigateToCustomerLogin } from "../../utils/auth-navigation";
 import { PageLoadCoordinator } from "../../utils/page-load-guard";
@@ -114,12 +114,12 @@ Page({
       if (error instanceof AuthExpiredError) {
         if (!ownExpiry || !loadCoordinator.isLive(loadGuard)) return;
         cachedOrders = null;
-        this.setData({ orders: [], loading: false, error: error.message });
+      this.setData({ orders: [], loading: false, error: customerErrorMessage(error, "订单加载失败，请稍后重试") });
         navigateToCustomerLogin("orders", "/pages/orders/index");
         return;
       }
       this.setData({
-        error: error instanceof Error ? error.message : "订单加载失败",
+        error: customerErrorMessage(error, "订单加载失败，请稍后重试"),
       });
     } finally {
       if (loadCoordinator.isCurrent(loadGuard, customerAuth.captureSessionEpoch())) this.setData({ loading: false });

@@ -1,4 +1,4 @@
-import { api, AuthExpiredError, customerAuth } from "../../utils/api";
+import { api, AuthExpiredError, customerAuth, customerErrorMessage } from "../../utils/api";
 import {
   canSubmitCommunityQualityCase,
   communityQualityCaseStatusText,
@@ -235,7 +235,7 @@ Page({
       if (!ownExpiry && !loadCoordinator.isCurrent(loadGuard, customerAuth.captureSessionEpoch())) return;
       if (error instanceof AuthExpiredError) {
         if (!ownExpiry || !loadCoordinator.isLive(loadGuard)) return;
-        this.setData({ order: null, loading: false, error: error.message });
+        this.setData({ order: null, loading: false, error: customerErrorMessage(error, "订单详情加载失败，请稍后重试") });
         navigateToCustomerLogin(
           "order-detail",
           `/pages/order-detail/index?id=${encodeURIComponent(this.data.id)}`,
@@ -243,7 +243,7 @@ Page({
         return;
       }
       this.setData({
-        error: error instanceof Error ? error.message : "订单加载失败",
+        error: customerErrorMessage(error, "订单详情加载失败，请稍后重试"),
       });
     } finally {
       if (loadCoordinator.isCurrent(loadGuard, customerAuth.captureSessionEpoch())) this.setData({ loading: false });
@@ -314,7 +314,7 @@ Page({
       if (!current()) return;
       void wx.showModal({
         title: "取消失败",
-        content: error instanceof Error ? error.message : "请稍后重试",
+        content: customerErrorMessage(error, "操作失败，请稍后重试"),
         showCancel: false,
       });
     } finally {

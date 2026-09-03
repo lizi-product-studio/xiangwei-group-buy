@@ -1,4 +1,4 @@
-import { api, AuthExpiredError, customerAuth } from '../../utils/api';
+import { api, AuthExpiredError, customerAuth, customerErrorMessage } from '../../utils/api';
 import { formatDateTime } from '../../utils/format';
 import { pickupDeadlineText, qualityDeadlineText } from '../../utils/consumer-display';
 import { navigateToCustomerLogin } from '../../utils/auth-navigation';
@@ -75,7 +75,7 @@ Page({
         );
         return;
       }
-      this.setData({ error: error instanceof Error ? error.message : '取货码加载失败' });
+      this.setData({ error: customerErrorMessage(error, '取货码加载失败，请稍后重试') });
     } finally {
       if (loadCoordinator.isCurrent(loadGuard, customerAuth.captureSessionEpoch())) this.setData({ loading: false });
     }

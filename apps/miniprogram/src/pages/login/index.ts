@@ -11,11 +11,10 @@ import {
   type AuthState,
 } from "../../utils/auth-state";
 import { cancelCustomerLogin, finishCustomerLogin } from "../../utils/auth-navigation";
-import { customerAuth } from "../../utils/api";
+import { customerAuth, customerErrorMessage } from "../../utils/api";
 
 function loginError(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) return error.message;
-  return "微信登录暂时未完成，请检查网络后重试";
+  return customerErrorMessage(error, "微信登录暂时未完成，请检查网络后重试");
 }
 
 Page({

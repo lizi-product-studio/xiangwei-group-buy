@@ -1,4 +1,4 @@
-import { api, AuthExpiredError, customerAuth } from "../../utils/api";
+import { api, AuthExpiredError, customerAuth, customerErrorMessage } from "../../utils/api";
 import { COMMUNITY_QUALITY_TEXT_ONLY_HINT } from "../../utils/community-quality";
 import { navigateToCustomerLogin } from "../../utils/auth-navigation";
 import { PageActionCoordinator, isOwnedAuthExpiry } from "../../utils/page-action-coordinator";
@@ -25,6 +25,8 @@ Page({
     submitting: false,
     claimRequestId: "",
     loggedIn: false,
+    loading: false,
+    error: "",
     order: null as OrderDto | null,
     claimRows: [] as ClaimRow[],
     qualityHint: COMMUNITY_QUALITY_TEXT_ONLY_HINT,
@@ -64,7 +66,7 @@ Page({
     const loadGuard = loadCoordinator.begin(customerAuth.captureSessionEpoch());
     // Never render a previous account's order while the protected read is in
     // flight after a session change.
-    this.setData({ order: null, claimRows: [] });
+    this.setData({ order: null, claimRows: [], loading: true, error: "" });
     try {
       const order = await api.getOrder(this.data.orderId);
       if (!loadCoordinator.isCurrent(loadGuard, customerAuth.captureSessionEpoch()) || !customerAuth.isLoggedIn()) return;
@@ -113,7 +115,9 @@ Page({
         );
         return;
       }
-      void wx.showToast({ title: "订单信息加载失败", icon: "none" });
+      this.setData({ error: customerErrorMessage(error, "售后信息加载失败，请稍后重试") });
+    } finally {
+      if (loadCoordinator.isCurrent(loadGuard, customerAuth.captureSessionEpoch())) this.setData({ loading: false });
     }
   },
   onHide() { loadCoordinator.hide(); actionCoordinator.invalidate(); },
@@ -209,7 +213,7 @@ Page({
       if (!current()) return;
       void wx.showModal({
         title: "提交失败",
-        content: error instanceof Error ? error.message : "请稍后再试",
+        content: customerErrorMessage(error, "售后申请暂时无法提交，请稍后重试"),
         showCancel: false,
       });
     } finally {

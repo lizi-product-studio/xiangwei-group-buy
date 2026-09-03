@@ -1,4 +1,4 @@
-import { api } from '../../utils/api';
+import { api, customerErrorMessage } from '../../utils/api';
 import { formatMoney } from '../../utils/format';
 import { estimatedArrivalText, formatChinaDateTime, isCampaignPurchasable, shouldShowFloatingCart } from '../../utils/consumer-display';
 import { cartCount as readCartCount } from '../../utils/cart';
@@ -62,7 +62,7 @@ Page({
       const currentCartCount = readCartCount();
       this.setData({ campaigns, allProducts: campaigns, categories, categoryItems, activeCategory: '全部', area: areaContext.selected,pickupPoint:selectedPoint, deliveryText, cartCount: shouldShowFloatingCart(currentCartCount) ? currentCartCount : 0 });
     } catch (error) {
-      this.setData({ error: error instanceof Error ? error.message : '加载失败，请稍后重试' });
+      this.setData({ error: customerErrorMessage(error, '商品加载失败，请稍后重试') });
     } finally { this.setData({ loading: false }); }
   },
 

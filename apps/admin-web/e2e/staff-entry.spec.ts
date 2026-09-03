@@ -138,9 +138,10 @@ test("超管从网页创建员工，临时密码改密与撤权后的默认页�
   await page.getByLabel("新密码", { exact: true }).fill("p1a admin setup password");
   await page.getByLabel("确认新密码").fill("p1a admin setup password");
   await page.getByRole("button", { name: "保存新密码" }).click();
-  await expect(page.getByRole("heading", { name: "系统设置" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "人员与权限" })).toBeVisible();
 
-  await page.getByRole("button", { name: "修改密码" }).click();
+  await page.getByRole("button", { name: "打开账号菜单" }).click();
+  await page.getByRole("button", { name: "修改我的密码" }).click();
   const ownPasswordDialog = page.getByRole("dialog", { name: "修改密码" });
   await ownPasswordDialog
     .getByLabel("当前密码")
@@ -196,7 +197,7 @@ test("超管从网页创建员工，临时密码改密与撤权后的默认页�
   await expect(credentialDialog).toBeVisible();
   const managerCredential = await credentialDialog.locator("code").textContent();
   expect(managerCredential).toBeTruthy();
-  await credentialDialog.getByRole("button", { name: "我已安全保存" }).click();
+  await credentialDialog.getByRole("button", { name: "我已安全交付给员工" }).click();
   await expect(credentialDialog).toHaveCount(0);
 
   let invalidated = false;
@@ -216,6 +217,7 @@ test("超管从网页创建员工，临时密码改密与撤权后的默认页�
     .fill("p1a manager setup password");
   await managerPage.getByRole("button", { name: "保存新密码" }).click();
   await expect(managerPage.getByRole("heading", { name: "我的点位工作台" })).toBeVisible();
+  await expect(managerPage.getByRole("button", { name: "打开账号菜单" })).toContainText(`p1a.manager.${suffix}`);
   await expect(managerPage.getByText("商品管理", { exact: true })).toHaveCount(0);
   await expect(managerPage.getByText(`P1-A 授权点 ${suffix}`, { exact: true })).toHaveCount(0);
 
@@ -246,13 +248,13 @@ test("超管从网页创建员工，临时密码改密与撤权后的默认页�
   confirm = page.getByRole("dialog", { name: "确认恢复员工" });
   await confirm.getByLabel("操作原因").fill("完成交接后恢复");
   await confirm.getByRole("button", { name: "确认执行" }).click();
-  await staffRow.getByRole("button", { name: "重置密码" }).click();
-  confirm = page.getByRole("dialog", { name: "重置临时密码" });
+  await staffRow.getByRole("button", { name: "发放新临时密码" }).click();
+  confirm = page.getByRole("dialog", { name: "发放新临时密码" });
   await confirm.getByLabel("操作原因").fill("密码轮换");
   await confirm.getByRole("button", { name: "确认执行" }).click();
   const resetCredentialDialog = page.getByRole("dialog", { name: /临时密码/ });
   await expect(resetCredentialDialog).toBeVisible();
-  await resetCredentialDialog.getByRole("button", { name: "我已安全保存" }).click();
+  await resetCredentialDialog.getByRole("button", { name: "我已安全交付给员工" }).click();
 
   for (const width of [375, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
@@ -336,7 +338,8 @@ test("同一标签切换账号会清空旧工作区，客服和财务刷新只�
     await page.getByRole("button", { name: "保存新密码" }).click();
   };
   const logout = async () => {
-    await page.getByRole("button", { name: /退\s*出/ }).click();
+    await page.getByRole("button", { name: "打开账号菜单" }).click();
+    await page.getByRole("menuitem", { name: "退出登录" }).click();
     await expect(page.getByRole("button", { name: /登\s*录/ })).toBeVisible();
   };
 

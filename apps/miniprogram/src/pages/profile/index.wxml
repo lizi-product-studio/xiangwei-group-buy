@@ -68,6 +68,7 @@
       <text>我的固定自提点</text>
       <view class="card-head__link"><text>切换自提点</text><image src="/assets/right-gray.png" mode="aspectFit" aria-hidden="true" /></view>
     </view>
+    <view wx:if="{{areaError}}" class="summary-error" catchtap="loadArea" role="alert">{{areaError}}，点击重试</view>
     <view class="pickup-content">
       <view class="pickup-mark"><image src="/assets/location-white.png" mode="aspectFit" aria-label="自提点" /></view>
       <view class="pickup-copy">

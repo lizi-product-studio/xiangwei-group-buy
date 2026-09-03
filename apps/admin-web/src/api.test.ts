@@ -4,6 +4,7 @@ import {
   api,
   auth,
   isValidStaffRoles,
+  hasValidAdminSession,
   loginRetryMessage,
   loginRetryRemainingSeconds,
   parseRetryAfterSeconds,
@@ -114,6 +115,12 @@ describe("community admin API", () => {
     localStorage.setItem("community-admin-roles", JSON.stringify(["PICKUP_MANAGER"]));
     expect(auth.roles()).toEqual(["PICKUP_MANAGER"]);
     auth.clear();
+  });
+
+  it("fails closed when a bearer cache lacks the user identity required by the account menu", () => {
+    expect(hasValidAdminSession(true, "token", ["FINANCE"], null, "finance")).toBe(false);
+    expect(hasValidAdminSession(true, "token", ["FINANCE"], "user-1", null)).toBe(false);
+    expect(hasValidAdminSession(true, "token", ["FINANCE"], "user-1", "finance")).toBe(true);
   });
 
   it("updates launch-critical pickup point details with PATCH", async () => {

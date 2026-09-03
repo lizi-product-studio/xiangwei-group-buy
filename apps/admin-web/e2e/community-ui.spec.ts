@@ -107,7 +107,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
     admin.temporaryPassword,
     "community e2e admin password",
   );
-  await expect(page.getByRole("heading", { name: "系统设置" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "人员与权限" })).toBeVisible();
   const area = await call<{ id: string }>(
     request,
     "/api/v1/admin/service-areas",
@@ -173,7 +173,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   // is exercised without relying on a synthetic default point. Refresh the
   // current admin workspace before selecting that real area in the UI.
   await page.reload();
-  await expect(page.getByRole("heading", { name: "系统设置" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "人员与权限" })).toBeVisible();
   await expect(page.getByText("商品管理", { exact: true })).toBeVisible();
   await expect(page.getByText("团期管理", { exact: true })).toBeVisible();
   await expect(page.getByText("配送与到货", { exact: true })).toBeVisible();
@@ -529,7 +529,8 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   await labelsDialog.locator(".ant-modal-close").click();
   await expect(labelsDialog).toHaveCount(0);
 
-  await page.getByRole("button", { name: /退\s*出/ }).click();
+  await page.getByRole("button", { name: "打开账号菜单" }).click();
+  await page.getByRole("menuitem", { name: "退出登录" }).click();
   await expect(page.getByRole("button", { name: /登\s*录/ })).toBeVisible();
   await loginWithTemporaryPassword(
     page,
@@ -542,7 +543,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   ).toBeVisible();
   await expect(page.getByText("商品管理", { exact: true })).toHaveCount(0);
   await expect(page.getByText("财务管理", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("系统设置", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("人员与权限", { exact: true })).toHaveCount(0);
   await page.setViewportSize({ width: 768, height: 900 });
   await expect
     .poll(() =>
@@ -618,12 +619,13 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   );
   expect((await completedPickupOrder.json()).data.status).toBe("PICKED_UP");
 
-  await page.getByRole("button", { name: /退\s*出/ }).click();
+  await page.getByRole("button", { name: "打开账号菜单" }).click();
+  await page.getByRole("menuitem", { name: "退出登录" }).click();
   await expect(page.getByRole("button", { name: /登\s*录/ })).toBeVisible();
   await page.getByLabel("账号").fill(`admin.${suffix}`);
   await page.getByLabel("密码").fill("community e2e admin password");
   await page.getByRole("button", { name: /登\s*录/ }).click();
-  await expect(page.getByRole("heading", { name: "系统设置" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "人员与权限" })).toBeVisible();
   const adminLogin = await request.fetch(`${apiBase}/api/v1/auth/admin/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -737,7 +739,8 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
     );
     expect(expired.status(), await expired.text()).toBe(200);
   }
-  await page.getByRole("button", { name: /退\s*出/ }).click();
+  await page.getByRole("button", { name: "打开账号菜单" }).click();
+  await page.getByRole("menuitem", { name: "退出登录" }).click();
   await expect(page.getByRole("button", { name: /登\s*录/ })).toBeVisible();
   await loginWithTemporaryPassword(
     page,
@@ -862,7 +865,8 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   await lossWindowDialog.getByRole("button", { name: "二次确认并提交" }).click();
   await expect(lossWindowRow.getByText("已关闭", { exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: /退\s*出/ }).click();
+  await page.getByRole("button", { name: "打开账号菜单" }).click();
+  await page.getByRole("menuitem", { name: "退出登录" }).click();
   await expect(page.getByRole("button", { name: /登\s*录/ })).toBeVisible();
   await loginWithTemporaryPassword(
     page,

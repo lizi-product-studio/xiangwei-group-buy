@@ -1,4 +1,4 @@
-import { api, AuthExpiredError, customerAuth } from "../../utils/api";
+import { api, AuthExpiredError, customerAuth, customerErrorMessage } from "../../utils/api";
 import {
   clearCart,
   clearCheckoutDraft,
@@ -164,7 +164,7 @@ Page({
         customerAuth.captureSessionEpoch() === loadGuard.epoch + 1;
       if (!ownExpiry && !loadCoordinator.isCurrent(loadGuard, customerAuth.captureSessionEpoch())) return;
       this.setData({
-        error: error instanceof Error ? error.message : "结算信息加载失败",
+        error: customerErrorMessage(error, "结算信息加载失败，请稍后重试"),
         items: [],
         area: null,
       });

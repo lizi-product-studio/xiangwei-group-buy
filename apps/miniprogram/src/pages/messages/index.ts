@@ -1,4 +1,4 @@
-import { api, AuthExpiredError, customerAuth } from '../../utils/api';
+import { api, AuthExpiredError, customerAuth, customerErrorMessage } from '../../utils/api';
 import { formatDateTime } from '../../utils/format';
 import { navigateToCustomerLogin } from '../../utils/auth-navigation';
 import { consumeCancelReturnSuppression } from '../../utils/auth-intent';
@@ -68,11 +68,11 @@ Page({
       if (!ownExpiry && !loadCoordinator.isCurrent(loadGuard, customerAuth.captureSessionEpoch())) return;
       if (error instanceof AuthExpiredError) {
         if (!ownExpiry || !loadCoordinator.isLive(loadGuard)) return;
-        this.setData({ messages: [], error: error.message, loading: false });
+        this.setData({ messages: [], error: customerErrorMessage(error), loading: false });
         navigateToCustomerLogin('messages', '/pages/messages/index');
         return;
       }
-      this.setData({ error: error instanceof Error ? error.message : '消息加载失败' });
+      this.setData({ error: customerErrorMessage(error, '消息加载失败，请稍后重试') });
     }
     finally { if (loadCoordinator.isCurrent(loadGuard, customerAuth.captureSessionEpoch())) this.setData({ loading: false }); }
   },
@@ -132,7 +132,7 @@ Page({
         return;
       }
       if (!currentAction()) return;
-      void wx.showToast({ title: error instanceof Error ? error.message : '提醒设置失败', icon: 'none' });
+      void wx.showToast({ title: customerErrorMessage(error, '提醒设置失败，请稍后重试'), icon: 'none' });
     }
     finally { if (currentAction()) this.setData({ enabling: false }); }
   },

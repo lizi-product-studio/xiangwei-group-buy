@@ -1,4 +1,4 @@
-import { api, AuthExpiredError, customerAuth } from "../../utils/api";
+import { api, AuthExpiredError, customerAuth, customerErrorMessage } from "../../utils/api";
 import {
   loadServiceAreaContext,
   type ServiceAreaSelection,
@@ -30,6 +30,7 @@ Page({
     wechatMode: false,
     area: null as ServiceAreaSelection | null,
     pickupPoint: null as PickupPointSelection | null,
+    areaError: "",
     orderTotal: 0,
     counts: { pending: 0, active: 0, ready: 0, afterSale: 0 } as OrderCounts,
   },
@@ -37,7 +38,7 @@ Page({
     loadCoordinator.show();
     areaCoordinator.show();
     actionCoordinator.activate();
-    this.setData({ area: null, pickupPoint: null });
+    this.setData({ area: null, pickupPoint: null, areaError: "" });
     void this.loadSummary();
     void this.loadArea();
   },
@@ -49,9 +50,15 @@ Page({
       this.setData({
         area: context.selected,
         pickupPoint: readPickupPointSelection(),
+        areaError: "",
       });
-    } catch {
-      if (areaCoordinator.isCurrent(loadGuard, customerAuth.captureSessionEpoch())) this.setData({ area: null, pickupPoint: readPickupPointSelection() });
+    } catch (error) {
+      if (areaCoordinator.isCurrent(loadGuard, customerAuth.captureSessionEpoch()))
+        this.setData({
+          area: null,
+          pickupPoint: null,
+          areaError: customerErrorMessage(error, "收货区域加载失败，请稍后重试"),
+        });
     }
   },
   async loadSummary() {
@@ -111,7 +118,7 @@ Page({
         return;
       }
       this.setData({
-        error: error instanceof Error ? error.message : "订单概览加载失败",
+        error: customerErrorMessage(error, "订单概览加载失败，请稍后重试"),
       });
     } finally {
       if (loadCoordinator.isCurrent(loadGuard, customerAuth.captureSessionEpoch())) this.setData({ loading: false });

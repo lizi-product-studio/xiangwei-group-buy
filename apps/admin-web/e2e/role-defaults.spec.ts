@@ -50,7 +50,7 @@ async function createStaff(
   await page.getByLabel("新密码", { exact: true }).fill("role default setup password");
   await page.getByLabel("确认新密码").fill("role default setup password");
   await page.getByRole("button", { name: "保存新密码" }).click();
-  return { context, page, failures };
+  return { context, page, failures, username };
 }
 
 test("五个内部角色仅加载其默认页与可见菜单，USER 被后台拒绝", async ({ browser, request }) => {
@@ -66,7 +66,7 @@ test("五个内部角色仅加载其默认页与可见菜单，USER 被后台拒
   expect(pickupResponse.status()).toBeLessThan(300);
   const point = (await pickupResponse.json()).data as { id: string };
   const matrix = [
-    ["SUPER_ADMIN", "系统设置", "商品管理"],
+    ["SUPER_ADMIN", "人员与权限", "商品管理"],
     ["OPERATOR", "运营工作台", "团期管理"],
     ["CUSTOMER_SERVICE", "售后与异常", "售后与异常"],
     ["FINANCE", "财务管理", "财务管理"],
@@ -75,9 +75,12 @@ test("五个内部角色仅加载其默认页与可见菜单，USER 被后台拒
   for (const [role, heading, menu] of matrix) {
     const session = await createStaff(browser, role, role === "PICKUP_MANAGER" ? [point.id] : []);
     await expect(session.page.getByRole("heading", { name: heading })).toBeVisible();
+    await expect(session.page.getByRole("button", { name: "打开账号菜单" })).toContainText(
+      role === "SUPER_ADMIN" ? `默认页 ${role}` : session.username,
+    );
     await expect(session.page.getByRole("menuitem", { name: menu })).toBeVisible();
     if (role !== "SUPER_ADMIN")
-      await expect(session.page.getByText("系统设置", { exact: true })).toHaveCount(0);
+      await expect(session.page.getByText("人员与权限", { exact: true })).toHaveCount(0);
     if (role === "PICKUP_MANAGER")
       await expect(session.page.getByText("商品管理", { exact: true })).toHaveCount(0);
     expect(session.failures).toEqual([]);

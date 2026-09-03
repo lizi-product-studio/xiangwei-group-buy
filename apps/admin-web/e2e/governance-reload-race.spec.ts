@@ -67,7 +67,8 @@ async function login(page: Page, username: string, password: string) {
 }
 
 async function logout(page: Page) {
-  await page.getByRole("button", { name: /退\s*出/ }).click();
+  await page.getByRole("button", { name: "打开账号菜单" }).click();
+  await page.getByRole("menuitem", { name: "退出登录" }).click();
   await expect(page.getByRole("button", { name: /登\s*录/ })).toBeVisible();
 }
 
@@ -150,7 +151,7 @@ test("治理和审计读取的同身份迟到响应不会覆盖最新 generation
   await login(page, account.username, account.password);
   await page.getByRole("menuitem", { name: "运营治理" }).click();
   await expect.poll(() => governanceCalls).toBe(1);
-  await page.getByRole("menuitem", { name: "系统设置" }).click();
+  await page.getByRole("menuitem", { name: "人员与权限" }).click();
   await page.getByRole("menuitem", { name: "运营治理" }).click();
   await expect(page.getByText("CURRENT-GOVERNANCE", { exact: true })).toBeVisible();
   const unknownRow = page
@@ -175,7 +176,7 @@ test("治理和审计读取的同身份迟到响应不会覆盖最新 generation
   });
   await page.getByRole("menuitem", { name: "审计记录" }).click();
   await expect.poll(() => auditCalls).toBe(1);
-  await page.getByRole("menuitem", { name: "系统设置" }).click();
+  await page.getByRole("menuitem", { name: "人员与权限" }).click();
   await page.getByRole("menuitem", { name: "审计记录" }).click();
   await expect(page.getByText("CURRENT_AUDIT", { exact: true })).toBeVisible();
   releaseAudit();

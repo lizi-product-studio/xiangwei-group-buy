@@ -1,4 +1,4 @@
-import { api } from "../../utils/api";
+import { api, customerAuth, customerErrorMessage } from "../../utils/api";
 import { formatMoney } from "../../utils/format";
 import {
   campaignPaidQuantity,
@@ -27,8 +27,10 @@ import {
   readPickupPointSelection,
   type PickupPointSelection,
 } from "../../utils/pickup-point";
+import { PageLoadCoordinator } from "../../utils/page-load-guard";
 
 let countdownTimer: number | null = null;
+const loadCoordinator = new PageLoadCoordinator();
 
 function deliveryCopy(plan: DeliveryPlanDto | null): {
   title: string;
@@ -57,6 +59,8 @@ function deliveryCopy(plan: DeliveryPlanDto | null): {
 
 Page({
   data: {
+    campaignId: "",
+    skuId: "",
     campaign: null as CampaignDto | null,
     product: null as CampaignDto["items"][number] | null,
     cutoffText: "",
@@ -86,12 +90,17 @@ Page({
       this.setData({ loading: false, error: "团期参数缺失" });
       return;
     }
+    this.setData({ campaignId: options.id, skuId: options.skuId ?? "" });
     void this.loadCampaign(options.id, options.skuId);
   },
 
   async loadCampaign(id: string, skuId?: string) {
+    const epoch = customerAuth.captureSessionEpoch();
+    const loadGuard = loadCoordinator.begin(epoch);
+    this.setData({ loading: true, error: "" });
     try {
       const campaign = await api.getCampaign(id);
+      if (!loadCoordinator.isCurrent(loadGuard, customerAuth.captureSessionEpoch())) return;
       const product =
         campaign.items.find((item) => item.skuId === skuId) ??
         campaign.items[0];
@@ -100,6 +109,7 @@ Page({
         loadServiceAreaContext(campaign.serviceAreaId),
         loadPickupPoints(campaign.serviceAreaId),
       ]);
+      if (!loadCoordinator.isCurrent(loadGuard, customerAuth.captureSessionEpoch())) return;
       const delivery = deliveryCopy(campaign.deliveryPlan);
       const campaignSoldQuantity = campaignPaidQuantity(campaign);
       const pickupPoint = campaign.pickupPoint ?? points.points.find(
@@ -132,15 +142,21 @@ Page({
       });
       this.startCountdown();
     } catch (error) {
-      this.setData({
-        error: error instanceof Error ? error.message : "团期加载失败",
-      });
+      if (loadCoordinator.isCurrent(loadGuard, customerAuth.captureSessionEpoch()))
+        this.setData({ error: customerErrorMessage(error, "团期加载失败，请稍后重试") });
     } finally {
-      this.setData({ loading: false });
+      if (loadCoordinator.isCurrent(loadGuard, customerAuth.captureSessionEpoch()))
+        this.setData({ loading: false });
     }
   },
 
+  retryLoad() {
+    if (this.data.campaignId)
+      void this.loadCampaign(this.data.campaignId, this.data.skuId || undefined);
+  },
+
   async onShow() {
+    loadCoordinator.show();
     this.setData({ cartCount: cartCount() });
     if (!this.data.campaign) return;
     try {
@@ -154,7 +170,12 @@ Page({
   },
 
   onUnload() {
+    loadCoordinator.unload();
     this.stopCountdown();
+  },
+
+  onHide() {
+    loadCoordinator.hide();
   },
 
   startCountdown() {

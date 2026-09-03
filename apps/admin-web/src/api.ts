@@ -548,7 +548,9 @@ export function adminErrorText(error: unknown): string {
   return "操作未完成，请检查填写内容后重试";
 }
 const TOKEN = "community-admin-token",
-  ROLES = "community-admin-roles";
+  ROLES = "community-admin-roles",
+  USER_ID = "community-admin-user-id",
+  USERNAME = "community-admin-username";
 const ALLOWED_STAFF_ROLES = new Set<StaffRole>([
   "SUPER_ADMIN",
   "OPERATOR",
@@ -569,8 +571,20 @@ export function isValidStaffRoles(value: unknown): value is StaffRole[] {
 }
 export const requiresLogin =
   import.meta.env.PROD || import.meta.env.VITE_AUTH_MODE === "bearer";
+export function hasValidAdminSession(
+  requireBearer: boolean,
+  token: string | null,
+  roles: readonly string[],
+  userId: string | null,
+  username: string | null,
+): boolean {
+  if (!requireBearer) return true;
+  return Boolean(token && roles.length > 0 && userId?.trim() && username?.trim());
+}
 export const auth = {
   token: () => localStorage.getItem(TOKEN),
+  userId: () => localStorage.getItem(USER_ID),
+  username: () => localStorage.getItem(USERNAME),
   roles: (): string[] => {
     try {
       const v = JSON.parse(localStorage.getItem(ROLES) ?? "[]");
@@ -584,13 +598,17 @@ export const auth = {
       return [];
     }
   },
-  save: (token: string, roles: string[]) => {
+  save: (token: string, roles: string[], userId?: string, username?: string) => {
     localStorage.setItem(TOKEN, token);
     localStorage.setItem(ROLES, JSON.stringify(roles));
+    if (userId) localStorage.setItem(USER_ID, userId);
+    if (username) localStorage.setItem(USERNAME, username);
   },
   clear: () => {
     localStorage.removeItem(TOKEN);
     localStorage.removeItem(ROLES);
+    localStorage.removeItem(USER_ID);
+    localStorage.removeItem(USERNAME);
   },
 };
 function headers(json = true): Record<string, string> {
@@ -654,29 +672,33 @@ const patch = <T>(path: string, body: unknown) =>
 export const api = {
   login: async (username: string, password: string) => {
     const v = await post<
-      | { nextAction: "LOGIN"; accessToken: string; roles: string[] }
-      | { nextAction: "CHANGE_PASSWORD"; passwordChangeToken: string; roles: string[] }
+      | { nextAction: "LOGIN"; accessToken: string; roles: string[]; userId: string }
+      | { nextAction: "CHANGE_PASSWORD"; passwordChangeToken: string; roles: string[]; userId: string }
     >(
       "/api/v1/auth/admin/login",
       { username, password },
     );
-    if (v.nextAction === "LOGIN") auth.save(v.accessToken, v.roles);
+    if (v.nextAction === "LOGIN") auth.save(v.accessToken, v.roles, v.userId, username.trim().toLowerCase());
     return v;
   },
-  completePasswordChange: async (passwordChangeToken: string, newPassword: string) => {
-    const v = await post<{ nextAction: "LOGIN"; accessToken: string; roles: string[] }>(
+  completePasswordChange: async (
+    passwordChangeToken: string,
+    newPassword: string,
+    username?: string,
+  ) => {
+    const v = await post<{ nextAction: "LOGIN"; accessToken: string; roles: string[]; userId: string }>(
       "/api/v1/auth/admin/complete-password-change",
       { passwordChangeToken, newPassword },
     );
-    auth.save(v.accessToken, v.roles);
+    auth.save(v.accessToken, v.roles, v.userId, username?.trim().toLowerCase());
     return v;
   },
   changeOwnPassword: (currentPassword: string, newPassword: string) =>
-    post<{ nextAction: "LOGIN"; accessToken: string; roles: string[] }>(
+    post<{ nextAction: "LOGIN"; accessToken: string; roles: string[]; userId: string }>(
       "/api/v1/admin/me/change-password",
       { currentPassword, newPassword },
     ).then((v) => {
-      auth.save(v.accessToken, v.roles);
+      auth.save(v.accessToken, v.roles, v.userId);
       return v;
     }),
   logout: () => post<void>("/api/v1/auth/logout"),

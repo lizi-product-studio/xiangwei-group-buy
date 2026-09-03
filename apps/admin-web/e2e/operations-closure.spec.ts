@@ -139,7 +139,7 @@ test("超管通过网页复核运输、发车、紧急纠正、订单详情和�
   await page.getByLabel("新密码", { exact: true }).fill("closure admin password");
   await page.getByLabel("确认新密码").fill("closure admin password");
   await page.getByRole("button", { name: "保存新密码" }).click();
-  await expect(page.getByRole("heading", { name: "系统设置" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "人员与权限" })).toBeVisible();
 
   await page.getByRole("menuitem", { name: "配送与到货" }).click();
   const planRow = page.getByRole("row").filter({ hasText: `网页运输验收 ${suffix}` });
