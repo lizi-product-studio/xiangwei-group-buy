@@ -1,5 +1,5 @@
 <view class="home">
-  <image class="home__gate" src="/assets/header-gate-ink.png" mode="aspectFit"/>
+  <image class="home__gate" src="/assets/header-gate-ink.jpg" mode="aspectFit"/>
   <view class="home-header">
     <view class="location" bindtap="openPickup">
       <text class="location__label">当前固定自提点⌄</text>
@@ -19,7 +19,7 @@
     </view>
   </view>
 
-  <view class="origin-story"><image class="origin-story__image" src="/assets/hero-sorghum-field.png" mode="aspectFill"/><view class="origin-story__cover"><text class="origin-story__eyebrow">时令之味</text><text class="origin-story__title">来自土地的朴实馈赠</text><view class="origin-story__rule"></view><text class="origin-story__note">按产季上架，安心之选</text></view></view>
+  <view class="origin-story"><image class="origin-story__image" src="/assets/hero-sorghum-field.jpg" mode="aspectFill"/><view class="origin-story__cover"><text class="origin-story__eyebrow">时令之味</text><text class="origin-story__title">来自土地的朴实馈赠</text><view class="origin-story__rule"></view><text class="origin-story__note">按产季上架，安心之选</text></view></view>
 
   <view class="section-head"><view><text class="section-head__title">{{activeCategory === '全部' ? '正在收单' : activeCategory}}</text><text class="section-head__count">{{campaigns.length}} 件商品可加入本期订单</text></view><text class="section-head__rule" bindtap="openOrders">我的订单 ›</text></view>
   <view wx:if="{{loading}}" class="state-card">正在加载本期商品…</view>

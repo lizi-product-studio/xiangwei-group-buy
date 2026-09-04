@@ -34,7 +34,12 @@
   },
   "simulatorPluginLibVersion": {},
   "packOptions": {
-    "ignore": [],
+    "ignore": [
+      {
+        "type": "file",
+        "value": "assets/mini-program-avatar-helin.png"
+      }
+    ],
     "include": []
   },
   "editorSetting": {}
