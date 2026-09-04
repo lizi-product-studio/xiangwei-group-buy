@@ -1,5 +1,5 @@
 import { PRIVACY_NOTICE_VERSION } from "../config/legal";
-import { isLocalDemoDeployment } from "../config/deployment";
+import { isDemoDeployment, isLocalDemoDeployment } from "../config/deployment";
 import { clearAuthIntent, clearCancelReturnSuppression } from "./auth-intent";
 
 const app = getApp<IAppOption>();
@@ -32,7 +32,7 @@ const PRIVACY_CONSENT_VERSION_KEY = "hometown-privacy-notice-version";
 const hasDemoCustomerSession = (): boolean =>
   wx.getStorageSync<boolean>(DEMO_CUSTOMER_SESSION_KEY) === true;
 const isDemoLoginAvailable = (): boolean =>
-  isLocalDemoDeployment(app.globalData);
+  isDemoDeployment(app.globalData);
 
 /**
  * A 401 is a navigation event, not a reason to silently repeat a request.
@@ -72,9 +72,13 @@ export function customerErrorMessage(
     TECHNICAL_ERROR_PATTERN.test(message) ||
     INTERNAL_CODE_PATTERN.test(message)
   ) {
-    return isLocalDemoDeployment(app.globalData)
-      ? "本地服务未启动，请在项目根目录运行 pnpm dev 后重试"
-      : fallback;
+    if (isLocalDemoDeployment(app.globalData)) {
+      return "本地服务未启动，请在项目根目录运行 pnpm dev 后重试";
+    }
+    if (isDemoDeployment(app.globalData)) {
+      return "服务暂时不可用，请稍后重试";
+    }
+    return fallback;
   }
   return message;
 }

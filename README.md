@@ -40,7 +40,9 @@ pnpm dev:admin
 
 运营后台：`http://127.0.0.1:5173`
 
-小程序：在微信开发者工具中导入 `apps/miniprogram`。本地 API 默认地址为 `http://127.0.0.1:3100`。
+小程序：在微信开发者工具中导入 `apps/miniprogram`。开发者工具的 `develop` 环境默认访问共享开发 API `http://180.76.100.156`，无需先启动本地 API 即可预览首页。
+
+如需本地联调，可将 `apps/miniprogram/src/config/deployment.local.example.ts` 复制为被 gitignore 的 `apps/miniprogram/src/config/deployment.local.ts`，并保留 `development = { mode: 'local' }`，再在项目根目录运行 `pnpm dev`。该切换只对 `develop/local` 的开发体验登录生效；`trial/release` 仍必须使用备案 HTTPS 域名、真实微信登录和已审核模板配置，不能填 HTTP 地址或固定凭据。
 
 如需使用 MySQL 与 Redis：
 

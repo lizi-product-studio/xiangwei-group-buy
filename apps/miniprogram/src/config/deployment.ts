@@ -10,6 +10,7 @@ export interface MiniProgramDeployment {
 
 type DeploymentKey = 'develop' | 'local' | 'trial' | 'release';
 type ReleaseDeployments = Partial<Record<'trial' | 'release', MiniProgramDeployment>>;
+type DevelopmentMode = 'remote' | 'local';
 
 /**
  * CI or the pre-upload step generates this gitignored module from release secrets.
@@ -17,31 +18,69 @@ type ReleaseDeployments = Partial<Record<'trial' | 'release', MiniProgramDeploym
  * never silently be uploaded.
  */
 let releaseDeployments: ReleaseDeployments = {};
-try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports -- this optional file is generated only in the secure upload workspace.
-  const generated = require('./deployment.local') as { deployments?: ReleaseDeployments };
-  releaseDeployments = generated.deployments ?? {};
-} catch {
-  // Development does not need a production deployment file.
+let developmentMode: DevelopmentMode = 'remote';
+let developmentConfigInvalid = false;
+
+export function isMissingOptionalDeploymentModule(error: unknown): boolean {
+  if (!error || typeof error !== 'object' || !('code' in error) || error.code !== 'MODULE_NOT_FOUND') {
+    return false;
+  }
+  const message = 'message' in error && typeof error.message === 'string' ? error.message : '';
+  return /Cannot find module ['"]\.\/deployment\.local['"]/.test(message);
 }
 
-const develop: MiniProgramDeployment = {
+if (typeof require === 'function') {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- this optional file is generated only in the secure upload workspace.
+    const generated = require('./deployment.local') as {
+      deployments?: ReleaseDeployments;
+      development?: { mode?: DevelopmentMode };
+    };
+    releaseDeployments = generated.deployments ?? {};
+    const configuredDevelopmentMode = generated.development?.mode;
+    if (configuredDevelopmentMode === undefined) {
+      developmentMode = 'remote';
+    } else if (configuredDevelopmentMode === 'local' || configuredDevelopmentMode === 'remote') {
+      developmentMode = configuredDevelopmentMode;
+    } else {
+      developmentConfigInvalid = true;
+    }
+  } catch (error) {
+    if (!isMissingOptionalDeploymentModule(error)) developmentConfigInvalid = true;
+  }
+}
+
+const remoteDevelop: MiniProgramDeployment = {
+  apiBaseUrl: 'http://180.76.100.156',
+  authMode: 'demo',
+  subscriptionTemplates: [],
+  demoLoginEnabled: true,
+};
+const localDevelop: MiniProgramDeployment = {
   apiBaseUrl: 'http://127.0.0.1:3100',
   authMode: 'demo',
   subscriptionTemplates: [],
   demoLoginEnabled: true,
 };
+const develop = developmentMode === 'local' ? localDevelop : remoteDevelop;
 
 const LOCAL_HTTP_HOST = /^http:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?(?:\/|$)/i;
+const REMOTE_DEMO_HTTP_HOST = /^http:\/\/180\.76\.100\.156(?:\/|$)/i;
 
-export function isLocalDemoDeployment(
+export function isDemoDeployment(
   deployment: Pick<MiniProgramDeployment, 'apiBaseUrl' | 'authMode' | 'demoLoginEnabled'>,
 ): boolean {
   return (
     deployment.authMode === 'demo' &&
     deployment.demoLoginEnabled === true &&
-    LOCAL_HTTP_HOST.test(deployment.apiBaseUrl)
+    (LOCAL_HTTP_HOST.test(deployment.apiBaseUrl) || REMOTE_DEMO_HTTP_HOST.test(deployment.apiBaseUrl))
   );
+}
+
+export function isLocalDemoDeployment(
+  deployment: Pick<MiniProgramDeployment, 'apiBaseUrl' | 'authMode' | 'demoLoginEnabled'>,
+): boolean {
+  return isDemoDeployment(deployment) && LOCAL_HTTP_HOST.test(deployment.apiBaseUrl);
 }
 
 export function resolveDeployment(environment: string): MiniProgramDeployment {
@@ -49,7 +88,10 @@ export function resolveDeployment(environment: string): MiniProgramDeployment {
     throw new Error('未知的小程序运行环境，已拒绝启动');
   }
   const key: DeploymentKey = environment;
-  const deployment = key === 'develop' || key === 'local' ? develop : releaseDeployments[key];
+  if (developmentConfigInvalid && (key === 'develop' || key === 'local')) {
+    throw new Error('开发环境 deployment.local.ts 配置无效，已拒绝启动');
+  }
+  const deployment = key === 'develop' ? develop : key === 'local' ? localDevelop : releaseDeployments[key];
   const host = deployment?.apiBaseUrl.match(/^https:\/\/([^/:?#]+)/i)?.[1]?.toLowerCase() ?? '';
   const isPlaceholderHost = host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.example.com') || host.endsWith('.example.org') || host.endsWith('.example.net') || host === 'example.invalid' || host.endsWith('.example.invalid') || host.endsWith('.invalid');
   const hasPlaceholderTemplate = deployment?.subscriptionTemplates.some((item) => !item.templateId.trim() || /(?:example|approved-(?:trial|release)-)/i.test(item.templateId)) ?? true;
@@ -64,6 +106,6 @@ export function resolveDeployment(environment: string): MiniProgramDeployment {
     ...deployment,
     // The capability is a build/runtime decision made here. A release or
     // trial config can never opt into demo auth even if its object is edited.
-    demoLoginEnabled: (key === 'develop' || key === 'local') && isLocalDemoDeployment(deployment),
+    demoLoginEnabled: (key === 'develop' || key === 'local') && isDemoDeployment(deployment),
   };
 }

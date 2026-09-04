@@ -31,6 +31,7 @@ describe('mini-program bootstrap environment fail-closed', () => {
     const registerApp = await bootstrap({ miniProgram: { envVersion: 'develop' } });
     expect(registerApp).toHaveBeenCalledWith(expect.objectContaining({
       globalData: expect.objectContaining({
+        apiBaseUrl: 'http://180.76.100.156',
         authMode: 'demo',
         demoLoginEnabled: true,
       }),

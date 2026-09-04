@@ -39,6 +39,8 @@ describe("development demo auth guard", () => {
 
   it.each([
     ["HTTPS", "https://127.0.0.1:3100", true],
+    ["unapproved HTTP", "http://unapproved.example.test", true],
+    ["remote demo with explicit port", "http://180.76.100.156:9999", true],
     ["demo capability disabled", "http://127.0.0.1:3100", false],
   ])("does not create a demo session for %s", async (_label, apiBaseUrl, enabled) => {
     const { customerAuth } = await loadApi({ apiBaseUrl, demoLoginEnabled: enabled });
@@ -49,7 +51,7 @@ describe("development demo auth guard", () => {
     expect(storage.has("hometown-privacy-notice-version")).toBe(false);
   });
 
-  it("allows demo auth only for local HTTP and does not let stored state bypass the guard", async () => {
+  it("allows demo auth for the approved remote develop HTTP target and does not let stored state bypass the guard", async () => {
     const { api, customerAuth, app, request } = await loadApi();
     await expect(customerAuth.login(PRIVACY_NOTICE_VERSION)).resolves.toBeUndefined();
     expect(customerAuth.isLoggedIn()).toBe(true);
@@ -59,6 +61,12 @@ describe("development demo auth guard", () => {
     expect(customerAuth.isLoggedIn()).toBe(false);
     await expect(api.listOrders()).rejects.toThrow("当前环境未启用开发登录");
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it("allows an explicitly configured shared remote demo target", async () => {
+    const { customerAuth } = await loadApi({ apiBaseUrl: "http://180.76.100.156" });
+    await expect(customerAuth.login(PRIVACY_NOTICE_VERSION)).resolves.toBeUndefined();
+    expect(customerAuth.isLoggedIn()).toBe(true);
   });
 
   it("requires the current privacy version before writing any session state", async () => {

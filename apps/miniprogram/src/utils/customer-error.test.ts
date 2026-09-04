@@ -38,6 +38,13 @@ describe("consumer-safe request errors", () => {
     expect(message).not.toMatch(/503|https?:\/\//);
   });
 
+  it("uses a remote-service recovery message for the shared develop demo", async () => {
+    const { customerErrorMessage } = await load({ apiBaseUrl: "http://180.76.100.156" });
+    expect(customerErrorMessage(new Error("HTTP 503 http://180.76.100.156/api/v1/campaigns"))).toBe(
+      "服务暂时不可用，请稍后重试",
+    );
+  });
+
   it("keeps safe business conflicts readable", async () => {
     const { customerErrorMessage } = await load();
     expect(customerErrorMessage(new Error("当前团期已截单"), "当前操作暂不可用，请刷新后重试")).toBe(
