@@ -29,7 +29,13 @@ describe('secure mini-program deployment configuration', () => {
 
   it('distinguishes a missing optional file from a broken dependency inside it', () => {
     expect(isMissingOptionalDeploymentModule({ code: 'MODULE_NOT_FOUND', message: "Cannot find module './deployment.local'" })).toBe(true);
+    expect(isMissingOptionalDeploymentModule({ message: "module './deployment.local' is not defined in runtime" })).toBe(true);
+    expect(isMissingOptionalDeploymentModule({ errMsg: 'module "./deployment.local" not found' })).toBe(true);
+    expect(isMissingOptionalDeploymentModule("module './deployment.local' is not defined in runtime")).toBe(true);
+    expect(isMissingOptionalDeploymentModule("Cannot find module './deployment.local.ts'")).toBe(true);
+    expect(isMissingOptionalDeploymentModule({ message: "module 'config/deployment.local.js' is not defined, require args is './deployment.local'" })).toBe(true);
     expect(isMissingOptionalDeploymentModule({ code: 'MODULE_NOT_FOUND', message: "Cannot find module './private-secrets'" })).toBe(false);
+    expect(isMissingOptionalDeploymentModule({ code: 'MODULE_NOT_FOUND', message: "Cannot find module './private-secrets'", stack: 'required by ./deployment.local' })).toBe(false);
     expect(isMissingOptionalDeploymentModule(new Error('syntax error'))).toBe(false);
   });
 

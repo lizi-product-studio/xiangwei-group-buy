@@ -22,11 +22,23 @@ let developmentMode: DevelopmentMode = 'remote';
 let developmentConfigInvalid = false;
 
 export function isMissingOptionalDeploymentModule(error: unknown): boolean {
-  if (!error || typeof error !== 'object' || !('code' in error) || error.code !== 'MODULE_NOT_FOUND') {
+  if (!error) {
     return false;
   }
-  const message = 'message' in error && typeof error.message === 'string' ? error.message : '';
-  return /Cannot find module ['"]\.\/deployment\.local['"]/.test(message);
+  const record = typeof error === 'object' ? error as Record<string, unknown> : undefined;
+  const code = record?.code;
+  if (code !== undefined && code !== 'MODULE_NOT_FOUND') return false;
+  const details = [
+    ...(record ? ['message', 'errMsg', 'moduleName', 'path'].map((key) => typeof record[key] === 'string' ? record[key] : '') : []),
+    typeof error === 'string' ? error : String(error),
+  ]
+    .filter(Boolean)
+    .join(' ');
+  // Node reports "Cannot find module", while the WeChat module runtime uses
+  // forms such as "module './deployment.local' is not defined in runtime".
+  // Match the missing optional module itself, never a dependency mentioned by
+  // a nested MODULE_NOT_FOUND error.
+  return /(?:cannot find module\s+['"]?[^'"\s]*deployment\.local(?:\.(?:ts|js))?['"]?|module\s+['"]?[^'"\s]*deployment\.local(?:\.(?:ts|js))?['"]?\s+(?:is\s+)?(?:not defined|not found|does not exist))/i.test(details);
 }
 
 if (typeof require === 'function') {
