@@ -38,6 +38,22 @@
       {
         "type": "file",
         "value": "assets/mini-program-avatar-helin.png"
+      },
+      {
+        "type": "suffix",
+        "value": ".test.ts"
+      },
+      {
+        "type": "suffix",
+        "value": ".spec.ts"
+      },
+      {
+        "type": "suffix",
+        "value": ".test.js"
+      },
+      {
+        "type": "suffix",
+        "value": ".spec.js"
       }
     ],
     "include": []
