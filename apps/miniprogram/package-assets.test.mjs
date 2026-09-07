@@ -54,7 +54,7 @@ describe('mini-program upload package assets', () => {
 
   it('uses optimized home artwork while preserving transparent category icons', () => {
     const homeMarkup = readFileSync(join(sourceRoot, 'pages/home/index.wxml'), 'utf8');
-    const largeArtwork = ['header-gate-ink.jpg', 'hero-sorghum-field.jpg'];
+    const largeArtwork = ['hero-sorghum-field.jpg'];
     const categoryIcons = [
       'category-icon-leaf.png',
       'category-icon-grain.png',
@@ -67,7 +67,8 @@ describe('mini-program upload package assets', () => {
       expect(homeMarkup).toContain(`/assets/${filename}`);
       expect(statSync(join(sourceRoot, 'assets', filename)).size).toBeLessThan(150 * 1024);
     }
-    expect(homeMarkup).not.toContain('/assets/header-gate-ink.png');
+    // The approved redesign removes the decorative gate from the homepage.
+    expect(homeMarkup).not.toContain('/assets/header-gate-ink.');
     expect(homeMarkup).not.toContain('/assets/hero-sorghum-field.png');
 
     for (const filename of categoryIcons) {

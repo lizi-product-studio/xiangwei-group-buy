@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { loadServiceAreaContext } from '../../utils/service-area';
+import { readPickupPointSelection } from '../../utils/pickup-point';
 
 type HomePage = {
   data: Record<string, unknown>;
@@ -109,4 +111,23 @@ describe('home remote-service recovery', () => {
     expect(page.data.campaigns).toHaveLength(1);
     expect(page.data.loading).toBe(false);
   });
+  it('distinguishes unavailable service from a selected point awaiting its next campaign', async () => {
+    listCampaigns.mockResolvedValue([]);
+    vi.mocked(loadServiceAreaContext).mockResolvedValueOnce({ areas: [], selected: null });
+    vi.mocked(readPickupPointSelection).mockReturnValueOnce(null);
+    const page = await loadPage();
+    await page.loadCampaigns.call(page);
+    expect(page.data.availableAreaCount).toBe(0);
+    expect(page.data.area).toBeNull();
+    expect(page.data.pickupPoint).toBeNull();
+
+    const area = { id: 'area-1', name: '示例区域', regionCode: 'CN-1', orderEnabled: true } as ServiceAreaDto;
+    vi.mocked(loadServiceAreaContext).mockResolvedValueOnce({ areas: [area], selected: area });
+    await page.loadCampaigns.call(page);
+    expect(page.data.availableAreaCount).toBe(1);
+    expect(page.data.allProducts).toEqual([]);
+    expect(page.data.deliveryText).toBe('本期好物正在筹备，开团后即可选购');
+    expect(page.data.pickupPoint).toMatchObject({ id: 'point-1' });
+  });
+
 });

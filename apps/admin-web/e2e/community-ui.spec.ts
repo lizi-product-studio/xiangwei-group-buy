@@ -224,7 +224,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
     .click({ position: { x: 120, y: 100 } });
   await expect(page.getByText(/位置核验暂时不可用/)).toBeVisible();
   await expect(
-    page.locator('.ant-modal:visible button[type="submit"]'),
+    page.getByRole("dialog", { name: "新增自提点" }).locator('button[type="submit"]'),
   ).toBeDisabled();
   expect(pickupPointWrites).toBe(0);
   await page.unroute("**/api/v1/admin/geo/reverse?**");
@@ -251,14 +251,14 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   });
   allowExpectedLocationVerificationFailure = false;
   await page.getByRole("button", { name: "重试核验" }).click();
-  await expect(page.getByText("已定位，可拖动图钉微调")).toBeVisible();
+  await expect(page.getByText("所选位置已完成本次核验；可拖动图钉重新调整")).toBeVisible();
   await expect(page.getByText(/地图图钉坐标（只读确认）/)).toBeVisible();
   await page.locator(".leaflet-tile").first().evaluate((tile) => {
     tile.dispatchEvent(new Event("error"));
   });
   await expect(page.getByText(/地图暂时不可用/)).toBeVisible();
   await expect(
-    page.locator('.ant-modal:visible button[type="submit"]'),
+    page.getByRole("dialog", { name: "新增自提点" }).locator('button[type="submit"]'),
   ).toBeDisabled();
   expect(pickupPointWrites).toBe(0);
   await page.getByRole("button", { name: "重试地图" }).click();
@@ -267,12 +267,12 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
     .click({ position: { x: 120, y: 100 } });
   await expect(page.getByText(/地图暂时不可用/)).toHaveCount(0);
   await expect(
-    page.locator('.ant-modal:visible button[type="submit"]'),
+    page.getByRole("dialog", { name: "新增自提点" }).locator('button[type="submit"]'),
   ).toBeEnabled();
   await page.getByLabel("营业时间").fill("每日 08:30–21:00");
   await page.getByLabel("领取提示").fill("请从南门进入并出示领取码");
   await page
-    .locator('.ant-modal:visible button[type="submit"]')
+    .getByRole("dialog", { name: "新增自提点" }).locator('button[type="submit"]')
     .click();
   await expect(page.getByText(reviewPointName)).toBeVisible();
   expect(pickupPointWrites).toBe(1);
@@ -324,9 +324,9 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   await page
     .getByRole("application", { name: "自提点地图，点击或拖动图钉选择实际位置" })
     .click({ position: { x: 120, y: 100 } });
-  await expect(page.getByText("已定位，可拖动图钉微调")).toBeVisible();
+  await expect(page.getByText("所选位置已完成本次核验；可拖动图钉重新调整")).toBeVisible();
   allowExpectedPickupDuplicate = true;
-  await page.locator('.ant-modal:visible button[type="submit"]').click();
+  await page.getByRole("dialog", { name: "新增自提点" }).locator('button[type="submit"]').click();
   const duplicateConfirmDialog = page.getByRole("dialog", { name: "发现疑似重复自提点" });
   await expect(duplicateConfirmDialog).toBeVisible();
   allowExpectedPickupDuplicate = false;

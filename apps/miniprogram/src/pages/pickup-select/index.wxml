@@ -1,33 +1,33 @@
-<view class="pickup-page">
-  <view class="pickup-page__intro">
-    <text>选择收货区域</text>
-    <text>先选择您方便领取货物的区县和固定自提点。下单前即可看到本团可用的自提点；预计到货时间会在订单中持续更新。</text>
+<view class="ui-view pickup-page">
+  <view class="ui-view pickup-page__intro">
+    <text class="ui-text">选择收货区域</text>
+    <text class="ui-text">先选择您方便领取货物的区县和固定自提点。下单前即可看到本团可用的自提点；预计到货时间会在订单中持续更新。</text>
   </view>
 
-  <view wx:if="{{areas.length > 1}}" class="area-group">
-    <view wx:for="{{areas}}" wx:key="id" class="point-row {{selectedAreaId === item.id ? 'point-row--selected' : ''}}" data-id="{{item.id}}" bindtap="chooseArea">
-      <view class="point-row__pin">区</view><view class="point-row__copy"><text>{{item.name}}</text></view><text class="point-row__check">{{selectedAreaId === item.id ? '当前区域' : '切换'}}</text>
+  <view wx:if="{{areas.length > 1}}" class="ui-view area-group">
+    <view wx:for="{{areas}}" wx:key="id" class="ui-view point-row {{selectedAreaId === item.id ? 'point-row--selected' : ''}}" data-id="{{item.id}}" bindtap="chooseArea">
+      <view class="ui-view point-row__pin"><image class="ui-image point-row__asset" src="/assets/location-green.png" mode="aspectFit"/></view><view class="ui-view point-row__copy"><text class="ui-text">{{item.name}}</text></view><text class="ui-text point-row__check">{{selectedAreaId === item.id ? '当前区域' : '切换'}}</text>
     </view>
   </view>
 
-  <view wx:if="{{loading}}" class="state-card">正在加载已开放的收货区域…</view>
-  <view wx:elif="{{error}}" class="state-card state-card--error">
-    <text>{{error}}</text>
-    <button size="mini" bindtap="loadAreas">重新加载</button>
+  <view wx:if="{{loading}}" class="ui-view state-card">正在加载已开放的收货区域…</view>
+  <view wx:elif="{{error}}" class="ui-view state-card state-card--error">
+    <text class="ui-text">{{error}}</text>
+    <button class="ui-button state-card__action" bindtap="loadAreas">重新加载</button>
   </view>
-  <view wx:elif="{{!areas.length}}" class="state-card">
-    <text>当前区域暂未开放收单</text>
-    <text>您可以留下开通意向，平台会优先评估有稳定领取需求的地区。</text>
-    <button size="mini" class="ghost-button" bindtap="showInterest">登记开通意向</button>
+  <view wx:elif="{{!areas.length}}" class="ui-view state-card">
+    <text class="ui-text">当前区域暂未开放收单</text>
+    <text class="ui-text">您可以留下开通意向，平台会优先评估有稳定领取需求的地区。</text>
+    <button class="ui-button state-card__action" bindtap="showInterest">登记开通意向</button>
   </view>
 
-  <view wx:for="{{points}}" wx:key="id" class="area-group">
-    <view class="point-row {{selectedId === item.id ? 'point-row--selected' : ''}}" data-id="{{item.id}}" bindtap="choosePoint">
-      <view class="point-row__pin">点</view>
-      <view class="point-row__copy"><text>{{item.name}}</text><text>{{item.address}}</text><text wx:if="{{item.businessHours}}">营业时间：{{item.businessHours}}</text><text wx:if="{{item.pickupInstructions}}">领取提示：{{item.pickupInstructions}}</text><text wx:if="{{item.contactName || item.contactPhone}}">联系人：{{item.contactName || '点位负责人'}} {{item.contactPhone}}</text><view class="point-row__actions"><text data-id="{{item.id}}" catchtap="openLocation">一键导航</text><text data-id="{{item.id}}" catchtap="callPoint">拨打电话</text></view></view>
-      <text class="point-row__check">{{selectedId === item.id ? '已选择' : '选择'}}</text>
+  <view wx:for="{{points}}" wx:key="id" class="ui-view area-group">
+    <view class="ui-view point-row {{selectedId === item.id ? 'point-row--selected' : ''}}" data-id="{{item.id}}" bindtap="choosePoint">
+      <view class="ui-view point-row__pin"><image class="ui-image point-row__asset" src="/assets/location-green.png" mode="aspectFit"/></view>
+      <view class="ui-view point-row__copy"><text class="ui-text">{{item.name}}</text><text class="ui-text">{{item.address}}</text><text class="ui-text" wx:if="{{item.businessHours}}">营业时间：{{item.businessHours}}</text><text class="ui-text" wx:if="{{item.pickupInstructions}}">领取提示：{{item.pickupInstructions}}</text><text class="ui-text" wx:if="{{item.contactName || item.contactPhone}}">联系人：{{item.contactName || '点位负责人'}} {{item.contactPhone}}</text><view class="ui-view point-row__actions"><text class="ui-text" data-id="{{item.id}}" catchtap="openLocation">一键导航</text><text class="ui-text" data-id="{{item.id}}" catchtap="callPoint">拨打电话</text></view></view>
+      <text class="ui-text point-row__check">{{selectedId === item.id ? '已选择' : '选择'}}</text>
     </view>
   </view>
-  <view wx:if="{{!loading && areas.length && !points.length}}" class="state-card">当前区域暂无可用自提点，请选择其他区域或登记开通意向。</view>
-  <button wx:if="{{areas.length}}" class="interest-link" bindtap="showInterest">所在区县暂未开放？登记开通意向</button>
+  <view wx:if="{{!loading && areas.length && !points.length}}" class="ui-view state-card">当前区域暂无可用自提点，请选择其他区域或登记开通意向。</view>
+  <button wx:if="{{areas.length}}" class="ui-button interest-link" bindtap="showInterest">所在区县暂未开放？登记开通意向</button>
 </view>

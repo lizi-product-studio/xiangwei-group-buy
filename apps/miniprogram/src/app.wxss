@@ -1,21 +1,21 @@
 page {
-  --ink: #17263a;
-  --paper: #fffefb;
+  --ink: #23312d;
+  --paper: #fffefa;
   --brand: #f05232;
   --brand-soft: #fff0eb;
-  --success: #547b36;
-  --line: #ece9e1;
+  --success: #597a43;
+  --line: #e9e7df;
   min-height: 100%;
   color: var(--ink);
-  background: #faf9f4;
+  background: #faf8f2;
   font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 button { border-radius: 18rpx; }
 button::after { border: 0; }
-.primary-button { color: #fff; background: var(--brand); font-weight: 750; box-shadow: 0 10rpx 24rpx rgba(240,82,50,.16); }
+.primary-button { color: #fff; background: var(--brand); font-weight: 650; box-shadow: none; }
 .primary-button[disabled] { color: #fff; background: #f7aa9a; }
 .ghost-button { color: var(--ink); background: #fffefb; border: 1rpx solid var(--line); }
-.money { font-family: "DIN Alternate", Bahnschrift, sans-serif; font-weight: 750; }
+.money { font-family: "DIN Alternate", Bahnschrift, sans-serif; font-weight: 650; }
 .money::before { content: "¥"; margin-right: 3rpx; font-size: .65em; }
 .eyebrow { color: #7c8775; font-size: 20rpx; font-weight: 700; }
 .point-row__actions { display: flex; gap: 24rpx; margin-top: 5rpx; }
@@ -23,3 +23,7 @@ button::after { border: 0; }
 .receipt-row { display: flex; flex-direction: column; gap: 8rpx; margin-top: 16rpx; padding: 18rpx; color: #626a75; background: #f8f8f5; border-radius: 14rpx; font-size: 21rpx; line-height: 1.5; }
 .receipt-row text:first-child { color: var(--ink); font-size: 24rpx; font-weight: 700; }
 .cart-page { padding-bottom: calc(200rpx + env(safe-area-inset-bottom)) !important; }
+
+/* Shared visual foundation; scoped actions preserve each page's business guards. */
+.primary-button,.secondary-button {box-sizing:border-box;min-height:88rpx;border-radius:18rpx;font-size:28rpx;line-height:1.5;display:flex;align-items:center;justify-content:center;}
+.secondary-button {color:#597a43;background:#fffefa;border:1rpx solid #e9e7df;}

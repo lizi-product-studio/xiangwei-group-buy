@@ -1,9 +1,11 @@
-.legal-page { min-height: 100vh; padding: 24rpx; background: #faf9f4; box-sizing: border-box; }
+.legal-page { min-height: 100vh; padding: 24rpx; background: #faf8f2; box-sizing: border-box; }
 .legal-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 12rpx; margin-bottom: 20rpx; padding: 8rpx; background: #eef0eb; border-radius: 18rpx; }
 .legal-tab { margin: 0; padding: 16rpx 10rpx; color: #65706b; background: transparent; border-radius: 12rpx; font-size: 23rpx; line-height: 1.2; }
-.legal-tab--active { color: #17263a; background: #fffefb; font-weight: 750; box-shadow: 0 3rpx 10rpx rgba(23,38,58,.08); }
-.legal-card { padding: 32rpx 30rpx 44rpx; color: #5f6971; background: #fffefb; border: 1rpx solid #ece9e1; border-radius: 24rpx; font-size: 24rpx; line-height: 1.8; }
-.legal-card text { display: block; }
-.legal-title { color: #17263a; font-size: 34rpx; font-weight: 800; }
-.legal-meta { margin-top: 8rpx; color: #91999e; font-size: 19rpx; }
-.legal-heading { margin-top: 28rpx; color: #33443b; font-size: 26rpx; font-weight: 750; }
+.legal-tab--active { color: #23312d; background: #fffefa; font-weight:650; box-shadow: 0 3rpx 10rpx rgba(23,38,58,.08); }
+.legal-card { padding: 32rpx 30rpx 44rpx; color: #5f6971; background: #fffefa; border: 1rpx solid #e9e7df; border-radius: 24rpx; font-size: 24rpx; line-height: 1.8; }
+.legal-card .ui-text { display: block; }
+.legal-title { color: #23312d; font-size: 34rpx; font-weight:650; }
+.legal-meta { margin-top: 8rpx; color: #91999e; font-size:24rpx; }
+.legal-heading { margin-top: 28rpx; color: #33443b; font-size: 26rpx; font-weight:650; }
+
+.legal-page {padding:32rpx 40rpx calc(48rpx + env(safe-area-inset-bottom));}.legal-tabs {padding:0;gap:16rpx;background:transparent;}.legal-page .legal-tab {width:100%!important;box-sizing:border-box;margin:0!important;padding:20rpx 12rpx!important;line-height:1.5;font-size:24rpx;border:1rpx solid #e9e7df;background:#fffefa;border-radius:18rpx;}.legal-page .legal-tab--active {color:#f05232;border-color:#efab99;background:#fff0e9;box-shadow:none;}.legal-card {padding:26rpx 0;background:transparent;border:0;border-radius:0;font-size:26rpx;line-height:1.9;}.legal-title {font-size:38rpx;}.legal-meta {font-size:24rpx;}.legal-heading {font-size:28rpx;margin-top:32rpx;}

@@ -1,7 +1,7 @@
-<view class="messages-page">
-  <view class="reminder-card"><view><text>订单提醒</text><text>{{reminderText}}</text></view><button size="mini" loading="{{enabling}}" disabled="{{enableLabel === '仅站内提醒'}}" bindtap="enable">{{enableLabel}}</button></view>
-  <view wx:if="{{loading}}" class="state-card">正在加载消息…</view>
-  <view wx:elif="{{error}}" class="state-card state-card--error"><text>{{error}}</text><button wx:if="{{error === '登录后可查看订单消息'}}" size="mini" bindtap="openLogin">微信快捷登录</button><button wx:else size="mini" bindtap="load">重新加载</button></view>
-  <view wx:elif="{{!messages.length}}" class="state-card"><text>暂时没有订单消息</text><text>团期地点确认、发车或到货后，消息会出现在这里。</text></view>
-  <view wx:for="{{messages}}" wx:key="id" class="message-card {{item.readAt ? '' : 'message-card--unread'}}" data-id="{{item.id}}" data-order-id="{{item.orderId}}" bindtap="openOrder"><view><text>{{item.title}}</text><text>{{item.createdText}}</text></view><text>{{item.content}}</text><text class="message-card__link">查看订单 ›</text></view>
+<view class="ui-view messages-page">
+  <view class="ui-view reminder-card"><view class="ui-view"><text class="ui-text">订单提醒</text><text class="ui-text">{{reminderText}}</text></view><button class="ui-button {{enableLabel === '仅站内提醒' ? 'ui-disabled' : ''}}" size="mini" loading="{{enabling}}" disabled="{{enableLabel === '仅站内提醒'}}" bindtap="enable">{{enableLabel}}</button></view>
+  <view wx:if="{{loading}}" class="ui-view state-card">正在加载消息…</view>
+  <view wx:elif="{{error}}" class="ui-view state-card state-card--error"><text class="ui-text">{{error}}</text><button class="ui-button" wx:if="{{error === '登录后可查看订单消息'}}" size="mini" bindtap="openLogin">微信快捷登录</button><button class="ui-button" wx:else size="mini" bindtap="load">重新加载</button></view>
+  <view wx:elif="{{!messages.length}}" class="ui-view state-card"><text class="ui-text">暂时没有订单消息</text><text class="ui-text">团期地点确认、发车或到货后，消息会出现在这里。</text></view>
+  <view wx:for="{{messages}}" wx:key="id" class="ui-view message-card {{item.readAt ? '' : 'message-card--unread'}}" data-id="{{item.id}}" data-order-id="{{item.orderId}}" bindtap="openOrder"><view class="ui-view"><text class="ui-text">{{item.title}}</text><text class="ui-text">{{item.createdText}}</text></view><text class="ui-text">{{item.content}}</text><text class="ui-text message-card__link">查看订单 ›</text></view>
 </view>

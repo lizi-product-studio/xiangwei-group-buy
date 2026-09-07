@@ -16,16 +16,16 @@
     "pages/login/index"
   ],
   "window": {
-    "navigationBarBackgroundColor": "#fffefb",
+    "navigationBarBackgroundColor": "#fffefa",
     "navigationBarTextStyle": "black",
     "navigationBarTitleText": "乡味集",
-    "backgroundColor": "#faf9f4",
+    "backgroundColor": "#faf8f2",
     "backgroundTextStyle": "dark"
   },
   "tabBar": {
     "color": "#677281",
-    "selectedColor": "#ef5438",
-    "backgroundColor": "#fffefb",
+    "selectedColor": "#f05232",
+    "backgroundColor": "#fffefa",
     "borderStyle": "white",
     "list": [
       { "pagePath": "pages/home/index", "text": "团购", "iconPath": "assets/tab-home-default.png", "selectedIconPath": "assets/tab-home-active.png" },

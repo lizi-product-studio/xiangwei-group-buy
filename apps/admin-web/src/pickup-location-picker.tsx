@@ -126,6 +126,8 @@ export function PickupLocationPicker({
           return;
         }
         applyPlace(place, true);
+        setSearchError(null);
+        setOptions([]);
         setMapError(null);
         reportVerificationState("CONFIRMED");
       })
@@ -276,6 +278,13 @@ export function PickupLocationPicker({
     return () => window.clearTimeout(timer);
   }, [value, searchBias, disabled, searchRetry]);
 
+  const retrySearch = () => {
+    typingRef.current = true;
+    lastQueryRef.current = "";
+    setSearchError(null);
+    setSearchRetry((value) => value + 1);
+  };
+
   const located = latitude != null && longitude != null;
 
   return (
@@ -336,16 +345,20 @@ export function PickupLocationPicker({
         />
         <p className="pickup-map-hint">
           {located
-            ? "拖动图钉微调精确位置，自动回填经纬度"
-            : "输入地址后自动定位，也可直接在地图上点选"}
+            ? "拖动图钉微调位置，调整后会重新核验"
+            : "输入地址后请选择搜索候选，或在地图上点选"}
         </p>
       </div>
-      <Typography.Text type={located ? "secondary" : "danger"}>
+      <Typography.Text type="secondary">
         {searching
-          ? "正在定位…"
-          : located
-            ? "已定位，可拖动图钉微调"
-            : "请选择服务区域并填写详细地址，或在地图上点选"}
+          ? "正在搜索地点，请从候选中选择实际位置…"
+          : verificationState === "VERIFYING"
+            ? "正在核验所选位置，请稍候…"
+            : verificationState === "CONFIRMED"
+              ? "所选位置已完成本次核验；可拖动图钉重新调整"
+              : located
+                ? "图钉位置待核验，请确认后保存"
+                : "选择候选或地图位置后，系统将核验行政路径"}
       </Typography.Text>
       <div aria-live="polite">
         {configurationError ? (
@@ -357,7 +370,7 @@ export function PickupLocationPicker({
               onClick={() => {
                 setConfigurationError(false);
                 if (latitude != null && longitude != null) reverseAt(latitude, longitude);
-                else setSearchRetry((value) => value + 1);
+                else retrySearch();
               }}
             >
               重新检测
@@ -369,10 +382,7 @@ export function PickupLocationPicker({
             <Button
               type="link"
               size="small"
-              onClick={() => {
-                lastQueryRef.current = "";
-                setSearchRetry((value) => value + 1);
-              }}
+              onClick={retrySearch}
             >
               重试搜索
             </Button>

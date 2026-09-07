@@ -1,32 +1,32 @@
-<view class="legal-page">
-  <view class="legal-tabs" role="tablist">
-    <button class="legal-tab {{document === 'terms' ? 'legal-tab--active' : ''}}" data-document="terms" bindtap="selectDocument">用户服务协议</button>
-    <button class="legal-tab {{document === 'privacy' ? 'legal-tab--active' : ''}}" data-document="privacy" bindtap="selectDocument">隐私说明</button>
+<view class="ui-view legal-page">
+  <view class="ui-view legal-tabs" role="tablist">
+    <button class="ui-button legal-tab {{document === 'terms' ? 'legal-tab--active' : ''}}" data-document="terms" bindtap="selectDocument">用户服务协议</button>
+    <button class="ui-button legal-tab {{document === 'privacy' ? 'legal-tab--active' : ''}}" data-document="privacy" bindtap="selectDocument">隐私说明</button>
   </view>
 
-  <view wx:if="{{document === 'terms'}}" class="legal-card">
-    <text class="legal-title">用户服务协议</text>
-    <text class="legal-meta">版本：{{privacyVersion}}</text>
-    <text class="legal-heading">一、服务内容</text>
-    <text>“乡味集”提供团购商品浏览、下单支付、订单查询、固定自提点领取及售后服务。商品以团期页面、订单页展示的信息为准。</text>
-    <text class="legal-heading">二、下单与领取</text>
-    <text>下单前请确认团期、商品数量及固定自提点。支付成功后，平台按团期统一备货与配送；预计到货时间如有变化，将在订单和消息中心更新。到货后请凭有效取货码领取。</text>
-    <text class="legal-heading">三、退款与售后</text>
-    <text>未达到成团规则的订单将按团期规则原路退款。商品质量或履约问题请在订单可售后期间提交申请，平台会依据订单与商品信息处理。</text>
-    <text class="legal-heading">四、联系我们</text>
-    <text>如需帮助，请通过小程序“我的—客服”联系平台。平台会在合理期限内处理服务咨询与投诉。</text>
+  <view wx:if="{{document === 'terms'}}" class="ui-view legal-card">
+    <text class="ui-text legal-title">用户服务协议</text>
+    <text class="ui-text legal-meta">版本：{{privacyVersion}}</text>
+    <text class="ui-text legal-heading">一、服务内容</text>
+    <text class="ui-text">“乡味集”提供团购商品浏览、下单支付、订单查询、固定自提点领取及售后服务。商品以团期页面、订单页展示的信息为准。</text>
+    <text class="ui-text legal-heading">二、下单与领取</text>
+    <text class="ui-text">下单前请确认团期、商品数量及固定自提点。支付成功后，平台按团期统一备货与配送；预计到货时间如有变化，将在订单和消息中心更新。到货后请凭有效取货码领取。</text>
+    <text class="ui-text legal-heading">三、退款与售后</text>
+    <text class="ui-text">未达到成团规则的订单将按团期规则原路退款。商品质量或履约问题请在订单可售后期间提交申请，平台会依据订单与商品信息处理。</text>
+    <text class="ui-text legal-heading">四、联系我们</text>
+    <text class="ui-text">如需帮助，请通过小程序“我的—客服”联系平台。平台会在合理期限内处理服务咨询与投诉。</text>
   </view>
 
-  <view wx:else class="legal-card">
-    <text class="legal-title">隐私说明</text>
-    <text class="legal-meta">版本：{{privacyVersion}}</text>
-    <text class="legal-heading">一、我们处理哪些信息</text>
-    <text>为完成微信登录、下单、支付、固定自提点领取和售后，我们会处理微信授权产生的账号标识、订单信息和自提点选择。我们不会在登录时主动获取手机号。</text>
-    <text class="legal-heading">二、开通意向登记</text>
-    <text>当你主动登记区域开通意向时，我们会收集所在地区、联系人姓名和中国大陆手机号，仅用于评估该区域的服务需求及通知开通进展，不用于营销转售。</text>
-    <text class="legal-heading">三、保存与保护</text>
-    <text>我们按提供服务、处理售后和履行法定义务所需的期限保存信息，并采取访问权限和最小化展示措施保护信息。运营后台默认对手机号进行脱敏展示。</text>
-    <text class="legal-heading">四、你的权利与联系渠道</text>
-    <text>你可以在“开通意向”页面查看、直接更正尚未处理的意向或提交撤回；已进入处理的意向可通过“我的—客服”申请更正。撤回会停止后续开通联系，但不影响法律法规、争议处理或审计要求必须保留的记录。</text>
+  <view wx:else class="ui-view legal-card">
+    <text class="ui-text legal-title">隐私说明</text>
+    <text class="ui-text legal-meta">版本：{{privacyVersion}}</text>
+    <text class="ui-text legal-heading">一、我们处理哪些信息</text>
+    <text class="ui-text">为完成微信登录、下单、支付、固定自提点领取和售后，我们会处理微信授权产生的账号标识、订单信息和自提点选择。我们不会在登录时主动获取手机号。</text>
+    <text class="ui-text legal-heading">二、开通意向登记</text>
+    <text class="ui-text">当你主动登记区域开通意向时，我们会收集所在地区、联系人姓名和中国大陆手机号，仅用于评估该区域的服务需求及通知开通进展，不用于营销转售。</text>
+    <text class="ui-text legal-heading">三、保存与保护</text>
+    <text class="ui-text">我们按提供服务、处理售后和履行法定义务所需的期限保存信息，并采取访问权限和最小化展示措施保护信息。运营后台默认对手机号进行脱敏展示。</text>
+    <text class="ui-text legal-heading">四、你的权利与联系渠道</text>
+    <text class="ui-text">你可以在“开通意向”页面查看、直接更正尚未处理的意向或提交撤回；已进入处理的意向可通过“我的—客服”申请更正。撤回会停止后续开通联系，但不影响法律法规、争议处理或审计要求必须保留的记录。</text>
   </view>
 </view>

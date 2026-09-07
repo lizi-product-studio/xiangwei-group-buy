@@ -1,33 +1,33 @@
-<view class="login-page">
-  <view class="login-page__navigation" style="top: {{navigationTop}}px; height: {{navigationHeight}}px;">
-    <button class="login-page__back {{status === 'AUTHENTICATING' ? 'login-page__back--disabled' : ''}}" bindtap="cancel" disabled="{{status === 'AUTHENTICATING'}}" aria-label="返回">
-      <image class="login-page__back-icon" src="/assets/right-gray.png" mode="aspectFit" />
+<view class="ui-view login-page">
+  <view class="ui-view login-page__navigation" style="top: {{navigationTop}}px; height: {{navigationHeight}}px;">
+    <button class="ui-button {{status === 'AUTHENTICATING' ? 'ui-disabled' : ''}} login-page__back {{status === 'AUTHENTICATING' ? 'login-page__back--disabled' : ''}}" bindtap="cancel" disabled="{{status === 'AUTHENTICATING'}}" aria-label="返回">
+      <image class="ui-image login-page__back-icon" src="/assets/right-gray.png" mode="aspectFit" />
     </button>
   </view>
-  <image class="login-page__hero" src="/assets/login-market-hero.jpg" mode="widthFix" aria-hidden="true" />
-  <view class="login-page__intro">
-    <text class="login-page__brand">乡味集</text>
-    <text class="login-page__title">好味道，一起分享</text>
-    <text class="login-page__subtitle">登录后查看订单与取货信息</text>
+  <image class="ui-image login-page__hero" src="/assets/login-market-hero.jpg" mode="widthFix" aria-hidden="true" />
+  <view class="ui-view login-page__intro">
+    <text class="ui-text login-page__brand">乡味集</text>
+    <text class="ui-text login-page__title">好味道，一起分享</text>
+    <text class="ui-text login-page__subtitle">登录后查看订单与取货信息</text>
   </view>
-  <view class="login-page__actions">
+  <view class="ui-view login-page__actions">
     <checkbox-group bindchange="changePrivacy">
-      <label class="login-page__consent">
-        <checkbox class="login-page__checkbox" value="accepted" checked="{{privacyAccepted}}" disabled="{{status === 'AUTHENTICATING'}}" color="#547b36" aria-label="同意用户服务协议和隐私说明" />
-        <view class="login-page__consent-copy">我已阅读并同意<text class="login-page__legal" catchtap="openTerms">《用户服务协议》</text>和<text class="login-page__legal" catchtap="openPrivacy">《隐私说明》</text></view>
+      <label class="ui-label login-page__consent">
+        <checkbox class="ui-checkbox {{status === 'AUTHENTICATING' ? 'ui-disabled' : ''}} login-page__checkbox" value="accepted" checked="{{privacyAccepted}}" disabled="{{status === 'AUTHENTICATING'}}" color="#547b36" aria-label="同意用户服务协议和隐私说明" />
+        <view class="ui-view login-page__consent-copy">我已阅读并同意<text class="ui-text login-page__legal" catchtap="openTerms">《用户服务协议》</text>和<text class="ui-text login-page__legal" catchtap="openPrivacy">《隐私说明》</text></view>
       </label>
     </checkbox-group>
-    <text wx:if="{{privacyError}}" class="login-page__inline-error" role="alert">{{privacyError}}</text>
-    <view wx:if="{{error}}" class="login-page__error" role="alert">{{error}}</view>
-    <button class="login-page__button {{status === 'AUTHENTICATING' ? 'login-page__button--disabled' : ''}}" loading="{{status === 'AUTHENTICATING'}}" disabled="{{status === 'AUTHENTICATING'}}" bindtap="login">
-      <image wx:if="{{status !== 'AUTHENTICATING'}}" class="login-page__button-icon" src="/assets/wechat-white.png" mode="aspectFit" aria-hidden="true" />
-      <text>{{status === 'ERROR' ? '重新登录' : (status === 'AUTHENTICATING' ? '登录中…' : '微信快捷登录')}}</text>
+    <text wx:if="{{privacyError}}" class="ui-text login-page__inline-error" role="alert">{{privacyError}}</text>
+    <view wx:if="{{error}}" class="ui-view login-page__error" role="alert">{{error}}</view>
+    <button class="ui-button {{status === 'AUTHENTICATING' ? 'ui-disabled' : ''}} login-page__button {{status === 'AUTHENTICATING' ? 'login-page__button--disabled' : ''}}" loading="{{status === 'AUTHENTICATING'}}" disabled="{{status === 'AUTHENTICATING'}}" bindtap="login">
+      <image wx:if="{{status !== 'AUTHENTICATING'}}" class="ui-image login-page__button-icon" src="/assets/wechat-white.png" mode="aspectFit" aria-hidden="true" />
+      <text class="ui-text">{{status === 'ERROR' ? '重新登录' : (status === 'AUTHENTICATING' ? '登录中…' : '微信快捷登录')}}</text>
     </button>
-    <button class="login-page__cancel {{status === 'AUTHENTICATING' ? 'login-page__cancel--disabled' : ''}}" bindtap="cancel" disabled="{{status === 'AUTHENTICATING'}}">暂不登录，先逛逛</button>
-    <text class="login-page__privacy-note">仅确认微信身份，不获取手机号</text>
-    <view wx:if="{{demoLoginAvailable}}" class="login-page__dev-zone">
-      <text>仅本地开发环境 · 用于预览认证流程</text>
-      <button class="login-page__experience-button" loading="{{status === 'AUTHENTICATING'}}" disabled="{{status === 'AUTHENTICATING'}}" bindtap="experienceLogin">开发体验登录</button>
+    <button class="ui-button {{status === 'AUTHENTICATING' ? 'ui-disabled' : ''}} login-page__cancel {{status === 'AUTHENTICATING' ? 'login-page__cancel--disabled' : ''}}" bindtap="cancel" disabled="{{status === 'AUTHENTICATING'}}">暂不登录，先逛逛</button>
+    <text class="ui-text login-page__privacy-note">仅确认微信身份，不获取手机号</text>
+    <view wx:if="{{demoLoginAvailable}}" class="ui-view login-page__dev-zone">
+      <text class="ui-text">仅本地开发环境 · 用于预览认证流程</text>
+      <button class="ui-button {{status === 'AUTHENTICATING' ? 'ui-disabled' : ''}} login-page__experience-button" loading="{{status === 'AUTHENTICATING'}}" disabled="{{status === 'AUTHENTICATING'}}" bindtap="experienceLogin">开发体验登录</button>
     </view>
   </view>
 </view>

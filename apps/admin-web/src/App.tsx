@@ -16,6 +16,7 @@ import {
   DatePicker,
   Descriptions,
   Dropdown,
+  Drawer,
   Empty,
   Form,
   Input,
@@ -725,15 +726,17 @@ function Dashboard({
   points,
   campaigns,
   orders,
+  onNavigate,
 }: {
   areas: ServiceArea[];
   points: PickupPoint[];
   campaigns: Campaign[];
   orders: Order[];
+  onNavigate: (page: AdminPage) => void;
 }) {
   return (
     <>
-      <PageTitle title="运营工作台" subtitle="唯一社区团购主线的实时概览" />
+      <PageTitle title="运营工作台" subtitle="从团期到领取，查看当前运营与履约进度" />
       <div className="stats-grid">
         <Card>
           <Statistic
@@ -767,6 +770,30 @@ function Dashboard({
               ).length
             }
           />
+        </Card>
+      </div>
+      <div className="dashboard-grid">
+        <Card title="当前团期" extra={<Button type="link" onClick={() => onNavigate("campaigns")}>查看团期</Button>}>
+          {campaigns.filter((campaign) => !["COMPLETED", "CANCELLED"].includes(campaign.status)).length === 0
+            ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无进行中的团期，配置商品与自提点后即可创建" />
+            : <div className="dashboard-campaign-list">
+              {campaigns.filter((campaign) => !["COMPLETED", "CANCELLED"].includes(campaign.status)).slice(0, 5).map((campaign) => (
+                <div className="dashboard-campaign-row" key={campaign.id}>
+                  <div><strong>{campaign.title}</strong><span>截单 {dayjs(campaign.cutoffAt).format("MM-DD HH:mm")}</span></div>
+                  <Status value={campaign.status} />
+                </div>
+              ))}
+            </div>}
+        </Card>
+        <Card title="订单履约概览" extra={<Button type="link" onClick={() => onNavigate("orders")}>查看订单</Button>}>
+          <div className="dashboard-order-stages">
+            {[
+              { label: "已支付待截单", statuses: ["PAID_WAITING_CLOSE"] },
+              { label: "备货与运输", statuses: ["LOCKED", "ALLOCATING", "IN_TRANSIT"] },
+              { label: "待领取", statuses: ["READY_FOR_PICKUP"] },
+              { label: "退款处理中", statuses: ["REFUNDING"] },
+            ].map((stage) => <div key={stage.label}><span>{stage.label}</span><strong>{orders.filter((order) => stage.statuses.includes(order.status)).length}</strong></div>)}
+          </div>
         </Card>
       </div>
     </>
@@ -3192,13 +3219,23 @@ function Areas({
           </Button>
         </Form>
       </Modal>
-      <Modal
-        width={760}
+      <Drawer
+        width={600}
+        className="pickup-point-drawer"
         open={pointOpen}
         title={editingPoint ? "编辑自提点" : "新增自提点"}
-        footer={null}
+        footer={
+          <div className="pickup-point-drawer__footer">
+            <Button onClick={() => setPointOpen(false)}>取消</Button>
+            <Button type="primary" htmlType="submit" form="pickup-point-form"
+              loading={submitting}
+              disabled={submitting || isPickupLocationSubmissionBlocked(locationChangeRequired, locationVerification)}>
+              {editingPoint ? "保存修改" : "保存"}
+            </Button>
+          </div>
+        }
         destroyOnHidden
-        onCancel={() => {
+        onClose={() => {
           setPointOpen(false);
           setEditingPoint(null);
           setLocationChangeRequired(true);
@@ -3206,7 +3243,7 @@ function Areas({
         }}
       >
         <Typography.Paragraph type="secondary" className="modal-note">
-            先选择服务区域，再填详细地址或地点名称并确认地图图钉。联系人不用在这里填，在「人员与权限」创建点位负责人并授权自提点后会同步过来。
+            选择服务区域，搜索地址并确认实际位置。
         </Typography.Paragraph>
         {regionLoadError && (
           <Alert
@@ -3232,6 +3269,7 @@ function Areas({
           />
         )}
         <Form
+          id="pickup-point-form"
           form={pointForm}
           layout="vertical"
           onValuesChange={(changedValues, values) => {
@@ -3363,60 +3401,14 @@ function Areas({
               />
             </Form.Item>
           )}
-          <Form.Item label="行政目录">
-            <Input
-              value={
-                selectedServiceArea
-                  ? selectedRegion?.path ?? "该服务区域尚未映射到行政目录"
-                  : "请先选择服务区域"
-              }
-              readOnly
-              {...(selectedServiceArea && !selectedRegion
-                ? { status: "error" as const }
-                : {})}
-            />
-          </Form.Item>
-          <div className="form-grid" aria-label="只读行政目录">
-            <Form.Item label="省" htmlFor="pickup-readonly-province">
-              <Select
-                id="pickup-readonly-province"
-                value={selectedRegion?.provinceName}
-                options={
-                  selectedRegion
-                    ? [{ value: selectedRegion.provinceName, label: selectedRegion.provinceName }]
-                    : []
-                }
-                placeholder="请先选择服务区域"
-              />
-            </Form.Item>
-            <Form.Item label="市" htmlFor="pickup-readonly-city">
-              <Select
-                id="pickup-readonly-city"
-                value={selectedRegion?.cityName}
-                options={
-                  selectedRegion
-                    ? [{ value: selectedRegion.cityName, label: selectedRegion.cityName }]
-                    : []
-                }
-                placeholder="请先选择服务区域"
-              />
-            </Form.Item>
-            <Form.Item label="区" htmlFor="pickup-readonly-district">
-              <Select
-                id="pickup-readonly-district"
-                value={selectedRegion?.name}
-                options={
-                  selectedRegion
-                    ? [{ value: selectedRegion.name, label: selectedRegion.name }]
-                    : []
-                }
-                placeholder="请先选择服务区域"
-              />
-            </Form.Item>
+          <div className="pickup-region-summary" aria-label="行政目录">
+            <span>行政归属</span>
+            <strong>{selectedServiceArea ? selectedRegion?.path ?? "该服务区域尚未映射到行政目录" : "选择服务区域后显示"}</strong>
+            <details>
+              <summary>位置核验说明</summary>
+              <p>行政目录由服务区域唯一派生，仅核验本次坐标的行政路径相容性，不代表实际配送范围、门牌或可达性已确认。</p>
+            </details>
           </div>
-          <Typography.Paragraph type="secondary" className="modal-note">
-            行政目录由服务区域唯一派生，仅用于本次坐标的行政路径相容核验，不表示实际配送边界、门牌或可达性已证明。
-          </Typography.Paragraph>
           {!selectedServiceArea && (
             <Alert
               type="info"
@@ -3435,8 +3427,8 @@ function Areas({
               { required: true, min: 5, message: "请填写详细地址，或在地图上点选" },
               {
                 validator: async () => {
-                  if (pointLatitude == null || pointLongitude == null)
-                    throw new Error("请等待地图定位，或拖动图钉确认位置");
+                  if (pointForm.getFieldValue("latitude") == null || pointForm.getFieldValue("longitude") == null)
+                    throw new Error("请选择搜索候选或地图图钉，完成位置核验");
                 },
               },
             ]}
@@ -3504,19 +3496,8 @@ function Areas({
               />
             </Form.Item>
           )}
-          <Button
-            type="primary"
-            htmlType="submit"
-            loading={submitting}
-            disabled={submitting || isPickupLocationSubmissionBlocked(
-              locationChangeRequired,
-              locationVerification,
-            )}
-          >
-            {editingPoint ? "保存修改" : "保存"}
-          </Button>
         </Form>
-      </Modal>
+      </Drawer>
     </>
   );
 }
@@ -5255,7 +5236,7 @@ export function App() {
   const pageContent = mainPageLoadFailed ? (
     <PageLoadError page={currentPage} reload={reload} />
   ) : currentPage === "dashboard" ? (
-      <Dashboard {...{ areas, points, campaigns, orders }} />
+      <Dashboard {...{ areas, points, campaigns, orders }} onNavigate={setPage} />
     ) : currentPage === "products" ? (
       <Products values={skus} categories={categories} reload={reload} />
     ) : currentPage === "campaigns" ? (
@@ -5373,15 +5354,15 @@ export function App() {
       <Layout className="app-shell">
         <Sider
           className="app-sider"
-          width={248}
+          width={232}
           theme="light"
           breakpoint="md"
           collapsedWidth={0}
           collapsible
         >
           <div className="brand">
-            <strong>社区团购</strong>
-            <span>运营后台</span>
+            <strong>乡味集</strong>
+            <span>社区团购 · 运营管理</span>
           </div>
           <Menu
             mode="inline"
@@ -5453,7 +5434,7 @@ export function App() {
               )}
             </Space>
           </Header>
-          <Content className="content">{content}</Content>
+          <Content className="content" data-page={currentPage}>{content}</Content>
         </Layout>
       </Layout>
     </AntApp>
