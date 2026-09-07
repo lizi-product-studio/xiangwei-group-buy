@@ -54,3 +54,12 @@
 - root汇总：两端独立QA PASS + 实际视觉passed，允许发布负责人进行范围提交、非force远端同步、仅后台静态备份发布及后验。用户设计实施批准与当前持续部署授权沿用。
 - 提交范围限定39源码/测试文件与本记录、原型任务记录、design-qa.md；排除用户project.config.json、.codex和独立原型目录。保留用户资产原位。
 - API镜像/AMAP/DB不变；不上传微信、不发送消息、不创建真实业务记录。发布执行及SHA待回报。
+
+## 后台静态发布与最终后验
+
+- 本地UI提交 `4bf0adead82edb443ca051ed217b3dffaf95a60f`；GitHub提交 `260caafd4f8a8adedb1629af67e4975bf6d93c17`，两端tree均为 `6a99450ef1f958926bb74c05e7bdd1a67bb69837`。精确42文件，非force同步；用户project.config.json、.codex及prototypes未纳入。
+- 后台构建通过，9个静态文件双端及公网SHA一致，`hometown-admin-current`已原子指向 `/var/www/hometown-admin-260caaf`。首页SHA `6ff93b19f6ddc378d0e6e2ce0d9d28ec08da014df94b5d9354b39aaf7c0c6278`。
+- 旧静态完整归档已在本机和服务器保留，权限0600且可读，SHA `af3df45a5c5d678fdcd003634d41ad45e73aa3c17894f29f9733ae7e4ae148c8`。失败可原子将链接恢复至 `/var/www/hometown-admin-db1cf1c`，不恢复数据库。
+- 独立发布QA PASS：静态版本、备份与回滚、API健康、未认证401、旧入口410及配置/资金指纹后验通过。API容器ID、启动时间、镜像6507b32、AMAP及其他环境值、trial、资源和端口均未变；未reload Nginx、未重建API、未写业务数据。
+- 主线程Safari线上视觉未完整捕获，不能用HTTP与资产校验代替完整线上交互验收；此前本地/开发工具UI验证结论保留其原范围。本轮未执行微信上传或正式渠道发布。
+- 发布证据位于受限目录 `TASK-20260907-UI-IMPLEMENT/release/release-evidence.json`；GitHub同步摘要与原始ref/commit回读为同目录 `github-sync-evidence.json`。本段属于发布后的文档补记，不改变已运行静态版本。
