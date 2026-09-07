@@ -248,8 +248,8 @@ test("超管从网页创建员工，临时密码改密与撤权后的默认页�
   confirm = page.getByRole("dialog", { name: "确认恢复员工" });
   await confirm.getByLabel("操作原因").fill("完成交接后恢复");
   await confirm.getByRole("button", { name: "确认执行" }).click();
-  await staffRow.getByRole("button", { name: "发放新临时密码" }).click();
-  confirm = page.getByRole("dialog", { name: "发放新临时密码" });
+  await staffRow.getByRole("button", { name: "重置密码" }).click();
+  confirm = page.getByRole("dialog", { name: "重置密码" });
   await confirm.getByLabel("操作原因").fill("密码轮换");
   await confirm.getByRole("button", { name: "确认执行" }).click();
   const resetCredentialDialog = page.getByRole("dialog", { name: /临时密码/ });

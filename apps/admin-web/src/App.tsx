@@ -4774,7 +4774,10 @@ function Settings({
           },
           { title: "电话", dataIndex: "phone" },
           { title: "角色", render: (_, v) => displayLabel(v.role) },
-          { title: "点位数", render: (_, v) => v.pickupPointIds.length },
+          {
+            title: "管理自提点",
+            render: (_, v) => v.role === "SUPER_ADMIN" ? "全部" : v.role === "PICKUP_MANAGER" ? `${v.pickupPointIds.length}个` : "不适用",
+          },
           { title: "状态", render: (_, v) => <Status value={v.status} /> },
           {
             title: "操作",
@@ -4790,23 +4793,23 @@ function Settings({
                   >
                     恢复
                   </Button>
-                ) : (
+                ) : value.userId !== currentUserId ? (
                   <Button
                     danger
                     type="link"
-                    disabled={value.userId === currentUserId}
                     onClick={() => setSensitive({ staff: value, kind: "suspend" })}
                   >
                     停用
                   </Button>
+                ) : null}
+                {value.userId !== currentUserId && (
+                  <Button
+                    type="link"
+                    onClick={() => setSensitive({ staff: value, kind: "reset" })}
+                  >
+                    重置密码
+                  </Button>
                 )}
-                <Button
-                  type="link"
-                  disabled={value.userId === currentUserId}
-                  onClick={() => setSensitive({ staff: value, kind: "reset" })}
-                >
-                  发放新临时密码
-                </Button>
               </Space>
             ),
           },
@@ -4923,7 +4926,7 @@ function Settings({
       </Modal>
       <Modal
         open={Boolean(sensitive)}
-        title={sensitive?.kind === "reset" ? "发放新临时密码" : sensitive?.kind === "suspend" ? "确认停用员工" : "确认恢复员工"}
+        title={sensitive?.kind === "reset" ? "重置密码" : sensitive?.kind === "suspend" ? "确认停用员工" : "确认恢复员工"}
         footer={null}
         onCancel={() => setSensitive(null)}
         destroyOnHidden
