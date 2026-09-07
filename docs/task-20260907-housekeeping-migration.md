@@ -153,6 +153,20 @@ A 通过后停止旧 DB，保留旧容器、root_mysql_data 卷、媒体和密�
 - QA attempt 23 最终结论 PASS；P3 注释已 FIXED，仅该注释变化，其余 28 实施文件不变。新冻结 manifest SHA 17334c3371422a83e8ca5dcb54a89c539fa4c783157a0d7ab2bea75d603338b5；三份主线程文档一致性复核通过，可提交本批次，真实微信上线仍 BLOCKED。
 - 证据入口：受限备份目录中的 subscription-freeze-manifest.json、subscription-validation-evidence.json、subscription-check.log、subscription-real-integration.log、subscription-e2e.log 与 subscription-integration-evidence.json。没有真机截图/真实发送凭证，不能将本地通过记为渠道通过。
 
+#### C-TEMPLATE-CONFIG：复制文本落地
+
+- task_id：TASK-20260907-HOUSEKEEPING-REPLACE；route：BOUNDED_CHANGE（已验收逻辑上的本地配置小批次，无生产/渠道写入）；状态 COMPLETE（本地配置落地，独立 QA attempt 24 PASS；完整生产 preflight 未通过）。
+- confirmed：用户在来源任务提供五个完整模板 ID；主线程已读取原始用户消息。仅首条 Markdown 转义下划线规范化，其余字符原样。长度/字符集/唯一性初检通过，实际账号归属与平台接受仍未验证。
+- ownership：研发单写受限本地 deploy env 和 Git 忽略的小程序部署配置；主线程持有任务及模板文档；独立 QA 只读检查实际读回和定向验证证据。
+- acceptance：五 ID 与用户文本逐字符一致，后端五字段 schema 与前端七事件映射一致，HTTPS/微信登录及显式 trial 配置通过本地校验；既有凭据和用户文件保持，真实配置不进入 Git。
+- non_goals：不修改已验收业务逻辑、不重复全量业务测试、不切生产、不上传或实发、不访问受限微信后台、不猜测修正相似字符。
+- stop_conditions：发现已有配置冲突或需改凭据时只停相关写入并报告；ID 缺项或形态异常保留原文上报，不再要求用户提供已经收到的值。
+
+- 研发 attempt 24：两个实际配置逐字符读回、五模板七事件映射、字段契约、Git ignore 与 diff 检查通过；定向配置及 provider 测试 11/11 PASS。仅 trial 使用 HTTPS 和微信登录，release 保持拒绝启动，无 develop override。受限 env 原 16 个键值不变，原件已备份，两个配置均权限 600。脱敏证据：受限备份目录 `template-config-evidence.json`。
+- 完整生产 preflight 未通过：当前 deploy.env.incomplete 是 Compose 插值片段，不能直接作为 API runtime env；直接加载会落入 development/demo/mock 默认。完整运行层的数据源、队列、认证/支付 provider、HTTPS 及支付密钥容器路径尚须部署阶段组装验证。本批未猜测补入，不代表 API 或微信发送可用。
+
+- QA attempt 24 原始结论：PASS，仅限本地配置落地。完整生产 preflight 未通过，真实渠道 NOT_RUN。独立验证实际文件指纹/权限、五组 DATA/七事件、私有来源 ID 一致、原 16 键未变及 Git 忽略。原始用户消息与首条转义规范化由主线程确认，QA 未宣称独立读取用户原文。
+
 ### D：服务器旧家政资源清理（2026-09-07 用户追加）
 
 - confirmed：用户在查看系统盘占用后明确要求“旧的跟家政相关的全给我清了。只保留跟拼团有关的”。本阶段优先于 C 配置工作。
