@@ -1,3 +1,5 @@
+import { ProductImages } from './modules/media/product-images.js';
+import { registerProductImageRoutes } from './routes/product-image-routes.js';
 import { WechatApiPhoneExchange, type WechatPhoneExchange } from './modules/auth/wechat-phone.js';
 import type { OrderNotificationType } from './modules/core/types.js';
 import { randomUUID } from "node:crypto";
@@ -230,6 +232,8 @@ export async function buildApp(
   dependencies: AppDependencies,
 ): Promise<FastifyInstance> {
   const { config } = dependencies;
+  const productImages = new ProductImages(config.PRODUCT_IMAGE_DIR);
+  await productImages.initialize();
   const app = Fastify({
     logger:
       config.NODE_ENV === "test"
@@ -722,6 +726,7 @@ export async function buildApp(
     return { status: "ok", dependencies };
   });
 
+  registerProductImageRoutes(app, productImages);
   registerAuthRoutes(app, {
     authService,
     adminAuthService,
@@ -1328,6 +1333,7 @@ export async function buildApp(
   app.post("/api/v1/admin/catalog/skus", async (request, reply) => {
     const actor = requireActor(request, ["OPERATOR", "SUPER_ADMIN"]);
     const input = catalogSkuSchema.parse(request.body);
+    await productImages.validateReference(input.imageUrl);
     const { existing, value } = await store.transaction(
       async (transactionStore) => {
         const existing = input.id

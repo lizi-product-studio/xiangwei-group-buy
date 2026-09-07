@@ -99,8 +99,8 @@ Page({
             .map((item) => `${item.name} × ${item.quantity}`)
             .join("、"),
           imageUrl: firstSkuId
-            ? (imageMap.get(firstSkuId) ?? "/assets/product-rice-noodles.jpg")
-            : "/assets/product-rice-noodles.jpg",
+            ? (imageMap.get(firstSkuId) ?? "")
+            : "",
         };
       });
       cachedOrders = { epoch: loadGuard.epoch, generation: loadGuard.generation, items };

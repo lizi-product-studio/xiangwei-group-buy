@@ -16,7 +16,8 @@ RUN pnpm --filter @hometown/domain build && pnpm --filter @hometown/api-contract
 FROM node:22-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /workspace
-RUN addgroup -S hometown && adduser -S hometown -G hometown
+RUN addgroup -g 1001 -S hometown && adduser -u 1001 -S hometown -G hometown
+RUN mkdir -p /var/lib/hometown/product-images && chown hometown:hometown /var/lib/hometown/product-images
 COPY --from=build --chown=hometown:hometown /workspace/node_modules ./node_modules
 COPY --from=build --chown=hometown:hometown /workspace/apps/api/package.json ./apps/api/package.json
 COPY --from=build --chown=hometown:hometown /workspace/apps/api/node_modules ./apps/api/node_modules

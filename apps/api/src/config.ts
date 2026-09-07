@@ -1,3 +1,5 @@
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { assertSubscriptionData, subscriptionGroups } from './modules/notifications/subscription-templates.js';
 import { z } from "zod";
 import { BusinessError } from "@hometown/domain";
@@ -8,6 +10,7 @@ const configSchema = z.object({
     .default("development"),
   HOST: z.string().default("127.0.0.1"),
   PORT: z.coerce.number().int().min(1).max(65_535).default(3100),
+  PRODUCT_IMAGE_DIR: z.string().trim().min(1).default(join(homedir(), ".local", "share", "hometown", "product-images")),
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),

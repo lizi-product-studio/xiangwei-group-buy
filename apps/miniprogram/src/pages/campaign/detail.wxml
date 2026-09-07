@@ -1,7 +1,7 @@
 <view wx:if="{{loading}}" class="ui-view detail-state">正在加载商品…</view>
 <view wx:elif="{{error}}" class="ui-view detail-state detail-state--error"><text class="ui-text">{{error}}</text><button class="ui-button" size="mini" bindtap="retryLoad">重新加载</button></view>
 <view wx:else class="ui-view detail">
-  <view class="ui-view product-hero"><image class="ui-image" src="{{product.imageUrl || '/assets/product-rice-noodles.jpg'}}" mode="aspectFill"/><text class="ui-text">{{product.origin}} · 产地直采</text></view>
+  <view class="ui-view product-hero"><view class="ui-image"><product-image src="{{product.imageUrl}}" /></view><text class="ui-text">{{product.origin}} · 产地直采</text></view>
   <view class="ui-view product-summary"><view class="ui-view price-row"><text class="ui-text price"><text class="ui-text">¥</text>{{priceText}}</text><text class="ui-text price-tag">团购价</text><text class="ui-text sold">已支付 {{product.paidQuantity || 0}} 件</text></view><text class="ui-text product-summary__title">{{product.title}}</text><text class="ui-text product-summary__desc">{{product.skuName}} · 团期集中送达</text></view>
   <view class="ui-view group-card">
     <view class="ui-view group-card__head"><text class="ui-text">本团成团进度</text><text class="ui-text">已支付 {{campaignSoldQuantity}} / {{campaign.minTotalQuantity}} 件</text></view>

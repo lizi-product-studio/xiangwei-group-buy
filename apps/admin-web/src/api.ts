@@ -763,6 +763,15 @@ export const api = {
       status?: "ACTIVE" | "INACTIVE";
     },
   ) => patch<PickupPoint>(`/api/v1/admin/pickup-points/${id}`, body),
+  uploadProductImage: (file: File, signal?: AbortSignal) => {
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type))
+      return Promise.reject(new AdminApiError("请选择 JPG、PNG 或 WebP 图片"));
+    if (file.size === 0 || file.size > 5 * 1024 * 1024)
+      return Promise.reject(new AdminApiError("图片不能为空，且不能超过 5 MB"));
+    return request<{ imageUrl: string }>("/api/v1/admin/product-images", {
+      method: "POST", body: file, headers: { "content-type": file.type }, ...(signal ? { signal } : {}),
+    });
+  },
   skus: () => request<CatalogSku[]>("/api/v1/admin/catalog/skus"),
   saveSku: (body: {
     id?: string;

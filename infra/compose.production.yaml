@@ -64,6 +64,7 @@ services:
       HOST: 0.0.0.0
       PORT: 3100
       LOG_LEVEL: info
+      PRODUCT_IMAGE_DIR: /var/lib/hometown/product-images
       TRUST_PROXY: "true"
       REQUIRE_HTTPS: "true"
       PRIVACY_NOTICE_VERSION: ${PRIVACY_NOTICE_VERSION:-2026-09-07-phone-v1}
@@ -98,6 +99,7 @@ services:
       WECHAT_PAY_REFUND_NOTIFY_URL: ${WECHAT_PAY_REFUND_NOTIFY_URL:?required}
       WECHAT_PAY_MERCHANT_NAME: ${WECHAT_PAY_MERCHANT_NAME:?required}
       PICKUP_CODE_SECRET: ${PICKUP_CODE_SECRET:?required}
+    volumes: ["product_images:/var/lib/hometown/product-images"]
     secrets: [wechat_private_key, wechat_public_key]
     depends_on:
       migrate: { condition: service_completed_successfully }
@@ -144,5 +146,5 @@ services:
 secrets:
   wechat_private_key: { file: "${WECHAT_PRIVATE_KEY_FILE:?required}" }
   wechat_public_key: { file: "${WECHAT_PUBLIC_KEY_FILE:?required}" }
-volumes: { mysql_data: {}, redis_data: {}, caddy_data: {}, caddy_config: {} }
+volumes: { product_images: {}, mysql_data: {}, redis_data: {}, caddy_data: {}, caddy_config: {} }
 networks: { backend: {} }

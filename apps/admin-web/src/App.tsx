@@ -1,3 +1,4 @@
+import { ProductImageField, ProductPicture } from "./ProductImageField.tsx";
 import { getEntryBranding } from "./entry-branding.ts";
 import {
   useCallback,
@@ -855,6 +856,12 @@ function Products({
   const [categoryOpen, setCategoryOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<ProductCategory | null>(null);
   const [saving, setSaving] = useState(false);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const imageUrlRef = useRef<string | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const uploadBusyRef = useRef(false);
+  const updateImage = (value: string | null) => { imageUrlRef.current = value; setImageUrl(value); };
+  const updateImageBusy = (busy: boolean) => { uploadBusyRef.current = busy; setUploadingImage(busy); };
   const [savingCategory, setSavingCategory] = useState(false);
   const [categoryForm] = Form.useForm();
   const [form] = Form.useForm();
@@ -868,7 +875,7 @@ function Products({
     defaultSellableQuantity: number;
     status: "ACTIVE" | "INACTIVE";
   }) => {
-    if (saving) return;
+    if (saving || uploadBusyRef.current) return;
     setSaving(true);
     try {
       const { retailPriceYuan, ...product } = value;
@@ -876,7 +883,7 @@ function Products({
         ...(editing ? { id: editing.id, productId: editing.productId } : {}),
         ...product,
         retailPriceCents: yuanToCents(retailPriceYuan),
-        imageUrl: null,
+        imageUrl: imageUrlRef.current,
       });
       setOpen(false);
       setEditing(null);
@@ -931,6 +938,8 @@ function Products({
             icon={<PlusOutlined />}
             onClick={() => {
               setEditing(null);
+              updateImage(null);
+              updateImageBusy(false);
               form.resetFields();
               form.setFieldsValue({ status: "ACTIVE" });
               setOpen(true);
@@ -949,10 +958,7 @@ function Products({
           {
             title: "商品",
             render: (_, v) => (
-              <>
-                <b>{v.product.title}</b>
-                <div>{v.name}</div>
-              </>
+              <Space><ProductPicture src={v.product.imageUrl} /><div><b>{v.product.title}</b><div>{v.name}</div></div></Space>
             ),
           },
           {
@@ -969,6 +975,8 @@ function Products({
                 <Button
                   onClick={() => {
                     setEditing(value);
+                    updateImage(value.product.imageUrl);
+                    updateImageBusy(false);
                     form.setFieldsValue({
                       title: value.product.title,
                       category: value.product.category,
@@ -1002,11 +1010,16 @@ function Products({
         title={editing ? "编辑商品" : "新增商品"}
         footer={null}
         onCancel={() => {
+          if (saving) return;
           setOpen(false);
           setEditing(null);
+          updateImageBusy(false);
         }}
       >
         <Form form={form} layout="vertical" onFinish={(v) => void save(v)}>
+          <Form.Item label="商品主图">
+            {open && <ProductImageField key={editing?.id ?? "new"} value={imageUrl} onChange={updateImage} onBusyChange={updateImageBusy} disabled={saving} />}
+          </Form.Item>
           <Form.Item
             name="title"
             label="商品名称"
@@ -1084,7 +1097,7 @@ function Products({
               ]}
             />
           </Form.Item>
-          <Button type="primary" htmlType="submit" loading={saving}>
+          <Button type="primary" htmlType="submit" loading={saving} disabled={saving || uploadingImage}>
             保存商品
           </Button>
         </Form>
