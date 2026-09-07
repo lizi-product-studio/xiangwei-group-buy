@@ -43,7 +43,7 @@ Project Assessor：GOVERNED_DELIVERY，高风险正式服务替换。最小角�
 
 ## 当前状态
 
-IN_PROGRESS：A 最终备份恢复、B1 域名维护切换及 B2 数据服务/真实集成已执行；维护首页补丁待最终审核部署；C 真实 API/微信链路阻塞。
+A+B COMPLETE：家政退役与账目保留、最终备份恢复、维护入口、新数据服务与生产空业务基线通过最终独立验收。C BLOCKED：真实 API 与小程序交易上线未完成，不宣布完整迁移上线。
 
 ### 预检更新
 
@@ -74,7 +74,8 @@ IN_PROGRESS：A 最终备份恢复、B1 域名维护切换及 B2 数据服务/�
 QA attempt 3：冻结差异未发现新的阻塞性代码问题；最终切换仍 BLOCKED，待切换清单、最终一致快照与剩余门禁。
 QA attempt 5：PASS（仅 A 证据审核及 B 分阶段执行条件审核），不是 B 部署结果或 C 交易上线 PASS。
 最终停写备份恢复 PASS；B1 研发 11 项公网冒烟 PASS，主线程另核 admin=200、API=503、saas=410。
-研发报告真实集成 7/7 PASS、零 skipped，独立 QA 复核中；微信真实链路 NOT_RUN。
+QA attempt 7：维护补丁审核 PASS，B2 基础设施及指定真实集成验收 PASS，模板设计审核 PASS；C 仍 BLOCKED。真实集成 7/7 PASS、零 skipped；微信真实链路 NOT_RUN。
+QA attempt 8 原始最终结论：A+B 阶段 PASS；范围为家政退役与账目保留、异机备份恢复、拼团维护入口部署、新数据服务及空业务基线准备；C 未验收，完整交易上线仍 BLOCKED。
 
 ## 已执行结果与版本
 
@@ -92,6 +93,18 @@ QA attempt 5：PASS（仅 A 证据审核及 B 分阶段执行条件审核），�
 - 用户已提供支付公钥 ID 和营业执照主体全称；研发已补入受限配置，真实模板 ID 与字段映射仍待完成。公钥 ID 与既有文件的实际平台对应关系尚无真实回调验证。
 - 模板设计见 docs/wechat-subscription-template-design.md；设计不等于微信后台模板已选用/审核。
 - C 阶段禁止直接启动原 compose.production.yaml 全栈：Caddy 会与现 Nginx 冲突，资源限制也不同。真实 API 需经审核的现 Nginx 连接方案、数据库基线与管理员初始化，以及完整微信配置后另行验收。
+- 2026-09-07 09:45:48：维护页修补部署完成，远端 7d3ed618648bf6fa279ec7fc7166bbd39da85f91（父 4d2ce58）；本地 12f1f1e 与远端树均为 0c19b0f231786357cd96187ee0e74b416947ff75。主/admin 首页明确配置中、暂未开放登录下单，无登录表单。
+- 维护 HTML 本地与两个公网哈希均为 da8fe5097fc16c31f97687ce01eccb98bd28028a797377004d9e4c9363085ccf；API 503/旧路由 410 回归通过。最终证据 maintenance-final-version.json 与 maintenance-live 截图。
+- 此后在已复核为空的生产 hometown_food 中执行未修改基线两次，均退出 0，3 条迁移 APPLIED、schema_version=3，仅初始化空 staff/sessions/credentials 数组，无业务数据或账号。此记录替代前述“生产库 0 表”的阶段状态；API 仍未启动。
+- 新基线备份 1332 字节，SHA-256 7d37b13d766a55e9a4b0c7a9ef308bc8d3e6f5c9958d07f91040ee9300dc69e8；隧道关闭。证据 production-baseline-evidence.json、production-schema-verification.txt 与两次 migration 日志。
+
+## 剩余工作与限制
+
+- 实际订阅模板 ID、关键词编号/类型与审核状态待微信后台取得；推荐设计中的订单号、领取截止和退款金额需要发送器适配与验证。
+- API 运行配置、资源预算与现 Nginx 连接方案尚未完成发布，未创建管理员账号；当前首页仅维护，不支持业务登录或下单。
+- 小程序仅完成消费者 AppID 对齐，尚未上传体验版/正式版或替换微信线上代码；真实登录、支付、退款及消息落点尚未验收。
+- 外部公网 IPv6 探测失败，无法区分本机网络路径与服务端可达性；服务器 IPv6 loopback 路由已通过，未把外部 IPv6 写成 PASS。
+- 知识反馈检查：本次仅记录项目迁移事实，无需更新跨项目知识库。
 
 ## 分阶段执行清单（研发冻结，经 QA attempt 4 补充）
 
