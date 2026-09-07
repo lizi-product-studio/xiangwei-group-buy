@@ -1,3 +1,4 @@
+import { getEntryBranding } from "./entry-branding.ts";
 import {
   useCallback,
   useEffect,
@@ -279,6 +280,8 @@ function AccessiblePasswordInput({
   );
 }
 
+const entryBranding = getEntryBranding(typeof window === "undefined" ? "" : window.location.hostname);
+
 function Login({
   done,
   notice,
@@ -354,31 +357,31 @@ function Login({
   };
   return (
     <main className="login-page">
-      <section className="login-story" aria-label="社区团购运营后台">
+      <section className="login-story" aria-label={entryBranding.storyTitle}>
         <div className="login-brand">
           <span className="login-brand__mark" aria-hidden="true">
             <BranchesOutlined />
           </span>
-          <strong>社区团购</strong>
-          <span>运营后台</span>
+          <strong>{entryBranding.loginBrand}</strong>
+          <span>{entryBranding.loginSection}</span>
         </div>
         <div className="login-story__copy">
           <span className="login-story__rule" aria-hidden="true" />
-          <Typography.Title level={1}>社区团购运营后台</Typography.Title>
+          <Typography.Title level={1}>{entryBranding.storyTitle}</Typography.Title>
           <Typography.Paragraph className="login-story__description">
-            运营、客服、财务与点位负责人使用各自账号登录。
+            {entryBranding.description}
           </Typography.Paragraph>
         </div>
       </section>
       <section className="login-panel" aria-label="登录表单">
         <div className="login-card">
           <Typography.Title level={2}>
-            {passwordChange ? "请先设置新密码" : "社区团购运营后台"}
+            {passwordChange ? "请先设置新密码" : entryBranding.loginTitle}
           </Typography.Title>
           <Typography.Paragraph className="login-card__intro">
             {passwordChange
-              ? "为了继续使用后台，请先完成密码修改。"
-              : "运营、客服、财务与点位负责人使用各自账号登录。"}
+              ? entryBranding.passwordDescription
+              : entryBranding.description}
           </Typography.Paragraph>
           {notice ? (
             <Alert
@@ -4965,6 +4968,9 @@ function Settings({
 }
 
 export function App() {
+  useEffect(() => {
+    document.title = entryBranding.title;
+  }, []);
   // Every login/logout receives a new epoch.  Responses started for a former
   // identity are ignored, so a new account cannot briefly render the former
   // employee's cached point, order, finance, or service facts.
@@ -5365,7 +5371,7 @@ export function App() {
         >
           <div className="brand">
             <strong>乡味集</strong>
-            <span>社区团购 · 运营管理</span>
+            <span>{entryBranding.workspaceDescription}</span>
           </div>
           <Menu
             mode="inline"
