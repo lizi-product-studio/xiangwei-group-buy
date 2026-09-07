@@ -43,7 +43,7 @@ Project Assessor：GOVERNED_DELIVERY，高风险正式服务替换。最小角�
 
 ## 当前状态
 
-IN_PROGRESS：研发正在完成备份与本地发布准备，尚未批准切换。
+IN_PROGRESS：A 最终备份恢复、B1 域名维护切换及 B2 数据服务/真实集成已执行；维护首页补丁待最终审核部署；C 真实 API/微信链路阻塞。
 
 ### 预检更新
 
@@ -72,7 +72,26 @@ IN_PROGRESS：研发正在完成备份与本地发布准备，尚未批准切换
 
 初备恢复 PASS；pnpm check PASS（7 个真实集成 skip，真实集成未通过）；E2E 13/13 PASS。
 QA attempt 3：冻结差异未发现新的阻塞性代码问题；最终切换仍 BLOCKED，待切换清单、最终一致快照与剩余门禁。
-正式切换、真实集成和微信真实链路均 NOT_RUN。
+QA attempt 5：PASS（仅 A 证据审核及 B 分阶段执行条件审核），不是 B 部署结果或 C 交易上线 PASS。
+最终停写备份恢复 PASS；B1 研发 11 项公网冒烟 PASS，主线程另核 admin=200、API=503、saas=410。
+研发报告真实集成 7/7 PASS、零 skipped，独立 QA 复核中；微信真实链路 NOT_RUN。
+
+## 已执行结果与版本
+
+- 2026-09-07 09:27:05（中国时区）：停止家政 API 和两条专属 cron；数据库无未完事务、无应用连接、启用事件为 0。
+- 最终 SQL 117302 字节，SHA-256 fffa6f4c989658bd928869e5c6bff9a8d88e58cc74a8ea081e1b1e907319b08a；最终文件归档 14407922 字节，SHA-256 905c444255cdab187fd5953537def45c0b4fc04299a5c49e4033c70d07097927。流式双端退出 0。
+- 干净独立 MySQL 8.0 恢复最终 SQL 成功，46 表及账目聚合与停写后源一致；OOM=false，恢复容器停止。QA 已直接核验最终比对证据。
+- 本地范围提交 9856735；原生 Git HTTPS 鉴权失败，未修改凭据。通过已连接 GitHub 工具确认远端 aa2d162 与本地原基线 39751e2 的树相同，以远端为父创建提交 4d2ce58a56a14aadb36212bc79bbfebf6dd37637，force:false 更新 codex/audit-remediation。
+- 本地 9856735 与远端 4d2ce58 的树均为 dd7d99c6baf880d1dac42e98ef6f71384d19164b；本地历史未重写，未强推。部署版本为远端 4d2ce58。
+- 2026-09-07 09:34:16：B1 完成，旧 API/DB 停止，root_mysql_data 保留，Nginx 校验和 reload 成功。主/admin 静态页面 200、API/health 503、旧入口/saas/8443 410。
+- 静态包 SHA-256 9106519eddb3da0a72576834968bc0253ebe9e3c1a5084a1e67f8ca4eaa6b4ef；index SHA-256 c0ee030cc3172e857e472f98596d22de3619ba1c5bff3d13eb86bfad673cb4a9。
+- 脱敏运行证据在受限备份目录的 final-backup-integrity.json、final-restore-compare.json、b1-public-smoke.json、b1-version.json；秘密、SQL和归档不进入 Git。
+- 家政未结账目由用户后续结清，不能把停服务记作财务清偿。
+- B2：新 MySQL 8.4.11、Redis 7.4.11 健康、无宿主公开端口、OOM=false；隔离测试库执行迁移两次均成功，真实 MySQL/Redis 7 项通过。测试 Redis 与 SSH 隧道已停止。生产 hometown_food 仍为 0 表，无测试数据或管理员初始化；不能称 API 数据迁移已完成。
+- 资源采样：可用内存约 630MB，磁盘约 3.9GB；后续 API 需重新核算单实例运行预算。
+- 用户已提供支付公钥 ID 和营业执照主体全称；研发已补入受限配置，真实模板 ID 与字段映射仍待完成。公钥 ID 与既有文件的实际平台对应关系尚无真实回调验证。
+- 模板设计见 docs/wechat-subscription-template-design.md；设计不等于微信后台模板已选用/审核。
+- C 阶段禁止直接启动原 compose.production.yaml 全栈：Caddy 会与现 Nginx 冲突，资源限制也不同。真实 API 需经审核的现 Nginx 连接方案、数据库基线与管理员初始化，以及完整微信配置后另行验收。
 
 ## 分阶段执行清单（研发冻结，经 QA attempt 4 补充）
 
