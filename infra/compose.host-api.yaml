@@ -1,0 +1,35 @@
+# API-only deployment beside the existing migration data services.
+# Host Nginx owns HTTPS. Never use this file to recreate MySQL or Redis.
+name: hometown-food
+services:
+  api:
+    image: ${API_IMAGE:?required verified release image}
+    user: "1001:1001" # Existing read-only payment keys are owned by this UID.
+    restart: unless-stopped
+    mem_limit: 384m
+    memswap_limit: 384m
+    cpus: 0.75
+    pids_limit: 128
+    environment:
+      NODE_OPTIONS: --max-old-space-size=256
+    env_file:
+      - ${API_RUNTIME_ENV_FILE:?required restricted production runtime env}
+    ports: ["127.0.0.1:3100:3100"]
+    volumes:
+      - ${WECHAT_PRIVATE_KEY_FILE:?required}:/run/secrets/wechat_private_key:ro
+      - ${WECHAT_PUBLIC_KEY_FILE:?required}:/run/secrets/wechat_public_key:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3100/health/ready',{headers:{'x-forwarded-proto':'https'}}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    networks: [backend]
+networks:
+  backend:
+    external: true
+    name: hometown-food_backend
