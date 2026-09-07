@@ -88,5 +88,5 @@
       <image class="ui-image" src="/assets/right-gray.png" mode="aspectFit" aria-hidden="true" />
     </button>
   </view>
-  <view class="ui-view account-settings"><text class="ui-text account-settings__title">账号设置</text><button wx:if="{{loggedIn}}" class="ui-button account-settings__logout" bindtap="logout">退出登录</button><button wx:else class="ui-button account-settings__logout" bindtap="openLogin">登录账号</button></view>
+  <view class="ui-view account-settings"><button wx:if="{{loggedIn}}" class="ui-button account-settings__logout" hover-class="account-settings__logout--hover" bindtap="logout">退出登录</button><button wx:else class="ui-button account-settings__logout" hover-class="account-settings__logout--hover" bindtap="openLogin">登录账号</button></view>
 </view>
