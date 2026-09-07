@@ -1,7 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { isDemoDeployment, isLocalDemoDeployment, isMissingOptionalDeploymentModule, resolveDeployment } from './deployment.js';
+import { isDemoDeployment, isLocalDemoDeployment, isMissingOptionalDeploymentModule, resolveDeployment, validSubscriptionMap } from './deployment.js';
+
+const fiveTemplates = [
+  { type: 'SITE_CONFIRMED' as const, templateId: 'site' }, { type: 'CAMPAIGN_POSTPONED' as const, templateId: 'site' }, { type: 'PICKUP_EXPIRED' as const, templateId: 'site' },
+  { type: 'VEHICLE_DISPATCHED' as const, templateId: 'dispatch' }, { type: 'ARRIVED' as const, templateId: 'arrival' }, { type: 'PICKUP_DEADLINE' as const, templateId: 'deadline' }, { type: 'PARTIAL_REFUND' as const, templateId: 'refund' },
+];
 
 describe('secure mini-program deployment configuration', () => {
+  it('requires five distinct IDs with exact shared-status grouping', () => {
+    expect(validSubscriptionMap(fiveTemplates)).toBe(true);
+    expect(validSubscriptionMap(fiveTemplates.map((item) => item.type === 'PICKUP_DEADLINE' ? { ...item, templateId: 'arrival' } : item))).toBe(false);
+    expect(validSubscriptionMap(fiveTemplates.map((item) => item.type === 'PICKUP_EXPIRED' ? { ...item, templateId: 'refund' } : item))).toBe(false);
+    expect(validSubscriptionMap([...fiveTemplates, fiveTemplates[0]!])).toBe(false);
+  });
   it('allows local development without release metadata', () => {
     expect(resolveDeployment('develop')).toMatchObject({ apiBaseUrl: 'http://180.76.100.156', authMode: 'demo', demoLoginEnabled: true });
     expect(resolveDeployment('local')).toMatchObject({ authMode: 'demo', demoLoginEnabled: true });

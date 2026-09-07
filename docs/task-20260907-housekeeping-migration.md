@@ -134,6 +134,25 @@ A 通过后停止旧 DB，保留旧容器、root_mysql_data 卷、媒体和密�
 
 仅在真实微信参数与模板齐全、独立审核通过后启动真实 API、迁移空库并切接口路由；体验版与真实渠道另验。
 
+#### C-SUBSCRIPTION：五模板适配（2026-09-07 新交接）
+
+- task_id：TASK-20260907-HOUSEKEEPING-REPLACE；route：GOVERNED_DELIVERY；状态：本地适配 QA PASS，真实微信上线 BLOCKED。
+- confirmed：已读取用户授权交接任务「撰写小程序介绍」及五张模板详情截图；用户确认纯数字取货码、同意逾期优先复用订单状态变更。截止时间沿用项目权威领取规则，由研发统一中国时区格式化，不要求用户另设日期规则。
+- delta：原四模板改为五模板映射七事件，补齐真实订单/退款/取货字段、逐类型格式与长度校验，检查数字码生成及已有有效码兼容、跨端授权映射和体验版/正式版跳转。
+- authority：实际字段与差异以 docs/wechat-subscription-template-design.md 顶部五模板决定为准；完整账号 template_id 待复制文本校验，模板类目/场景匹配与真实发送未通过。
+- ownership：主线程维护本记录和模板设计；现有研发负责人独占相关源码/测试/环境示例及代码关联文档；Assessor 只读评估关键风险，独立 QA 只读验收。保留 .codex 用户资产。
+- acceptance：五模板七事件前后端一致；数字码不使旧有效码失效；截止与订单页同源；退款引用真实成功对象；逐字段类型/长度合法；拒绝订阅与失败处理、消息订单归属及 trial/formal 明确；pnpm check、E2E、相应定向和必要真实集成通过，真实渠道结果另记。
+- non_goals：本小批次不切生产 API、不上传/发布小程序、不修改微信类目、不发送真实消息/支付/退款、不绕过电脑操作工具对微信后台 URL 的限制。
+- stop_conditions：已有有效码需不可逆变更、退款来源不明、必须擅自改变领取规则或平台场景、敏感凭据暴露时停相关路径并上报；真实模板 ID 缺失不阻止不依赖其值的本地适配。
+- 已实施：五模板严格字段映射与五个不同账号 ID 校验；小程序 3+2 授权分组和主动再次订阅；偏好绑定实际模板 ID，旧无绑定偏好不当作新授权，两端 ID 不一致返回 409。共享事件偏好不制造多次发送额度。
+- 已实施：通知读取真实订单、点位及持久窗口截止；六位数字码的 HMAC 输入/secret 保持，发送前核验有效凭证 hash。新窗口截止按 PRD 秒级规则，旧持久窗口原样；延期等导致过时的截止/逾期事件停止发送。
+- 已实施：部分退款通知新增可选 refundId 关联，读取这一笔 SUCCEEDED 退款的金额及微信 providerRefundId；商户退款号和资金幂等逻辑不变。关键上下文缺失在提交前转人工，提交后结果未知不盲目重试。
+- 兼容与配置：新增可选 JSON 字段，无 SQL 表结构迁移；保留旧凭证和窗口。旧四模板配置需更新五模板配置后才能启用；生产通知跳转环境显式配置 trial/formal。本批无生产 env/路由修改、无微信写入或小程序上传。
+- 最终验证：pnpm check PASS（domain 4 / contracts 24 / mini 108 / admin 70 / API 132）；真实 MySQL 8.4/Redis 7.4 独立集成 8/8 PASS 零跳过；最终 E2E 13/13 PASS。普通 check 的 8 项集成 skip 由单独真实运行补齐。首轮旧测试消息残留导致一项失败已保留日志，限定隔离测试聚合清理后全量重验通过，生产库未写；临时 Redis 和隧道关闭。
+- QA attempt 22 原始结论：本地五模板适配 PASS；真实微信上线仍 BLOCKED。冻结 29 实施文件及 4 日志 SHA 审核一致；唯一 P3 非阻塞项为部署示例旧占位符注释，安排单点修订后补验。
+- QA attempt 23 最终结论 PASS；P3 注释已 FIXED，仅该注释变化，其余 28 实施文件不变。新冻结 manifest SHA 17334c3371422a83e8ca5dcb54a89c539fa4c783157a0d7ab2bea75d603338b5；三份主线程文档一致性复核通过，可提交本批次，真实微信上线仍 BLOCKED。
+- 证据入口：受限备份目录中的 subscription-freeze-manifest.json、subscription-validation-evidence.json、subscription-check.log、subscription-real-integration.log、subscription-e2e.log 与 subscription-integration-evidence.json。没有真机截图/真实发送凭证，不能将本地通过记为渠道通过。
+
 ### D：服务器旧家政资源清理（2026-09-07 用户追加）
 
 - confirmed：用户在查看系统盘占用后明确要求“旧的跟家政相关的全给我清了。只保留跟拼团有关的”。本阶段优先于 C 配置工作。

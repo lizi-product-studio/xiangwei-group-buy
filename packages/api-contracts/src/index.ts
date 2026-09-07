@@ -445,6 +445,7 @@ export const notificationManualCompletionSchema = z.object({
   ]),
 });
 export const notificationPreferenceSchema = z.object({
+  templateIds: z.record(z.string(), z.string().trim().min(1).max(128)).optional(),
   types: z
     .array(
       z.enum([

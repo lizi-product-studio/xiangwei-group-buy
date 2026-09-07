@@ -381,14 +381,16 @@ export const api = {
       | "PICKUP_EXPIRED"
       | "CAMPAIGN_POSTPONED"
     >,
+    templateIds?: Record<string, string>,
   ) =>
     request<unknown>({
       url: "/api/v1/notifications/preferences",
       method: "POST",
-      data: { types },
+      data: { types, templateIds },
     }),
   getNotificationPreferences: () =>
     request<{
+      templateIds?: Record<string, string>;
       types: Array<
         | "SITE_CONFIRMED"
         | "VEHICLE_DISPATCHED"

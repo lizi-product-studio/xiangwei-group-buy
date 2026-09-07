@@ -126,17 +126,22 @@ export class NotificationService {
     orderId: string,
     plan: DeliveryPlan,
     eventKey: string,
+    refundId?: string,
   ): Promise<void> {
     const order = await store.getOrder(orderId);
     if (!order || !paidOrderStatuses.has(order.status)) return;
     if (type === "ARRIVED" && order.status !== "READY_FOR_PICKUP") return;
     const preference = await store.getNotificationPreference(order.userId);
-    const authorised = preference?.types.includes(type) ?? false;
+    const requiredTemplate = this.provider.templateIdFor?.(type);
+    const authorised = (preference?.types.includes(type) ?? false) &&
+      (!this.provider.templateIdFor || !!requiredTemplate && preference?.templateIds?.[type] === requiredTemplate);
     const message = copy(type, plan);
     const now = new Date().toISOString();
     await store.createOrderNotificationIfAbsent({
       id: randomUUID(),
       eventKey,
+      ...(refundId ? { refundId } : {}),
+      ...(type === "SITE_CONFIRMED" ? { siteConfirmed: !!plan.siteName && !!plan.address } : {}),
       userId: order.userId,
       orderId: order.id,
       type,
@@ -194,13 +199,34 @@ export class NotificationService {
       ? await this.store.getDeliveryPlan(order.deliveryPlanId)
       : null;
     const user = await this.store.getUser(notification.userId);
-    if (!plan || !user) {
+    if (!order || !plan || !user || order.userId !== user.id) {
       notification.status = "MANUAL_REQUIRED";
       notification.nextAttemptAt = null;
       notification.deliveryLeaseUntil = null;
       notification.deliveryClaimToken = null;
       notification.lastDeliveryError =
         "notification delivery dependencies are missing";
+      await this.store.saveOrderNotificationIfClaimed(notification, claimToken);
+      return;
+    }
+
+    const input = { user, notification, plan, order,
+      window: await this.store.getCommunityPickupWindowForUpdate(order.id),
+      credential: await this.store.getPickupCredential(order.id),
+      refund: notification.refundId ? await this.store.getPartialRefund(notification.refundId) : null,
+    };
+    try {
+      const preference = await this.store.getNotificationPreference(user.id);
+      const templateId = this.provider.templateIdFor?.(notification.type);
+      if (this.provider.templateIdFor && (!templateId || !preference?.types.includes(notification.type) || preference.templateIds?.[notification.type] !== templateId))
+        throw new Error('当前模板尚未获得用户授权，请重新订阅');
+      this.provider.prepare?.(input);
+    } catch (error) {
+      notification.status = 'MANUAL_REQUIRED';
+      notification.nextAttemptAt = null;
+      notification.deliveryLeaseUntil = null;
+      notification.deliveryClaimToken = null;
+      notification.lastDeliveryError = (error instanceof Error ? error.message : String(error)).slice(0, 500);
       await this.store.saveOrderNotificationIfClaimed(notification, claimToken);
       return;
     }
@@ -219,7 +245,7 @@ export class NotificationService {
     if (!submission || submission.providerSubmissionAttemptId !== attemptId)
       return;
     try {
-      await this.provider.send({ user, notification: submission, plan });
+      await this.provider.send({ ...input, notification: submission });
       await this.store.transaction((store) =>
         store.markOrderNotificationSentIfSubmission(
           submission.id,

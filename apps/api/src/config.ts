@@ -1,3 +1,4 @@
+import { assertSubscriptionData, subscriptionGroups } from './modules/notifications/subscription-templates.js';
 import { z } from "zod";
 import { BusinessError } from "@hometown/domain";
 
@@ -27,6 +28,9 @@ const configSchema = z.object({
     .default(604_800),
   WECHAT_APP_ID: z.string().min(6).optional(),
   WECHAT_APP_SECRET: z.string().min(8).optional(),
+  WECHAT_SUBSCRIBE_MINIPROGRAM_STATE: z.enum(["trial", "formal"]).default("trial"),
+  WECHAT_SUBSCRIBE_DEADLINE_TEMPLATE_ID: z.string().min(1).optional(),
+  WECHAT_SUBSCRIBE_DEADLINE_TEMPLATE_DATA: z.string().min(2).optional(),
   WECHAT_SUBSCRIBE_SITE_TEMPLATE_ID: z.string().min(1).optional(),
   WECHAT_SUBSCRIBE_SITE_TEMPLATE_DATA: z.string().min(2).optional(),
   WECHAT_SUBSCRIBE_DISPATCH_TEMPLATE_ID: z.string().min(1).optional(),
@@ -60,26 +64,6 @@ const configSchema = z.object({
 
 export type AppConfig = z.infer<typeof configSchema>;
 
-function assertTemplateData(value: string, name: string): void {
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (
-      !parsed ||
-      Array.isArray(parsed) ||
-      typeof parsed !== "object" ||
-      !Object.entries(parsed).every(
-        ([key, text]) => key.length > 0 && typeof text === "string",
-      )
-    )
-      throw new Error("invalid");
-  } catch {
-    throw new BusinessError(
-      "VALIDATION_ERROR",
-      `${name} 必须是非空字符串字段组成的 JSON 对象`,
-      500,
-    );
-  }
-}
 function assertProductionHttpsUrl(value: string, name: string): void {
   let url: URL;
   try {
@@ -187,38 +171,16 @@ export function loadConfig(
         "生产环境必须使用真实微信登录与支付",
         500,
       );
-    const templates = [
-      config.WECHAT_SUBSCRIBE_SITE_TEMPLATE_ID,
-      config.WECHAT_SUBSCRIBE_SITE_TEMPLATE_DATA,
-      config.WECHAT_SUBSCRIBE_DISPATCH_TEMPLATE_ID,
-      config.WECHAT_SUBSCRIBE_DISPATCH_TEMPLATE_DATA,
-      config.WECHAT_SUBSCRIBE_ARRIVAL_TEMPLATE_ID,
-      config.WECHAT_SUBSCRIBE_ARRIVAL_TEMPLATE_DATA,
-      config.WECHAT_SUBSCRIBE_PARTIAL_REFUND_TEMPLATE_ID,
-      config.WECHAT_SUBSCRIBE_PARTIAL_REFUND_TEMPLATE_DATA,
-    ];
-    if (templates.some((value) => !value))
-      throw new BusinessError(
-        "VALIDATION_ERROR",
-        "生产环境必须配置四类微信订阅消息模板及字段映射",
-        500,
-      );
-    assertTemplateData(
-      config.WECHAT_SUBSCRIBE_SITE_TEMPLATE_DATA!,
-      "WECHAT_SUBSCRIBE_SITE_TEMPLATE_DATA",
-    );
-    assertTemplateData(
-      config.WECHAT_SUBSCRIBE_DISPATCH_TEMPLATE_DATA!,
-      "WECHAT_SUBSCRIBE_DISPATCH_TEMPLATE_DATA",
-    );
-    assertTemplateData(
-      config.WECHAT_SUBSCRIBE_ARRIVAL_TEMPLATE_DATA!,
-      "WECHAT_SUBSCRIBE_ARRIVAL_TEMPLATE_DATA",
-    );
-    assertTemplateData(
-      config.WECHAT_SUBSCRIBE_PARTIAL_REFUND_TEMPLATE_DATA!,
-      "WECHAT_SUBSCRIBE_PARTIAL_REFUND_TEMPLATE_DATA",
-    );
+    if (!environment.WECHAT_SUBSCRIBE_MINIPROGRAM_STATE)
+      throw new BusinessError('VALIDATION_ERROR', '生产必须明确配置订阅消息 trial/formal 跳转环境', 500);
+    const ids = subscriptionGroups.map((group) => config[`WECHAT_SUBSCRIBE_${group}_TEMPLATE_ID`]);
+    if (ids.some((id) => !id || /replace|example|approved-/i.test(id)) || new Set(ids).size !== 5)
+      throw new BusinessError('VALIDATION_ERROR', '生产环境必须配置五类不同的真实微信订阅消息模板', 500);
+    for (const group of subscriptionGroups) {
+      try { assertSubscriptionData(group, config[`WECHAT_SUBSCRIBE_${group}_TEMPLATE_DATA`] ?? ''); }
+      catch { throw new BusinessError('VALIDATION_ERROR', `${group} 模板字段必须符合五模板契约`, 500); }
+    }
+
   }
   return config;
 }

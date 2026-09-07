@@ -1,8 +1,18 @@
 import type { AppConfig } from '../../config.js';
-import type { DeliveryPlan, OrderNotification, OrderNotificationType, User } from '../core/types.js';
+import type { DeliveryPlan, OrderNotification, OrderNotificationType, User, Order, CommunityPickupWindow, PickupCredential, PartialRefund } from '../core/types.js';
 
+import { assertSubscriptionData, chinaTime, subscriptionGroup, validateSubscriptionValue } from './subscription-templates.js';
+import { matchesPickupCode, pickupCode } from '../fulfillment/pickup-code.js';
+
+export interface SubscriptionInput {
+  user: User; notification: OrderNotification; plan: DeliveryPlan;
+  order?: Order; window?: CommunityPickupWindow | null;
+  credential?: PickupCredential | null; refund?: PartialRefund | null;
+}
 export interface SubscriptionMessageProvider {
-  send(input: { user: User; notification: OrderNotification; plan: DeliveryPlan }): Promise<void>;
+  send(input: SubscriptionInput): Promise<void>;
+  prepare?(input: SubscriptionInput): void;
+  templateIdFor?(type: OrderNotificationType): string | undefined;
 }
 
 type TemplateDefinition = { templateId: string | undefined; dataTemplate: string | undefined };
@@ -38,30 +48,57 @@ function replyMessage(body: Record<string, unknown>): string {
 }
 
 const eventTemplate = (config: AppConfig, type: OrderNotificationType): TemplateDefinition => {
-  if (type === 'SITE_CONFIRMED') return { templateId: config.WECHAT_SUBSCRIBE_SITE_TEMPLATE_ID, dataTemplate: config.WECHAT_SUBSCRIBE_SITE_TEMPLATE_DATA };
-  if (type === 'CAMPAIGN_POSTPONED') return { templateId: config.WECHAT_SUBSCRIBE_SITE_TEMPLATE_ID, dataTemplate: config.WECHAT_SUBSCRIBE_SITE_TEMPLATE_DATA };
-  if (type === 'VEHICLE_DISPATCHED') return { templateId: config.WECHAT_SUBSCRIBE_DISPATCH_TEMPLATE_ID, dataTemplate: config.WECHAT_SUBSCRIBE_DISPATCH_TEMPLATE_DATA };
-  if (type === 'PARTIAL_REFUND') return { templateId: config.WECHAT_SUBSCRIBE_PARTIAL_REFUND_TEMPLATE_ID, dataTemplate: config.WECHAT_SUBSCRIBE_PARTIAL_REFUND_TEMPLATE_DATA };
-  // Arrival and pickup-window events share one approved pickup-arrangement
-  // template. The semantic event type remains distinct in preferences/audit.
-  if (type === 'PICKUP_DEADLINE' || type === 'PICKUP_EXPIRED') return { templateId: config.WECHAT_SUBSCRIBE_ARRIVAL_TEMPLATE_ID, dataTemplate: config.WECHAT_SUBSCRIBE_ARRIVAL_TEMPLATE_DATA };
-  return { templateId: config.WECHAT_SUBSCRIBE_ARRIVAL_TEMPLATE_ID, dataTemplate: config.WECHAT_SUBSCRIBE_ARRIVAL_TEMPLATE_DATA };
+  const group = subscriptionGroup(type);
+  return { templateId: config[`WECHAT_SUBSCRIBE_${group}_TEMPLATE_ID`], dataTemplate: config[`WECHAT_SUBSCRIBE_${group}_TEMPLATE_DATA`] };
 };
 
-const templateValues = (notification: OrderNotification, plan: DeliveryPlan): Record<string, string> => ({
-  title: notification.title,
-  content: notification.content,
-  siteName: plan.siteName ?? '',
-  address: plan.address ?? '',
-  arrivalStartAt: plan.arrivalStartAt ?? '',
-  arrivalEndAt: plan.arrivalEndAt ?? '',
-});
+function templateValues(input: SubscriptionInput, secret: string): Record<string, string> {
+  const { notification, plan, order, user, window, credential, refund } = input;
+  if (!order || order.id !== notification.orderId || order.userId !== user.id || notification.userId !== user.id || order.deliveryPlanId !== plan.id)
+    throw new Error('通知订单或用户归属不匹配');
+  if (notification.type === 'SITE_CONFIRMED' && typeof notification.siteConfirmed !== 'boolean') throw new Error('地点通知缺少发生时的确认事实');
+  const states: Record<string, string> = { PENDING_PAYMENT: '待支付', PAID_WAITING_CLOSE: '待成团', LOCKED: '待配货', ALLOCATING: '配货中', IN_TRANSIT: '运输中', READY_FOR_PICKUP: '待领取', PICKED_UP: '已领取', COMPLETED: '已完成', REFUNDING: '退款中', REFUNDED: '已退款', CANCELLED: '已取消' };
+  const values: Record<string, string> = {
+    orderNo: order.orderNo, changedAt: chinaTime(notification.createdAt),
+    changeResult: notification.type === 'PICKUP_EXPIRED' ? '已逾期' : notification.type === 'CAMPAIGN_POSTPONED' ? '已顺延' : notification.siteConfirmed ? '已确认' : '调整中',
+    orderStatus: states[order.status] ?? '', goodsName: order.items.map((item) => item.name).join('、'),
+    siteName: plan.siteName ?? '', hint: notification.title,
+  };
+  if (notification.type === 'ARRIVED' || notification.type === 'PICKUP_DEADLINE') {
+    if (!window || window.orderId !== order.id || window.deliveryPlanId !== plan.id || !['ACTIVE', 'EXTENDED'].includes(window.status) || Date.parse(window.deadlineAt) <= Date.now())
+      throw new Error('领取窗口缺失、已失效或不属于通知订单');
+    if (notification.type === 'PICKUP_DEADLINE' && (notification.eventKey !== `pickup-deadline:${order.id}:${window.deadlineAt}` || Date.parse(window.deadlineAt) - Date.now() > 24 * 60 * 60_000))
+      throw new Error('截止提醒事件已过时，请按当前领取窗口处理');
+    values.pickupDeadlineDate = chinaTime(window.deadlineAt);
+    values.pickupDeadlineTime = chinaTime(window.deadlineAt);
+    if (notification.type === 'ARRIVED') {
+      const code = pickupCode(order.id, secret);
+      if (order.status !== 'READY_FOR_PICKUP' || !credential || credential.orderId !== order.id || credential.status !== 'ACTIVE' || Date.parse(credential.expiresAt) <= Date.now() || !matchesPickupCode(code, credential.codeHash, secret))
+        throw new Error('已有取货凭证不能安全表示为当前数字码，请人工联系并保留原凭证');
+      values.pickupCode = code;
+    }
+  }
+  if (notification.type === 'PICKUP_EXPIRED' && (!window || window.orderId !== order.id || window.deliveryPlanId !== plan.id || window.status !== 'EXPIRED_PENDING' || Date.parse(window.deadlineAt) >= Date.now() || notification.eventKey !== `pickup-expired:${order.id}:${window.deadlineAt}`))
+    throw new Error('逾期提醒事件已失效，当前订单不再处于该逾期窗口');
+  if (notification.type === 'PARTIAL_REFUND') {
+    if (!notification.refundId || !refund || refund.id !== notification.refundId || refund.orderId !== order.id || refund.status !== 'SUCCEEDED' || !Number.isSafeInteger(refund.amountCents) || refund.amountCents <= 0)
+      throw new Error('通知缺少对应的实际成功退款，需人工核对');
+    values.refundAmount = (refund.amountCents / 100).toFixed(2);
+    if (!refund.providerRefundId) throw new Error('成功退款缺少微信退款单号，需人工核对');
+    values.refundNo = refund.providerRefundId;
+  }
+  return values;
+}
 
 function renderData(template: string, values: Record<string, string>): Record<string, { value: string }> {
   const parsed = JSON.parse(template) as Record<string, string>;
-  return Object.fromEntries(Object.entries(parsed).map(([key, value]) => [key, {
-    value: value.replace(/{{(title|content|siteName|address|arrivalStartAt|arrivalEndAt)}}/g, (_, token: string) => values[token] ?? ''),
-  }]));
+  return Object.fromEntries(Object.entries(parsed).map(([key, text]) => {
+    const value = text.replace(/{{(\w+)}}/g, (_, token: string) => {
+      if (!(token in values)) throw new Error(`通知变量 ${token} 缺失`);
+      return values[token]!;
+    });
+    return [key, { value: validateSubscriptionValue(key, value) }];
+  }));
 }
 
 /** Intentionally fails closed: the caller immediately creates a manual-contact task. */
@@ -74,17 +111,26 @@ export class WechatSubscriptionMessageProvider implements SubscriptionMessagePro
 
   public constructor(private readonly config: AppConfig) {}
 
-  public async send(input: { user: User; notification: OrderNotification; plan: DeliveryPlan }): Promise<void> {
+  public templateIdFor(type: OrderNotificationType): string | undefined {
+    return eventTemplate(this.config, type).templateId;
+  }
+  public prepare(input: SubscriptionInput): void { this.payload(input); }
+  private payload(input: SubscriptionInput) {
     if (!input.user.wechatOpenId) throw new Error('用户没有可用的微信身份');
     const template = eventTemplate(this.config, input.notification.type);
     if (!template.templateId || !template.dataTemplate) throw new Error('当前提醒类型尚未配置微信模板');
-    const response = await this.call(template.templateId, {
+    assertSubscriptionData(subscriptionGroup(input.notification.type), template.dataTemplate);
+    return { template, data: renderData(template.dataTemplate, templateValues(input, this.config.PICKUP_CODE_SECRET)) };
+  }
+  public async send(input: SubscriptionInput): Promise<void> {
+    const { template, data } = this.payload(input);
+    const response = await this.call(template.templateId!, {
       touser: input.user.wechatOpenId,
       template_id: template.templateId,
       page: `pages/order-detail/index?id=${encodeURIComponent(input.notification.orderId)}`,
-      miniprogram_state: this.config.NODE_ENV === 'production' ? 'formal' : 'trial',
+      miniprogram_state: this.config.WECHAT_SUBSCRIBE_MINIPROGRAM_STATE,
       lang: 'zh_CN',
-      data: renderData(template.dataTemplate, templateValues(input.notification, input.plan)),
+      data: data,
     });
     if (response.errcode !== 0)
       throw new Error(

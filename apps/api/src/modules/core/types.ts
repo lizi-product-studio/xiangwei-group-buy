@@ -608,6 +608,10 @@ export type OrderNotificationStatus =
   | "MANUAL_REQUIRED"
   | "MANUAL_COMPLETED";
 export interface OrderNotification {
+  /** Exact successful refund that caused this event; absent historical rows fail closed. */
+  refundId?: string | null;
+  /** Site fact captured when this event was enqueued, not guessed at send time. */
+  siteConfirmed?: boolean;
   id: string;
   eventKey: string;
   userId: string;
@@ -648,6 +652,8 @@ export interface OrderNotification {
   deliveredAt: string | null;
 }
 export interface NotificationPreference {
+  /** Accepted account template IDs; legacy four-template preferences are not transferable. */
+  templateIds?: Partial<Record<OrderNotificationType, string>>;
   userId: string;
   types: OrderNotificationType[];
   updatedAt: string;

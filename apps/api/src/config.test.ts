@@ -1,3 +1,4 @@
+import { subscriptionData } from './modules/notifications/subscription-templates.js';
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "./config.js";
 
@@ -20,14 +21,17 @@ const productionBase = {
   WECHAT_PAY_API_V3_KEY: "12345678901234567890123456789012",
   WECHAT_PAY_MERCHANT_NAME: "社区团购主体",
   PICKUP_CODE_SECRET: "more-than-sixteen-random-characters",
+  WECHAT_SUBSCRIBE_MINIPROGRAM_STATE: "formal",
+  WECHAT_SUBSCRIBE_DEADLINE_TEMPLATE_ID: "deadline",
+  WECHAT_SUBSCRIBE_DEADLINE_TEMPLATE_DATA: JSON.stringify(subscriptionData.DEADLINE),
   WECHAT_SUBSCRIBE_SITE_TEMPLATE_ID: "site",
-  WECHAT_SUBSCRIBE_SITE_TEMPLATE_DATA: '{"thing1":"title"}',
+  WECHAT_SUBSCRIBE_SITE_TEMPLATE_DATA: JSON.stringify(subscriptionData.SITE),
   WECHAT_SUBSCRIBE_DISPATCH_TEMPLATE_ID: "dispatch",
-  WECHAT_SUBSCRIBE_DISPATCH_TEMPLATE_DATA: '{"thing1":"title"}',
+  WECHAT_SUBSCRIBE_DISPATCH_TEMPLATE_DATA: JSON.stringify(subscriptionData.DISPATCH),
   WECHAT_SUBSCRIBE_ARRIVAL_TEMPLATE_ID: "arrival",
-  WECHAT_SUBSCRIBE_ARRIVAL_TEMPLATE_DATA: '{"thing1":"title"}',
+  WECHAT_SUBSCRIBE_ARRIVAL_TEMPLATE_DATA: JSON.stringify(subscriptionData.ARRIVAL),
   WECHAT_SUBSCRIBE_PARTIAL_REFUND_TEMPLATE_ID: "partial-refund",
-  WECHAT_SUBSCRIBE_PARTIAL_REFUND_TEMPLATE_DATA: '{"thing1":"title"}',
+  WECHAT_SUBSCRIBE_PARTIAL_REFUND_TEMPLATE_DATA: JSON.stringify(subscriptionData.PARTIAL_REFUND),
 };
 
 describe("production configuration safety", () => {
@@ -52,6 +56,13 @@ describe("production configuration safety", () => {
     ).toThrow(/真实备案 HTTPS 域名/);
   });
 
+  it("rejects stale four-template mappings, duplicate IDs and implicit message landing", () => {
+    const good = { ...productionBase, WECHAT_PAY_NOTIFY_URL: 'https://api.groupbuy.cn/api/v1/payments/wechat/notify', WECHAT_PAY_REFUND_NOTIFY_URL: 'https://api.groupbuy.cn/api/v1/refunds/wechat/notify' };
+    expect(() => loadConfig({ ...good, WECHAT_SUBSCRIBE_DEADLINE_TEMPLATE_ID: undefined })).toThrow(/五类/);
+    expect(() => loadConfig({ ...good, WECHAT_SUBSCRIBE_DEADLINE_TEMPLATE_ID: good.WECHAT_SUBSCRIBE_ARRIVAL_TEMPLATE_ID })).toThrow(/五类/);
+    expect(() => loadConfig({ ...good, WECHAT_SUBSCRIBE_SITE_TEMPLATE_DATA: '{"thing1":"{{title}}"}' })).toThrow(/字段/);
+    expect(() => loadConfig({ ...good, WECHAT_SUBSCRIBE_MINIPROGRAM_STATE: undefined })).toThrow(/trial/);
+  });
   it("accepts concrete HTTPS callback hosts", () => {
     expect(() =>
       loadConfig({

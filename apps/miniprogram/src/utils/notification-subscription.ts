@@ -23,7 +23,7 @@ export function mergeAcceptedSubscriptionTypes(
 ): NotificationType[] {
   return Array.from(
     new Set([
-      ...current,
+      ...current.filter((type) => !requested.some((item) => item.type === type)),
       ...requested
         .filter((item) => result[item.templateId] === 'accept')
         .map((item) => item.type),

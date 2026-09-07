@@ -876,6 +876,7 @@ export class PaymentService {
           order.id,
           plan,
           `partial-refund:${refund.id}`,
+          refund.id,
         );
       if (
         !(await store.listFulfillmentAllocations(exception.id)).some(

@@ -9,8 +9,8 @@ const templates = [
   { type: 'CAMPAIGN_POSTPONED' as const, templateId: 'site' },
   { type: 'VEHICLE_DISPATCHED' as const, templateId: 'dispatch' },
   { type: 'ARRIVED' as const, templateId: 'arrival' },
-  { type: 'PICKUP_DEADLINE' as const, templateId: 'arrival' },
-  { type: 'PICKUP_EXPIRED' as const, templateId: 'arrival' },
+  { type: 'PICKUP_DEADLINE' as const, templateId: 'deadline' },
+  { type: 'PICKUP_EXPIRED' as const, templateId: 'site' },
   { type: 'PARTIAL_REFUND' as const, templateId: 'refund' },
 ];
 
@@ -30,8 +30,9 @@ describe('notification subscription grouping', () => {
       arrival: 'accept',
     });
     expect(accepted).toContain('CAMPAIGN_POSTPONED');
-    expect(accepted).toContain('PICKUP_DEADLINE');
+    expect(accepted).not.toContain('PICKUP_DEADLINE');
     expect(nextSubscriptionRequest(templates, accepted)).toEqual([
+      { type: 'PICKUP_DEADLINE', templateId: 'deadline' },
       { type: 'PARTIAL_REFUND', templateId: 'refund' },
     ]);
   });

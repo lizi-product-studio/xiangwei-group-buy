@@ -74,3 +74,5 @@ pnpm test:e2e
 - 微信私钥、公钥和 API v3 密钥不得提交到代码库。
 
 详细规则见 [产品需求](docs/PRD.md)、[架构说明](docs/architecture.md) 和 [上线清单](docs/go-live-checklist.md)。
+
+订阅消息采用五模板覆盖七事件；字段示例见 `infra/deploy.env.example`。服务端 `WECHAT_SUBSCRIBE_MINIPROGRAM_STATE` 必须与小程序 trial/formal 发布环境一致。旧模板偏好须按实际模板 ID 重新订阅；一次接受不等于无限额度。真实模板 ID、类目及字段接收仍须平台验收。

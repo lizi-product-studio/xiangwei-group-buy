@@ -10,6 +10,8 @@ import {
   nextSubscriptionRequest,
 } from '../../utils/notification-subscription';
 
+import type { NotificationType } from '../../config/deployment';
+
 type MessageView = { id: string; orderId: string; title: string; content: string; status: string; readAt: string | null; createdText: string };
 const loadCoordinator = new PageLoadCoordinator();
 const actionCoordinator = new PageActionCoordinator();
@@ -20,10 +22,12 @@ Page({
     error: '',
     messages: [] as MessageView[],
     enabling: false,
-    reminderText: '微信每次最多授权三类模板；完成后可继续授权退款提醒。',
+    cycleRequestedTypes: [] as NotificationType[],
+    cycleEpoch: -1,
+    reminderText: '每次最多订阅三种模板，五种提醒需分组订阅；接受一次不代表无限次通知。',
     enableLabel: '授权订单提醒',
   },
-  onShow() { loadCoordinator.show(); actionCoordinator.activate(); this.setData({ enabling: false }); void this.load(); },
+  onShow() { loadCoordinator.show(); actionCoordinator.activate(); const epoch = customerAuth.captureSessionEpoch(); this.setData({ enabling: false, ...(this.data.cycleEpoch !== epoch ? { cycleEpoch: epoch, cycleRequestedTypes: [] } : {}) }); void this.load(); },
   async load() {
     const loadGuard = loadCoordinator.begin(customerAuth.captureSessionEpoch());
     // Do not leave the previous account's messages visible while a new
@@ -44,7 +48,7 @@ Page({
           : Promise.resolve({ types: [] }),
       ]);
       if (!loadCoordinator.isCurrent(loadGuard, customerAuth.captureSessionEpoch()) || !customerAuth.isLoggedIn()) return;
-      const remaining = nextSubscriptionRequest(templates, preferences.types);
+      const remaining = nextSubscriptionRequest(templates, this.data.cycleRequestedTypes);
       this.setData({
         messages: messages.map((item) => ({ ...item, createdText: formatDateTime(item.createdAt) })),
         reminderText: !templates.length
@@ -52,13 +56,13 @@ Page({
           : remaining.length
             ? preferences.types.length
               ? '已有部分提醒授权；请继续授权剩余提醒。'
-              : '微信每次最多授权三类模板；完成后可继续授权退款提醒。'
-            : '订单提醒授权已完成；站内消息仍会保留。',
+              : '每次最多订阅三种模板，五种提醒需分组订阅；接受一次不代表无限次通知。'
+            : '本轮订阅已完成；需要更多提醒时可主动再次订阅。',
         enableLabel: !templates.length
           ? '仅站内提醒'
           : remaining.length
             ? preferences.types.length ? '继续授权' : '授权订单提醒'
-            : '已完成',
+            : '再次订阅',
       });
     } catch (error) {
       const ownExpiry = error instanceof AuthExpiredError &&
@@ -103,9 +107,9 @@ Page({
       }
       const current = await api.getNotificationPreferences();
       if (!currentAction()) return;
-      const requested = nextSubscriptionRequest(templates, current.types);
+      const requested = nextSubscriptionRequest(templates, this.data.cycleRequestedTypes.length === 7 ? [] : this.data.cycleRequestedTypes);
       if (!requested.length) {
-        void wx.showToast({ title: '订单提醒已全部授权', icon: 'success' });
+        this.setData({ cycleRequestedTypes: [] });
         return;
       }
       const result = await new Promise<Record<string, string>>((resolve, reject) => wx.requestSubscribeMessage({
@@ -114,15 +118,19 @@ Page({
         fail: reject,
       }));
       if (!currentAction()) return;
-      const accepted = mergeAcceptedSubscriptionTypes(current.types, requested, result);
-      await api.saveNotificationPreferences(accepted);
+      const validCurrent = current.types.filter((type) => current.templateIds?.[type] === templates.find((item) => item.type === type)?.templateId);
+      const accepted = mergeAcceptedSubscriptionTypes(validCurrent, requested, result);
+      const cycleRequestedTypes = Array.from(new Set([...(this.data.cycleRequestedTypes.length === 7 ? [] : this.data.cycleRequestedTypes), ...requested.map((item) => item.type)]));
+      const templateIds = Object.fromEntries(templates.filter((item) => accepted.includes(item.type)).map((item) => [item.type, item.templateId]));
+      await api.saveNotificationPreferences(accepted, templateIds);
       if (!currentAction()) return;
-      const remaining = nextSubscriptionRequest(templates, accepted);
+      const remaining = nextSubscriptionRequest(templates, cycleRequestedTypes);
       this.setData({
+        cycleRequestedTypes,
         reminderText: remaining.length
           ? '本组提醒已处理；请继续授权剩余提醒。'
-          : '订单提醒授权已完成；站内消息仍会保留。',
-        enableLabel: remaining.length ? '继续授权' : '已完成',
+          : '本轮订阅已完成；需要更多提醒时可主动再次订阅。',
+        enableLabel: remaining.length ? '继续授权' : '再次订阅',
       });
       void wx.showToast({ title: accepted.length ? (remaining.length ? '本组授权已保存' : '订单提醒已授权') : '未授权微信提醒，请留意站内消息', icon: accepted.length ? 'success' : 'none' });
     } catch (error) {

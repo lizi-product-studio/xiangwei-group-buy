@@ -81,6 +81,14 @@ describe.skipIf(!databaseUrl || !redisUrl)(
       });
       expect(await second.getUser(id)).toMatchObject({ id, status: "ACTIVE" });
     });
+    it("persists exact notification refund linkage and account-template preferences across pools", async () => {
+      const id = `subscription-${Date.now()}`;
+      const row = { ...notification(id), refundId: 'successful-refund-a', siteConfirmed: true, status: 'MANUAL_REQUIRED' as const, nextAttemptAt: null };
+      await first.createOrderNotificationIfAbsent(row);
+      await first.saveNotificationPreference({ userId: id, types: ['PARTIAL_REFUND'], templateIds: { PARTIAL_REFUND: 'account-refund-template' }, updatedAt: new Date().toISOString() });
+      expect(await second.getOrderNotification(id)).toMatchObject({ refundId: 'successful-refund-a', siteConfirmed: true, status: 'MANUAL_REQUIRED' });
+      expect(await second.getNotificationPreference(id)).toMatchObject({ templateIds: { PARTIAL_REFUND: 'account-refund-template' } });
+    });
     it("serializes concurrent aggregate writes across pools without losing either update", async () => {
       const suffix = Date.now();
       const firstId = `integration-concurrent-a-${suffix}`;

@@ -1,3 +1,4 @@
+import { pickupCode } from './pickup-code.js';
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   BusinessError,
@@ -27,13 +28,7 @@ export class FulfillmentService {
     private readonly notifications?: NotificationService,
   ) {}
   private code(orderId: string): string {
-    const hex = createHmac("sha256", this.secret)
-      .update(`pickup:${orderId}`)
-      .digest("hex");
-    return String(Number.parseInt(hex.slice(0, 12), 16) % 1_000_000).padStart(
-      6,
-      "0",
-    );
+    return pickupCode(orderId, this.secret);
   }
   private hash(code: string): string {
     return createHmac("sha256", this.secret).update(code).digest("hex");

@@ -1,3 +1,4 @@
+import type { OrderNotificationType } from './modules/core/types.js';
 import { randomUUID } from "node:crypto";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
@@ -265,7 +266,7 @@ export async function buildApp(
   holder.campaigns = campaigns;
   const orders = new OrderService(store, campaigns);
   const ledger = new LedgerService();
-  const subscription =
+  const subscription: SubscriptionMessageProvider =
     dependencies.subscriptionMessageProvider ??
     (config.WECHAT_APP_ID && config.WECHAT_APP_SECRET
       ? new WechatSubscriptionMessageProvider(config)
@@ -2171,24 +2172,26 @@ export async function buildApp(
   });
   app.post("/api/v1/notifications/preferences", async (request) => {
     const actor = requireActor(request, ["USER", "SUPER_ADMIN"]);
-    const value = {
-      userId: actor.userId,
-      types: notificationPreferenceSchema.parse(request.body).types,
-      updatedAt: new Date().toISOString(),
-    };
+    const requested = notificationPreferenceSchema.parse(request.body);
+    const templateIds: Partial<Record<OrderNotificationType, string>> = {};
+    const types = requested.types.filter((type) => {
+      const expected = subscription.templateIdFor?.(type);
+      if (!subscription.templateIdFor) return true;
+      if (!expected || requested.templateIds?.[type] !== expected)
+        throw new BusinessError('VALIDATION_ERROR', '订阅模板与当前服务不一致，请更新小程序后重新订阅', 409);
+      templateIds[type] = expected;
+      return true;
+    });
+    const value = { userId: actor.userId, types, templateIds, updatedAt: new Date().toISOString() };
     await store.saveNotificationPreference(value);
     return { data: value };
   });
   app.get("/api/v1/notifications/preferences", async (request) => {
     const actor = requireActor(request, ["USER", "SUPER_ADMIN"]);
-    return {
-      data:
-        (await store.getNotificationPreference(actor.userId)) ?? {
-          userId: actor.userId,
-          types: [],
-          updatedAt: null,
-        },
-    };
+    const value = await store.getNotificationPreference(actor.userId);
+    const types = value?.types.filter((type) => !subscription.templateIdFor ||
+      !!subscription.templateIdFor(type) && value.templateIds?.[type] === subscription.templateIdFor(type)) ?? [];
+    return { data: { userId: actor.userId, types, templateIds: value?.templateIds ?? {}, updatedAt: value?.updatedAt ?? null } };
   });
   app.get("/api/v1/admin/notifications/manual", async (request) => {
     requireActor(request, ["CUSTOMER_SERVICE", "SUPER_ADMIN"]);

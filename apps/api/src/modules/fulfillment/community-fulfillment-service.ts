@@ -1,4 +1,5 @@
-import { createHmac, randomUUID } from "node:crypto";
+import { pickupCode, pickupCodeHash } from './pickup-code.js';
+import { randomUUID } from "node:crypto";
 import { BusinessError, moneyCents, transitionOrder } from "@hometown/domain";
 import type { CommunityStore } from "./community-store.js";
 import type {
@@ -58,15 +59,7 @@ export class CommunityFulfillmentService {
     return new Date().toISOString();
   }
   private pickupHash(orderId: string) {
-    const hex = createHmac("sha256", this.pickupCodeSecret)
-      .update(`pickup:${orderId}`)
-      .digest("hex");
-    const code = String(
-      Number.parseInt(hex.slice(0, 12), 16) % 1_000_000,
-    ).padStart(6, "0");
-    return createHmac("sha256", this.pickupCodeSecret)
-      .update(code)
-      .digest("hex");
+    return pickupCodeHash(pickupCode(orderId, this.pickupCodeSecret), this.pickupCodeSecret);
   }
   /** Calendar-day deadline: 23:59:59 on the third natural day in China. */
   private pickupDeadline(arrivedAt: string) {
@@ -86,7 +79,7 @@ export class CommunityFulfillmentService {
         15,
         59,
         59,
-        999,
+        0,
       ),
     );
     return deadline.toISOString();

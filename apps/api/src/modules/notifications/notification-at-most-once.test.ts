@@ -1,3 +1,4 @@
+import { subscriptionData } from './subscription-templates.js';
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BusinessError } from "@hometown/domain";
@@ -56,8 +57,8 @@ const wechatConfig = () =>
     NODE_ENV: "test",
     WECHAT_APP_ID: "wechat-app-id",
     WECHAT_APP_SECRET: "wechat-secret",
-    WECHAT_SUBSCRIBE_ARRIVAL_TEMPLATE_ID: "arrival-template",
-    WECHAT_SUBSCRIBE_ARRIVAL_TEMPLATE_DATA: '{"thing1":"{{title}}"}',
+    WECHAT_SUBSCRIBE_SITE_TEMPLATE_ID: "site-template",
+    WECHAT_SUBSCRIBE_SITE_TEMPLATE_DATA: JSON.stringify(subscriptionData.SITE),
   });
 const wechatUser: User = {
   id: "user",
@@ -261,7 +262,7 @@ describe("notification at-most-once provider fence", () => {
     ]) {
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue(reply(invalidToken)));
       const provider = new WechatSubscriptionMessageProvider(wechatConfig());
-      await expect(provider.send({ user: wechatUser, notification: notification(), plan })).rejects.toThrow("微信访问令牌");
+      await expect(provider.send({ user: wechatUser, notification: { ...notification(), type: "SITE_CONFIRMED", siteConfirmed: true }, plan, order })).rejects.toThrow("微信访问令牌");
       vi.unstubAllGlobals();
     }
 
@@ -272,7 +273,7 @@ describe("notification at-most-once provider fence", () => {
         .mockResolvedValueOnce(reply({ access_token: "token", expires_in: 7_200 }))
         .mockResolvedValueOnce(reply(invalidSend)));
       const provider = new WechatSubscriptionMessageProvider(wechatConfig());
-      await expect(provider.send({ user: wechatUser, notification: notification(), plan })).rejects.toThrow("微信订阅消息");
+      await expect(provider.send({ user: wechatUser, notification: { ...notification(), type: "SITE_CONFIRMED", siteConfirmed: true }, plan, order })).rejects.toThrow("微信订阅消息");
       vi.unstubAllGlobals();
     }
 
@@ -281,21 +282,22 @@ describe("notification at-most-once provider fence", () => {
       .mockResolvedValueOnce(new Response("<html>gateway</html>", { status: 200 })));
     await expect(new WechatSubscriptionMessageProvider(wechatConfig()).send({
       user: wechatUser,
-      notification: notification(),
-      plan,
+      notification: { ...notification(), type: "SITE_CONFIRMED", siteConfirmed: true },
+      plan, order,
     })).rejects.toThrow("微信订阅消息返回不是有效 JSON");
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(reply({}, 503)));
     await expect(new WechatSubscriptionMessageProvider(wechatConfig()).send({
       user: wechatUser,
-      notification: notification(),
-      plan,
+      notification: { ...notification(), type: "SITE_CONFIRMED", siteConfirmed: true },
+      plan, order,
     })).rejects.toThrow("微信访问令牌网络错误：503");
   });
 
   it("keeps a malformed HTTP 200 provider result as a durable unknown submission", async () => {
     const store = await fixture();
-    await store.createOrderNotificationIfAbsent(notification());
+    await store.createOrderNotificationIfAbsent({ ...notification(), type: "SITE_CONFIRMED", siteConfirmed: true });
+    await store.saveNotificationPreference({ userId: "user", types: ["SITE_CONFIRMED"], templateIds: { SITE_CONFIRMED: "site-template" }, updatedAt: now() });
     vi.stubGlobal("fetch", vi.fn()
       .mockResolvedValueOnce(reply({ access_token: "token", expires_in: 7_200 }))
       .mockResolvedValueOnce(reply({})));

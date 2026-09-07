@@ -10,6 +10,21 @@ const admin = { "x-demo-user-id": "admin", "x-demo-role": "SUPER_ADMIN" };
 describe("single community application surface", () => {
   let app: FastifyInstance | undefined;
   afterEach(async () => app?.close());
+  it("rejects mismatched subscription IDs without reporting a false preference save", async () => {
+    const store = new MemoryStore(false);
+    app = await buildApp({ config: loadConfig({ NODE_ENV: 'test' }), store, subscriptionMessageProvider: { send: async () => undefined, templateIdFor: () => 'actual-account-template' } });
+    const headers = { 'x-demo-user-id': 'subscription-user', 'x-demo-role': 'USER' };
+    for (const templateIds of [undefined, { ARRIVED: 'different-template' }]) {
+      const result = await app.inject({ method: 'POST', url: '/api/v1/notifications/preferences', headers, payload: { types: ['ARRIVED'], templateIds } });
+      expect(result.statusCode).toBe(409);
+    }
+    expect(await store.getNotificationPreference('subscription-user')).toBeNull();
+    const accepted = await app.inject({ method: 'POST', url: '/api/v1/notifications/preferences', headers, payload: { types: ['ARRIVED'], templateIds: { ARRIVED: 'actual-account-template' } } });
+    expect(accepted.statusCode).toBe(200);
+    expect(accepted.json().data.templateIds).toEqual({ ARRIVED: 'actual-account-template' });
+    await store.saveNotificationPreference({ userId: 'subscription-user', types: ['ARRIVED'], updatedAt: new Date().toISOString() });
+    expect((await app.inject({ method: 'GET', url: '/api/v1/notifications/preferences', headers })).json().data.types).toEqual([]);
+  });
   it("exposes only community catalog and campaign creation", async () => {
     const store = new MemoryStore(false);
     app = await buildApp({ config: loadConfig({ NODE_ENV: "test" }), store });
