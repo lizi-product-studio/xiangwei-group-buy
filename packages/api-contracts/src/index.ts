@@ -12,6 +12,7 @@ const privacyNoticeVersionSchema = z
 export const adminPasswordSchema = z.string().min(8).max(128);
 
 export const wechatLoginSchema = z.object({
+  phoneCode: z.string().trim().min(1).max(256).optional(),
   code: z.string().trim().min(6).max(128),
   privacyAccepted: z.literal(true),
   privacyVersion: privacyNoticeVersionSchema,

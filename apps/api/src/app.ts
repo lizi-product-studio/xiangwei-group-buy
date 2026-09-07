@@ -1,3 +1,4 @@
+import { WechatApiPhoneExchange, type WechatPhoneExchange } from './modules/auth/wechat-phone.js';
 import type { OrderNotificationType } from './modules/core/types.js';
 import { randomUUID } from "node:crypto";
 import cors from "@fastify/cors";
@@ -169,6 +170,7 @@ export interface AppDependencies {
   /** Deterministic adapter injection is test-only; production uses Amap only. */
   reverseLocationAdapter?: ReverseLocationAdapter;
   wechatCodeExchange?: WechatCodeExchange;
+  wechatPhoneExchange?: WechatPhoneExchange;
   subscriptionMessageProvider?: SubscriptionMessageProvider;
   paymentProvider?: PaymentProvider;
   loginRateLimiter?: LoginRateLimiter;
@@ -236,6 +238,10 @@ export async function buildApp(
             level: config.LOG_LEVEL,
             redact: [
               "req.headers.authorization",
+              "req.body.code",
+              "req.body.phoneCode",
+              "req.body.phoneNumber",
+              "req.body.openid",
               "req.headers.cookie",
               "res.headers.set-cookie",
             ],
@@ -329,6 +335,8 @@ export async function buildApp(
               config.WECHAT_APP_SECRET!,
             ),
           config.AUTH_SESSION_TTL_SECONDS,
+          dependencies.wechatPhoneExchange ?? new WechatApiPhoneExchange(config.WECHAT_APP_ID!, config.WECHAT_APP_SECRET!),
+          config.PRIVACY_NOTICE_VERSION,
         )
       : null;
   const adminAuthService = new AdminAuthService(

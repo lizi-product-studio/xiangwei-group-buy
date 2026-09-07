@@ -93,7 +93,7 @@ describe("development demo auth guard", () => {
     Object.assign(wx, { login });
     request.mockImplementation((options) => options.success({
       statusCode: 200,
-      data: { data: options.url.endsWith("/auth/wechat/login") ? { accessToken: "test-wechat-token" } : [] },
+      data: { data: options.url.endsWith("/auth/wechat/login") ? { phoneRequired: false, accessToken: "test-wechat-token", expiresAt: "2099-01-01T00:00:00.000Z", userId: "user-test" } : [] },
     }));
     await customerAuth.login(PRIVACY_NOTICE_VERSION);
     await api.listOrders();

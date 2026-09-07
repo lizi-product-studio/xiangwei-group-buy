@@ -10,11 +10,14 @@ interface Envelope<T> {
 interface ErrorEnvelope {
   message?: string;
 }
-interface LoginResult {
+interface AuthenticatedLoginResult {
+  phoneRequired: false;
   accessToken: string;
   expiresAt: string;
   userId: string;
 }
+type LoginResult = AuthenticatedLoginResult | { phoneRequired: true };
+export type WechatLoginOutcome = "AUTHENTICATED" | "PHONE_REQUIRED";
 interface PaymentResult {
   provider: "mock" | "wechat";
   status: string;
@@ -25,7 +28,7 @@ type ClientRequestOptions = WechatMiniprogram.RequestOption & {
   auth?: AuthRequirement;
 };
 
-let loginPromise: Promise<string> | null = null;
+let loginFlight: { epoch: number; phone: boolean; promise: Promise<WechatLoginOutcome> } | null = null;
 let sessionEpoch = 0;
 const DEMO_CUSTOMER_SESSION_KEY = "hometown-demo-customer-session";
 const PRIVACY_CONSENT_VERSION_KEY = "hometown-privacy-notice-version";
@@ -96,16 +99,24 @@ function wxLogin(): Promise<string> {
 function loginRequest(
   code: string,
   privacyVersion: string,
+  phoneCode?: string,
 ): Promise<LoginResult> {
   return new Promise((resolve, reject) => {
     wx.request<Envelope<LoginResult>>({
       url: `${app.globalData.apiBaseUrl}/api/v1/auth/wechat/login`,
       method: "POST",
       header: { "content-type": "application/json" },
-      data: { code, privacyAccepted: true, privacyVersion },
+      data: { code, privacyAccepted: true, privacyVersion, ...(phoneCode ? { phoneCode } : {}) },
       success(response) {
-        if (response.statusCode >= 200 && response.statusCode < 300)
-          return resolve(response.data.data);
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          const result = response.data?.data;
+          if (result?.phoneRequired === true) return resolve({ phoneRequired: true });
+          if (result?.phoneRequired === false && typeof result.accessToken === "string" && result.accessToken
+            && typeof result.userId === "string" && result.userId
+            && typeof result.expiresAt === "string" && Number.isFinite(Date.parse(result.expiresAt)))
+            return resolve(result);
+          return reject(new Error("登录响应未完成，请重新登录"));
+        }
         reject(
           new Error(
             customerErrorMessage(
@@ -120,45 +131,46 @@ function loginRequest(
   });
 }
 
-async function ensureAccessToken(
-  force = false,
-  explicitPrivacyVersion?: string,
-): Promise<string> {
+function cachedAccessToken(): string | null {
+  if (wx.getStorageSync<string>(PRIVACY_CONSENT_VERSION_KEY) !== PRIVACY_NOTICE_VERSION) return null;
+  return app.globalData.accessToken ?? wx.getStorageSync<string>("accessToken") ?? null;
+}
+
+async function ensureAccessToken(): Promise<string> {
+  const cached = cachedAccessToken();
+  if (cached) { app.globalData.accessToken = cached; return cached; }
+  // Protected reads and writes cannot silently enter phone authorization or
+  // replay a business action. The owning page routes back through login.
   const requestEpoch = sessionEpoch;
-  const privacyVersion =
-    explicitPrivacyVersion ??
-    wx.getStorageSync<string>(PRIVACY_CONSENT_VERSION_KEY);
-  if (privacyVersion !== PRIVACY_NOTICE_VERSION)
-    throw new Error("请先阅读并同意最新隐私说明");
-  if (!force) {
-    const cached =
-      app.globalData.accessToken ?? wx.getStorageSync<string>("accessToken");
-    if (
-      cached &&
-      wx.getStorageSync<string>(PRIVACY_CONSENT_VERSION_KEY) === privacyVersion
-    ) {
-      app.globalData.accessToken = cached;
-      return cached;
-    }
+  customerAuth.clearSession();
+  throw new AuthExpiredError(requestEpoch, true);
+}
+
+function performWechatLogin(privacyVersion: string, phoneCode?: string): Promise<WechatLoginOutcome> {
+  const epoch = sessionEpoch;
+  if (!phoneCode && cachedAccessToken()) return Promise.resolve("AUTHENTICATED");
+  if (loginFlight?.epoch === epoch) {
+    if (loginFlight.phone === Boolean(phoneCode)) return loginFlight.promise;
+    return Promise.reject(new Error("登录正在处理中，请稍候重试"));
   }
-  if (!loginPromise) {
-    loginPromise = wxLogin()
-      .then((code) => loginRequest(code, privacyVersion))
-      .then((result) => {
-        // A logout/401 can happen while wx.login or the exchange request is
-        // pending. Do not let that late response repopulate the token store.
-        if (sessionEpoch !== requestEpoch)
-          throw new Error("登录状态已变化，请重新登录");
-        app.globalData.accessToken = result.accessToken;
-        wx.setStorageSync("accessToken", result.accessToken);
-        wx.setStorageSync(PRIVACY_CONSENT_VERSION_KEY, privacyVersion);
-        return result.accessToken;
-      })
-      .finally(() => {
-        loginPromise = null;
-      });
-  }
-  return loginPromise;
+  const flight = { epoch, phone: Boolean(phoneCode), promise: undefined as unknown as Promise<WechatLoginOutcome> };
+  flight.promise = wxLogin()
+    .then((code) => {
+      if (sessionEpoch !== epoch) throw new Error("登录状态已变化，请重新登录");
+      return loginRequest(code, privacyVersion, phoneCode);
+    })
+    .then((result): WechatLoginOutcome => {
+      if (sessionEpoch !== epoch) throw new Error("登录状态已变化，请重新登录");
+      if (result.phoneRequired) return "PHONE_REQUIRED";
+      app.globalData.accessToken = result.accessToken;
+      wx.setStorageSync("accessToken", result.accessToken);
+      wx.setStorageSync(PRIVACY_CONSENT_VERSION_KEY, privacyVersion);
+      sessionEpoch += 1;
+      return "AUTHENTICATED";
+    })
+    .finally(() => { if (loginFlight === flight) loginFlight = null; });
+  loginFlight = flight;
+  return flight.promise;
 }
 
 async function request<T>(
@@ -420,25 +432,17 @@ export const customerAuth = {
         wx.getStorageSync<string>(PRIVACY_CONSENT_VERSION_KEY) ===
           PRIVACY_NOTICE_VERSION
       : isDemoLoginAvailable() && hasDemoCustomerSession(),
-  async login(privacyVersion: string): Promise<void> {
+  async login(privacyVersion: string): Promise<WechatLoginOutcome | void> {
     if (app.globalData.authMode === "wechat")
       return this.loginWechat(privacyVersion);
     return this.loginDemo(privacyVersion);
   },
-  async loginWechat(privacyVersion: string): Promise<void> {
+  async loginWechat(privacyVersion: string, phoneCode?: string): Promise<WechatLoginOutcome> {
     if (privacyVersion !== PRIVACY_NOTICE_VERSION)
       throw new Error("请先阅读并同意最新隐私说明");
     if (app.globalData.authMode !== "wechat")
       throw new Error("当前未配置微信快捷登录，请使用开发体验登录");
-    const loginEpoch = sessionEpoch;
-    await ensureAccessToken(false, privacyVersion);
-    // A successful login establishes the current identity, even if the
-    // underlying token happened to be refreshed in place.
-    if (sessionEpoch !== loginEpoch) {
-      this.clearSession();
-      throw new Error("登录状态已变化，请重新登录");
-    }
-    sessionEpoch += 1;
+    return performWechatLogin(privacyVersion, phoneCode);
   },
   async loginDemo(privacyVersion: string): Promise<void> {
     if (privacyVersion !== PRIVACY_NOTICE_VERSION)
@@ -456,6 +460,7 @@ export const customerAuth = {
   },
   clearSession(): void {
     sessionEpoch += 1;
+    loginFlight = null;
     app.globalData.accessToken = null;
     wx.removeStorageSync("accessToken");
     wx.removeStorageSync(DEMO_CUSTOMER_SESSION_KEY);

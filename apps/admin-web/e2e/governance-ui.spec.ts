@@ -398,7 +398,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
       contactName: "意向用户",
       contactPhone: "13900000000",
       privacyAccepted: true,
-      privacyVersion: "2026-08-12",
+      privacyVersion: "2026-09-07-phone-v1",
     },
   });
   expect(intent.status(), await intent.text()).toBe(201);

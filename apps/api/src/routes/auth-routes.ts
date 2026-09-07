@@ -48,7 +48,7 @@ export function registerAuthRoutes(
           400,
         );
       return {
-        data: await authService.login(input.code, input.privacyVersion),
+        data: await authService.login(input.code, input.privacyVersion, input.phoneCode),
       };
     },
   );

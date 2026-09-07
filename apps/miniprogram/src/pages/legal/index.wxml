@@ -21,7 +21,7 @@
     <text class="ui-text legal-title">隐私说明</text>
     <text class="ui-text legal-meta">版本：{{privacyVersion}}</text>
     <text class="ui-text legal-heading">一、我们处理哪些信息</text>
-    <text class="ui-text">为完成微信登录、下单、支付、固定自提点领取和售后，我们会处理微信授权产生的账号标识、订单信息和自提点选择。我们不会在登录时主动获取手机号。</text>
+    <text class="ui-text">为完成微信登录、下单、支付、固定自提点领取和售后，我们会处理微信授权产生的账号标识、订单信息和自提点选择。首次登录时，在你主动授权后获取并绑定经微信验证的手机号，用于账号绑定、订单联系、取货及售后，不用于营销。拒绝授权可以继续浏览；已绑定后，后续微信登录无需重复授权手机号。</text>
     <text class="ui-text legal-heading">二、开通意向登记</text>
     <text class="ui-text">当你主动登记区域开通意向时，我们会收集所在地区、联系人姓名和中国大陆手机号，仅用于评估该区域的服务需求及通知开通进展，不用于营销转售。</text>
     <text class="ui-text legal-heading">三、保存与保护</text>

@@ -66,7 +66,7 @@ services:
       LOG_LEVEL: info
       TRUST_PROXY: "true"
       REQUIRE_HTTPS: "true"
-      PRIVACY_NOTICE_VERSION: ${PRIVACY_NOTICE_VERSION:-2026-08-12}
+      PRIVACY_NOTICE_VERSION: ${PRIVACY_NOTICE_VERSION:-2026-09-07-phone-v1}
       RATE_LIMIT_MAX: 600
       DATA_STORE: mysql
       DATABASE_URL: mysql://hometown:${MYSQL_APP_PASSWORD:?required}@mysql:3306/hometown_food

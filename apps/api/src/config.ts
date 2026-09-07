@@ -19,7 +19,7 @@ const configSchema = z.object({
     .string()
     .trim()
     .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/)
-    .default("2026-08-12"),
+    .default("2026-09-07-phone-v1"),
   AUTH_SESSION_TTL_SECONDS: z.coerce
     .number()
     .int()

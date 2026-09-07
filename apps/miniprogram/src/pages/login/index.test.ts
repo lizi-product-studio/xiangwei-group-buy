@@ -2,6 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthEvent, AuthState } from "../../utils/auth-state";
 
 type PageInstance = {
+  pageActive: boolean;
+  onShow: () => void;
+  onUnload: () => void;
+  authorizePhone: (event: WechatMiniprogram.ButtonGetPhoneNumber) => Promise<void>;
+  retryIdentity: () => void;
   data: Record<string, unknown>;
   setData: (patch: Record<string, unknown>) => void;
   stateData: (event: AuthEvent) => AuthState & { statusText: string };
@@ -54,6 +59,11 @@ describe("consumer login page", () => {
     await import("./index");
     if (!pageDefinition) throw new Error("login page was not registered");
     const instance: PageInstance = {
+      pageActive: true,
+      onShow: pageDefinition.onShow,
+      onUnload: pageDefinition.onUnload,
+      authorizePhone: pageDefinition.authorizePhone,
+      retryIdentity: pageDefinition.retryIdentity,
       data: JSON.parse(JSON.stringify(pageDefinition.data)) as Record<string, unknown>,
       setData(patch: Record<string, unknown>) {
         Object.assign(this.data, patch);
@@ -148,4 +158,63 @@ describe("consumer login page", () => {
     expect(instance.data.error).toBe("当前未配置微信快捷登录，请使用开发体验登录");
     expect(navigateTo).not.toHaveBeenCalled();
   });
+  it("keeps phone authorization refusal unauthenticated and makes it retryable", async () => {
+    const { instance, switchTab } = await loadPage({ authMode: "wechat", demoLoginEnabled: false });
+    instance.data.phoneRequired = true;
+    instance.data.privacyAccepted = true;
+    await instance.authorizePhone({ detail: { errMsg: "getPhoneNumber:fail user deny" } } as WechatMiniprogram.ButtonGetPhoneNumber);
+    expect(instance.data.status).toBe("PHONE_REQUIRED");
+    expect(instance.data.loggedIn).toBe(false);
+    expect(instance.data.error).toContain("重新授权");
+    expect(switchTab).not.toHaveBeenCalled();
+  });
+
+  it("waits for the phone step, passes only the granted phone code, and finishes after success", async () => {
+    const { instance, switchTab } = await loadPage({ authMode: "wechat", demoLoginEnabled: false });
+    const { customerAuth } = await import("../../utils/api");
+    const login = vi.spyOn(customerAuth, "loginWechat")
+      .mockResolvedValueOnce("PHONE_REQUIRED")
+      .mockResolvedValueOnce("AUTHENTICATED");
+    instance.changePrivacy({ detail: { value: ["accepted"] } });
+    await instance.login();
+    expect(instance.data.phoneRequired).toBe(true);
+    expect(instance.data.loggedIn).toBe(false);
+    expect(switchTab).not.toHaveBeenCalled();
+    await instance.authorizePhone({ detail: { errMsg: "getPhoneNumber:ok", code: "granted-phone" } } as WechatMiniprogram.ButtonGetPhoneNumber);
+    expect(login.mock.calls[1]?.[1]).toBe("granted-phone");
+    expect(instance.data.phoneRequired).toBe(false);
+    expect(instance.data.loggedIn).toBe(true);
+    expect(switchTab).toHaveBeenCalled();
+  });
+
+  it("clears the stale visible success state when cached login is no longer valid", async () => {
+    const { instance } = await loadPage({ authMode: "wechat", demoLoginEnabled: false });
+    instance.data.loggedIn = true;
+    instance.data.status = "AUTHENTICATED";
+    instance.onShow();
+    expect(instance.data.loggedIn).toBe(false);
+    expect(instance.data.status).toBe("SIGNED_OUT");
+    expect(instance.data.privacyAccepted).toBe(false);
+  });
+
+  it("invalidates a pending login when the page is unloaded", async () => {
+    const { instance } = await loadPage();
+    const { customerAuth } = await import("../../utils/api");
+    const epoch = customerAuth.captureSessionEpoch();
+    instance.data.status = "AUTHENTICATING";
+    instance.onUnload();
+    expect(instance.pageActive).toBe(false);
+    expect(customerAuth.captureSessionEpoch()).toBe(epoch + 1);
+  });
+
+  it("explains a phone service quota failure without exposing the raw WeChat error", async () => {
+    const { instance } = await loadPage({ authMode: "wechat", demoLoginEnabled: false });
+    instance.data.phoneRequired = true;
+    instance.data.privacyAccepted = true;
+    await instance.authorizePhone({ detail: { errMsg: "getPhoneNumber:fail", errno: 1400001 } } as unknown as WechatMiniprogram.ButtonGetPhoneNumber);
+    expect(instance.data.error).toBe("手机号授权服务额度不足，请稍后再试或联系平台");
+    expect(instance.data.loggedIn).toBe(false);
+    expect(instance.data.status).toBe("PHONE_REQUIRED");
+  });
+
 });

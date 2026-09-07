@@ -5,6 +5,7 @@
 export type AuthStatus =
   | "SIGNED_OUT"
   | "AWAITING_CONSENT"
+  | "PHONE_REQUIRED"
   | "AUTHENTICATING"
   | "AUTHENTICATED"
   | "ERROR";
@@ -17,6 +18,7 @@ export interface AuthState {
 
 export type AuthEvent =
   | { type: "CONSENT_CHANGED"; accepted: boolean }
+  | { type: "PHONE_REQUIRED" }
   | { type: "LOGIN_STARTED" }
   | { type: "LOGIN_SUCCEEDED" }
   | { type: "LOGIN_FAILED"; message: string }
@@ -42,6 +44,8 @@ export function reduceAuthState(
         status: event.accepted ? "AWAITING_CONSENT" : "SIGNED_OUT",
         error: "",
       };
+    case "PHONE_REQUIRED":
+      return { ...state, status: "PHONE_REQUIRED", error: "" };
     case "LOGIN_STARTED":
       return { ...state, status: "AUTHENTICATING", error: "" };
     case "LOGIN_SUCCEEDED":
@@ -68,6 +72,8 @@ export function reduceAuthState(
 
 export function authStatusText(status: AuthStatus): string {
   switch (status) {
+    case "PHONE_REQUIRED":
+      return "首次登录，请授权绑定手机号";
     case "AUTHENTICATING":
       return "正在连接微信…";
     case "AUTHENTICATED":

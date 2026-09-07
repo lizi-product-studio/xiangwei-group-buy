@@ -3,4 +3,4 @@
  * The API rejects a stale value, so an updated notice cannot be silently
  * accepted by an older client.
  */
-export const PRIVACY_NOTICE_VERSION = '2026-08-12';
+export const PRIVACY_NOTICE_VERSION = '2026-09-07-phone-v1';

@@ -57,3 +57,5 @@
   .login-page__cancel { margin-top: 16rpx; }
   .login-page__privacy-note { margin-top: 14rpx; }
 }
+
+.login-page__phone-copy {display:block;margin:12rpx 0;color:#697269;font-size:24rpx;line-height:1.7;}.login-page .login-page__retry {width:100%!important;margin:16rpx 0 0!important;padding:10rpx 0!important;background:transparent;color:#597a43;font-size:24rpx;line-height:1.6;}.login-page__retry::after {border:0;}

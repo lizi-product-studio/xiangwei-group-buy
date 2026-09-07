@@ -50,7 +50,7 @@ describe("customer auth session epoch", () => {
       resolveLoginExchange(accessToken = "token-a") {
         loginRequestCallbacks?.success?.({
           statusCode: 200,
-          data: { data: { accessToken, expiresAt: "2099-01-01T00:00:00.000Z", userId: "user-a" } },
+          data: { data: { phoneRequired: false, accessToken, expiresAt: "2099-01-01T00:00:00.000Z", userId: "user-a" } },
         });
       },
       respondProtected(response: unknown) {

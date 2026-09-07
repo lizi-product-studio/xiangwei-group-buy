@@ -557,7 +557,7 @@ describe("P1-C governance API contracts", () => {
         contactName: "王小明",
         contactPhone: "13900000000",
         privacyAccepted: true,
-        privacyVersion: "2026-08-12",
+        privacyVersion: "2026-09-07-phone-v1",
       },
     });
     expect(created.statusCode, created.body).toBe(201);
@@ -583,7 +583,7 @@ describe("P1-C governance API contracts", () => {
         contactName: "王小明",
         contactPhone: "13700000000",
         privacyAccepted: true,
-        privacyVersion: "2026-08-12",
+        privacyVersion: "2026-09-07-phone-v1",
       },
     });
     expect(corrected.statusCode, corrected.body).toBe(200);
@@ -606,7 +606,7 @@ describe("P1-C governance API contracts", () => {
         contactName: "王小明",
         contactPhone: "13600000000",
         privacyAccepted: true,
-        privacyVersion: "2026-08-12",
+        privacyVersion: "2026-09-07-phone-v1",
       },
     });
     const withdrawn = await app.inject({
@@ -666,7 +666,7 @@ describe("P1-C governance API contracts", () => {
         contactName: "王小明",
         contactPhone: "13900000000",
         privacyAccepted: true,
-        privacyVersion: "2026-08-12",
+        privacyVersion: "2026-09-07-phone-v1",
       },
     });
     expect(editAfterHandling.statusCode).toBe(409);

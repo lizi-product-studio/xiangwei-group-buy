@@ -129,6 +129,14 @@ describe("public API contracts", () => {
     ).toBe(false);
   });
 
+  it("accepts only a nonempty bounded optional phone authorization code", () => {
+    const input = { code: "wechat-code-123", privacyAccepted: true, privacyVersion: "2026-09-07-phone-v1" };
+    expect(wechatLoginSchema.safeParse({ ...input, phoneCode: "phone-code" }).success).toBe(true);
+    for (const phoneCode of ["", " ", 123, "x".repeat(257), null]) {
+      expect(wechatLoginSchema.safeParse({ ...input, phoneCode }).success).toBe(false);
+    }
+  });
+
   it("requires pickup managers to be created through the staff directory", () => {
     const input = {
       displayName: "点位负责人",

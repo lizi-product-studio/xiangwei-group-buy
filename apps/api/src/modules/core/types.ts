@@ -178,6 +178,8 @@ export type InternalStaffStatus =
 export interface User {
   id: string;
   wechatOpenId: string | null;
+  phoneNumber?: string;
+  phoneVerifiedAt?: string;
   status: "ACTIVE" | "BLOCKED";
   createdAt: string;
 }

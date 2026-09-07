@@ -18,6 +18,7 @@ function loginError(error: unknown): string {
 }
 
 Page({
+  pageActive: true,
   data: {
     status: initialAuthState.status,
     privacyAccepted: initialAuthState.privacyAccepted,
@@ -28,12 +29,14 @@ Page({
     sourceText: "个人服务",
     statusText: authStatusText(initialAuthState.status),
     loggedIn: false,
+    phoneRequired: false,
     demoLoginAvailable: false,
     navigationTop: 24,
     navigationHeight: 32,
   },
 
   onLoad(options: Record<string, string | undefined>) {
+    this.pageActive = true;
     const menu = typeof wx.getMenuButtonBoundingClientRect === "function"
       ? wx.getMenuButtonBoundingClientRect()
       : undefined;
@@ -56,8 +59,16 @@ Page({
       this.setData({
         ...this.stateData({ type: "LOGIN_SUCCEEDED" }),
         loggedIn: true,
+        phoneRequired: false,
       });
+    } else if (this.data.loggedIn) {
+      this.setData({ ...this.stateData({ type: "SESSION_EXPIRED" }), loggedIn: false, phoneRequired: false });
     }
+  },
+
+  onUnload() {
+    this.pageActive = false;
+    if (this.data.status === "AUTHENTICATING") customerAuth.clearSession();
   },
 
   stateData(event: Parameters<typeof reduceAuthState>[1]): AuthState & { statusText: string } {
@@ -75,10 +86,11 @@ Page({
     this.setData({
       ...this.stateData({ type: "CONSENT_CHANGED", accepted }),
       privacyError: "",
+      ...(accepted ? {} : { phoneRequired: false }),
     });
   },
 
-  async login() {
+  async login(phoneCode?: string) {
     if (this.data.status === "AUTHENTICATING") return;
     if (!this.data.privacyAccepted) {
       this.setData({
@@ -93,16 +105,50 @@ Page({
       loggedIn: false,
     });
     try {
-      await customerAuth.loginWechat(PRIVACY_NOTICE_VERSION);
-      this.setData({ ...this.stateData({ type: "LOGIN_SUCCEEDED" }), loggedIn: true });
+      const outcome = await customerAuth.loginWechat(PRIVACY_NOTICE_VERSION, typeof phoneCode === "string" ? phoneCode : undefined);
+      if (!this.pageActive) return;
+      if (outcome === "PHONE_REQUIRED") {
+        this.setData({ ...this.stateData({ type: "PHONE_REQUIRED" }), phoneRequired: true, loggedIn: false });
+        return;
+      }
+      this.setData({ ...this.stateData({ type: "LOGIN_SUCCEEDED" }), loggedIn: true, phoneRequired: false });
       void wx.showToast({ title: "登录成功", icon: "success" });
       finishCustomerLogin();
     } catch (error) {
+      if (!this.pageActive) return;
       this.setData({
         ...this.stateData({ type: "LOGIN_FAILED", message: loginError(error) }),
         loggedIn: false,
       });
     }
+  },
+
+  async authorizePhone(event: WechatMiniprogram.ButtonGetPhoneNumber) {
+    if (!this.data.phoneRequired || this.data.status === "AUTHENTICATING") return;
+    if (!this.data.privacyAccepted) {
+      this.setData({ privacyError: "请先勾选并同意用户服务协议和隐私说明" });
+      return;
+    }
+    const phoneCode = event.detail?.code;
+    if (event.detail?.errMsg !== "getPhoneNumber:ok" || !phoneCode) {
+      this.setData({
+        ...this.stateData({ type: "PHONE_REQUIRED" }),
+        error: (event.detail as { errno?: number }).errno === 1400001
+          ? "手机号授权服务额度不足，请稍后再试或联系平台"
+          : "手机号授权未完成，可以重新授权，或暂不登录先逛逛",
+        loggedIn: false,
+      });
+      return;
+    }
+    // A phone code is single-use. Keep it only in this call and obtain a fresh
+    // wx.login identity code in customerAuth.loginWechat for the same request.
+    await this.login(phoneCode);
+  },
+
+  retryIdentity() {
+    if (this.data.status === "AUTHENTICATING") return;
+    this.setData({ phoneRequired: false });
+    void this.login();
   },
 
   async experienceLogin() {

@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
@@ -18,12 +19,13 @@ describe("WeChat session routing through the shared authentication hook", () => 
     app = await buildApp({
       config,
       store: new MemoryStore(false),
+      wechatPhoneExchange: { exchange: async () => ({ phoneNumber: "13800138000", phoneVerifiedAt: new Date().toISOString() }) },
       wechatCodeExchange: { exchange: async () => ({ openId: "session-routing-user" }) },
     });
     const login = await app.inject({
       method: "POST",
       url: "/api/v1/auth/wechat/login",
-      payload: { code: "wechat-code", privacyAccepted: true, privacyVersion: config.PRIVACY_NOTICE_VERSION },
+      payload: { phoneCode: "phone-code", code: "wechat-code", privacyAccepted: true, privacyVersion: config.PRIVACY_NOTICE_VERSION },
     });
     expect(login.statusCode).toBe(200);
     const headers = { authorization: `Bearer ${login.json().data.accessToken as string}` };
@@ -38,4 +40,23 @@ describe("WeChat session routing through the shared authentication hook", () => 
     expect((await app.inject({ method: "POST", url: "/api/v1/auth/logout", headers, payload: {} })).statusCode).toBe(204);
     expect((await app.inject({ method: "GET", url: "/api/v1/orders", headers })).statusCode).toBe(401);
   });
+  it("returns only phoneRequired before binding and rejects legacy consumer sessions", async () => {
+    const config = loadConfig({ NODE_ENV: "test", AUTH_PROVIDER: "wechat", WECHAT_APP_ID: "test-wechat-app", WECHAT_APP_SECRET: "test-wechat-secret" });
+    const store = new MemoryStore(false);
+    const phoneExchange = vi.fn(async () => ({ phoneNumber: "13800138000", phoneVerifiedAt: new Date().toISOString() }));
+    app = await buildApp({ config, store, wechatCodeExchange: { exchange: async () => ({ openId: "legacy" }) }, wechatPhoneExchange: { exchange: phoneExchange } });
+    const payload = { code: "identity-code", privacyAccepted: true, privacyVersion: config.PRIVACY_NOTICE_VERSION };
+    const first = await app.inject({ method: "POST", url: "/api/v1/auth/wechat/login", payload: { ...payload, phoneNumber: "13900139000", openid: "forged" } });
+    expect(first.json().data).toEqual({ phoneRequired: true });
+    expect(await store.findUserByWechatOpenId("legacy")).toBeNull();
+    expect(phoneExchange).not.toHaveBeenCalled();
+    await store.saveUser({ id: "legacy-user", wechatOpenId: "legacy", status: "ACTIVE", createdAt: new Date().toISOString() });
+    const oldToken = "legacy-token".repeat(4);
+    await store.saveAuthSession({ tokenHash: createHash("sha256").update(oldToken).digest("hex"), userId: "legacy-user", roles: ["USER"], authorizationVersion: 0, expiresAt: new Date(Date.now()+60_000).toISOString() });
+    expect((await app.inject({ method: "GET", url: "/api/v1/orders", headers: { authorization: `Bearer ${oldToken}` } })).statusCode).toBe(401);
+    const bound = await app.inject({ method: "POST", url: "/api/v1/auth/wechat/login", payload: { ...payload, phoneCode: "phone-code" } });
+    expect(bound.json().data).toMatchObject({ phoneRequired: false, userId: "legacy-user" });
+    expect(phoneExchange).toHaveBeenCalledExactlyOnceWith("phone-code", "legacy");
+  });
+
 });
