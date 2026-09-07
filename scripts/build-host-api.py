@@ -104,7 +104,7 @@ finally:
                                    capture_output=True, text=True, timeout=10)
             if state.returncode == 0 and state.stdout.strip() == 'true':
                 residual.append(container_id)
-            elif state.returncode != 0 and 'No such' not in state.stderr:
+            elif state.returncode != 0 and 'no such' not in state.stderr.lower():
                 cleanup_errors.append('residual inspect unavailable: ' + container_id)
         except Exception:
             cleanup_errors.append('residual inspect timeout: ' + container_id)
