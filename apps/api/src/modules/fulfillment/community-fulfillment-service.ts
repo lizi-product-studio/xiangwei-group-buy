@@ -242,7 +242,14 @@ export class CommunityFulfillmentService {
           "只有运输中的配送可以由点位确认到货",
           409,
         );
-      const rows = await store.listOrderLinesByCampaignForUpdate(campaign.id);
+      const fulfillmentOrders = new Set(
+        (await store.listOrdersByCampaign(campaign.id))
+          .filter((order) => order.deliveryPlanId === plan.id &&
+            ["LOCKED", "ALLOCATING", "IN_TRANSIT", "READY_FOR_PICKUP"].includes(order.status))
+          .map((order) => order.id),
+      );
+      const rows = (await store.listOrderLinesByCampaignForUpdate(campaign.id))
+        .filter((row) => fulfillmentOrders.has(row.orderId));
       // The sales-line locks serialize two first-arrival requests.  Re-read the
       // idempotency fact after acquiring them, otherwise a contender that read
       // before the first transaction committed could allocate the same paid
@@ -550,6 +557,12 @@ export class CommunityFulfillmentService {
       const rows = await store.listOrderLinesByCampaignForUpdate(
         draft.campaignId,
       );
+      for (const orderId of new Set(draft.items.map((item) => item.orderId))) {
+        const order = await store.getOrderForUpdate(orderId);
+        if (!order || order.deliveryPlanId !== draft.deliveryPlanId ||
+          !["LOCKED", "ALLOCATING", "IN_TRANSIT", "READY_FOR_PICKUP"].includes(order.status))
+          throw new BusinessError("CONCURRENT_MODIFICATION", "订单履约状态已变化，不能确认过期草案", 409);
+      }
       const byId = new Map(rows.map((row) => [row.id, row]));
       const allocations: FulfillmentAllocation[] = [];
       const exception = await store.getFulfillmentExceptionForUpdate(

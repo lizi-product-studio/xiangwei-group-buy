@@ -6,7 +6,7 @@ import { CommunityFulfillmentService } from "./community-fulfillment-service.js"
 
 const arrivedAt = "2026-08-21T08:00:00.000Z";
 describe("arrival discrepancy allocation", () => {
-  it("allocates received quantity by paidAt then orderNo and waits for operator confirmation", async () => {
+  it.each(["normal", "REFUNDING", "REFUNDED", "CANCELLED", "stale-draft"] as const)("allocates only fulfillment orders, preserves ordering and rejects obsolete drafts: %s", async (scenario) => {
     const store = new MemoryStore(false);
     const campaign: Campaign = {
       id: "campaign",
@@ -106,6 +106,10 @@ describe("arrival discrepancy allocation", () => {
     };
     await saveOrder("later", "ORDER-2", "2026-08-20T02:00:00.000Z");
     await saveOrder("earlier", "ORDER-1", "2026-08-20T01:00:00.000Z");
+    if (["REFUNDING", "REFUNDED", "CANCELLED"].includes(scenario)) {
+      await saveOrder("excluded", "ORDER-0", "2026-08-20T00:00:00.000Z");
+      await store.saveOrderStatus({ ...(await store.getOrder("excluded"))!, status: scenario as Order["status"] });
+    }
     const service = new CommunityFulfillmentService(
       store,
       "pickup-secret-at-least-16",
@@ -149,6 +153,13 @@ describe("arrival discrepancy allocation", () => {
         (v) => v.fulfilledQuantity === 0,
       ),
     ).toBe(true);
+    if (scenario === "stale-draft") {
+      await store.saveOrderStatus({ ...(await store.getOrder("later"))!, status: "REFUNDING" });
+      await expect(service.confirmAllocationDraft(confirmation.id, "operator", "confirm-request")).rejects.toThrow("过期草案");
+      expect((await store.listOrderLinesByCampaign("campaign")).every((row) => row.fulfilledQuantity === 0)).toBe(true);
+      expect((await store.getCommunityAllocationDraftByDeliveryForUpdate(confirmation.id))?.status).toBe("PENDING_OPERATOR_CONFIRMATION");
+      return;
+    }
     await service.confirmAllocationDraft(
       confirmation.id,
       "operator",

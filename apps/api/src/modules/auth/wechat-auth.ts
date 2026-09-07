@@ -55,7 +55,9 @@ export class AuthService {
     const token = authorization.slice(7).trim();
     if (token.length < 32 || token.length > 128) return null;
     const session = await this.store.getAuthSession(tokenHash(token));
-    return session ? { userId: session.userId, roles: session.roles } : null;
+    return session?.roles.length === 1 && session.roles[0] === 'USER'
+      ? { userId: session.userId, roles: session.roles }
+      : null;
   }
 
   public async logout(authorization: string | undefined): Promise<void> {

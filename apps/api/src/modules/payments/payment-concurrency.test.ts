@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { moneyCents } from "@hometown/domain";
 import { MemoryStore } from "../core/store.js";
 import { LedgerService } from "../finance/ledger-service.js";
+import { OrderService } from "../orders/order-service.js";
+import { CampaignService } from "../campaigns/campaign-service.js";
 import { PaymentService } from "./payment-service.js";
 import type { PaymentProvider } from "./payment-provider.js";
 
@@ -87,8 +89,9 @@ describe("payment and refund concurrency", () => {
     ]);
     expect([paid.status, cancelled.status]).toContain("fulfilled");
     const order = await store.getOrder("order");
-    expect(["PAID_WAITING_CLOSE", "CANCELLED"]).toContain(order?.status);
-    if (order?.status === "PAID_WAITING_CLOSE") {
+    expect(["PAID_WAITING_CLOSE", "REFUNDING"]).toContain(order?.status);
+    if (order?.status === "REFUNDING") expect(await store.listOrderRefunds(10)).toHaveLength(1);
+    {
       await expect(
         service.handleNotification(notification),
       ).resolves.toBeUndefined();
@@ -98,6 +101,40 @@ describe("payment and refund concurrency", () => {
         ),
       ).toHaveLength(1);
     }
+  });
+  it.each(["cancel", "expire"])("persists a recoverable late-payment refund after %s without restoring inventory", async (mode) => {
+    const store = await fixture();
+    const orders = new OrderService(store, new CampaignService(store, { schedule: async () => {} }));
+    if (mode === "expire") {
+      await store.saveOrder({ ...(await store.getOrder("order"))!, expiresAt: new Date(0).toISOString() });
+      expect(await orders.expirePendingOrders()).toBe(1);
+    } else await orders.cancelPending("order", "customer");
+    expect((await store.getPaymentByOrder("order"))?.status).toBe("FAILED");
+    const release = vi.spyOn(store, "releaseCampaignInventory");
+    const reserve = vi.spyOn(store, "reserveCampaignInventory");
+    const submit = vi.fn(provider.refund);
+    const localProvider = { ...provider, refund: submit };
+    const service = new PaymentService(store, localProvider, new LedgerService());
+    const callback = { eventId: "late-pay", type: "TRANSACTION.SUCCESS", orderNo: "ORDER-1", providerPaymentId: "wechat-payment", amountCents: 1200, bodyHash: "late-hash" };
+    await expect(service.handleNotification({ ...callback, amountCents: 1199 })).rejects.toThrow("金额不一致");
+    await service.handleNotification(callback);
+    await service.handleNotification(callback);
+    await service.handleNotification({ ...callback, eventId: "late-pay-again" });
+    expect((await store.getOrder("order"))?.status).toBe("REFUNDING");
+    expect((await store.getPaymentByOrder("order"))?.status).toBe("REFUNDING");
+    expect(await store.listOrderRefunds(10)).toEqual([expect.objectContaining({ status: "CREATED", providerRefundNo: "RFORDER-1", amountCents: 1200 })]);
+    expect(submit).not.toHaveBeenCalled();
+    // A fresh service recovers the committed obligation after a process restart.
+    await new PaymentService(store, localProvider, new LedgerService()).reconcileRefunds();
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect((await store.getOrder("order"))?.status).toBe("REFUNDED");
+    await service.handleNotification({ ...callback, eventId: "late-after-refund" });
+    await expect(service.handleNotification({ ...callback, eventId: "wrong-provider-id", providerPaymentId: "other-payment" })).rejects.toThrow("支付机构交易号不一致");
+    expect(await store.listOrderRefunds(10)).toHaveLength(1);
+    expect((await store.getOrder("order"))?.status).toBe("REFUNDED");
+    expect((await store.listLedgerTransactions("order")).map((entry) => entry.eventType).sort()).toEqual(["PAYMENT_SUCCEEDED", "REFUND_SUCCEEDED"]);
+    expect(release).not.toHaveBeenCalled();
+    expect(reserve).not.toHaveBeenCalled();
   });
   it("applies a repeated refund callback once", async () => {
     const store = await fixture();

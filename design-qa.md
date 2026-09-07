@@ -1,43 +1,36 @@
-# Admin Login Design QA
+# 登录页设计核验
+
+任务：TASK-20260907-LAUNCH-1800。用户已选定照片食材方案，范围为现有微信小程序登录页。
+
+## 依据与归一化
+
+- 原始视觉：exec-6e3f2f34-2691-4f51-8f4e-6f3f3df353a3.png，853×1844。归一化副本：docs/evidence/launch-20260907/login-reference-normalized.png，430×932。
+- 实际微信工具截图：docs/evidence/launch-20260907/login-320.png、login-430.png，原图均1142×768，包含桌面工具；实际CSS设备分别320×568、430×932。
+- 430内容区从工具截图坐标833,81裁取267×580，再缩放430×932为login-430-normalized.png。与参考归一图在同一工具输入中同时查看。预览本身缩小，放大不会增加真实细节，不作像素级一致承诺。
+- 状态：游客、协议未勾选、登录页初始状态。真实微信胶囊/状态栏/底部系统手势区保留，不仿造草图中右侧“登录”导航字。
+
+## 发现与复查
+
+1. P1 / FIXED：微信原生按钮默认宽度使返回按钮呈大白胶囊、登录按钮窄。改成本页明确宽度、透明返回点击区、主按钮满宽；最终320/430截图确认。
+2. P2 / FIXED：初版协议与身份说明字号过小。改至少12px、允许窄屏换行；320图确认不横向溢出。
+3. P2 / FIXED：修改按钮后WXSS出现不支持标签/属性选择器提示。改纯类选择器，重新加载后当前日志未见该新增警告，布局保持。
+
+## 五项视觉检查
+
+- 字体：使用现有系统中文字体，品牌/标题/副标题有层级；协议至少12px。与图稿字形不做字体文件级复制。
+- 间距：图片在上、信息左对齐、主要操作在下；320紧凑布局可换行，430保留留白。按钮与胶囊未互相遮挡。
+- 颜色：暖白底、橙色品牌/主按钮、深色标题、绿色协议/访客入口符合图稿。
+- 图片：独立生成照片作为JPEG资产，非将整张界面截图做背景；布袋、食材、暖光及下缘淡出保持，未裁切主体。截图放大略糊来自预览缩放，源JPEG为1000×1000。
+- 文案：品牌、主标题、订单取货说明、协议与访客入口、仅确认身份不获取手机号保持；文字和按钮均可交互原生控件。
+
+全图比较后单独查看底部协议与按钮区域，验证完整文案和窄屏换行。真实工具已操作未勾协议点击登录，出现要求同意提示；已打开用户协议并返回，仍未勾选。没有代用户接受协议或进行真实账号登录。
+
+## 验证边界
+
+独立QA：功能/320与430视觉/源包约束PASS；4文件20项定向测试通过。整批check退出0，365通过、8数据库集成跳过，小程序115项通过。源包925267字节，小于1.2MiB；不等于微信最终上传包实测。
+
+375设备未单独操作；320页脚接近下缘，实际滚动未测，源码保留自然页面滚动。真实微信、真机、支付和微信上传不属于视觉PASS。
+
+无未解决P0/P1/P2视觉发现。P3：系统字体、图片主体局部与生成草图存在自然差异，不影响已确认构图和操作。
 
 final result: passed
-
-Evidence refreshed from the final reviewed code on 2026-09-03 after the
-rate-limit, disabled-control, password-setup and session-boundary fixes. No
-credential shown in these captures belongs to a real environment.
-
-## Scope
-
-- Source visual: `.visual-audit-2026-09-02/admin-login/screens/01-login-ideation.png`
-- Implementation capture: `.visual-audit-2026-09-02/admin-login/implementation/02-login-1440x1024.png`
-- Compared state and viewport: unauthenticated default login, `1440 × 1024`
-
-## Comparison result
-
-- The desktop split is aligned with the approved composition: narrative panel `54%`, form panel `46%`.
-- The implemented form begins at approximately `x=876, y=205`, has a `466px` content width, and matches the source hierarchy for title, fields, primary action, and recovery link.
-- The approved sorghum-field asset, navy overlay, warm-white work surface, orange rule, and accessible dark-orange CTA are present without placeholder art.
-- Passwords remain masked by default; the real icon control toggles visibility and has a usable focus target.
-
-## State and responsive evidence
-
-- `03-login-1440x900.png`: compressed-height desktop layout.
-- `04-login-900.png`, `05-login-768.png`, `06-login-375.png`: responsive layouts with no page-level horizontal overflow.
-- `07-field-errors.png`: field-level required validation.
-- `08-rate-limit.png`: Retry-After countdown, recovery contact and disabled
-  login controls while the window is active.
-- `09-force-password-change.png`: restricted temporary-password change state.
-- `10-session-expired.png`: recoverable session-expiry notice.
-- `11-loading.png`: disabled/loading submit, fields, password-visibility and
-  recovery controls.
-- `12-invalid-credentials.png`: generic credential error with password cleared.
-- `13-network-error.png`: recoverable service-connection error with retry and
-  escalation guidance, without raw status or stack output.
-
-All four responsive captures were generated with an explicit horizontal
-overflow assertion. The session-expiry and password-setup captures use only
-synthetic local browser fixtures.
-
-## Remaining polish
-
-- P3: the existing Ant Design branch mark is the closest available library icon to the reference plant glyph; it does not affect hierarchy, accessibility, or task completion.

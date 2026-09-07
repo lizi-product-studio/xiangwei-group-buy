@@ -13,8 +13,8 @@ describe('secure mini-program deployment configuration', () => {
     expect(validSubscriptionMap(fiveTemplates.map((item) => item.type === 'PICKUP_EXPIRED' ? { ...item, templateId: 'refund' } : item))).toBe(false);
     expect(validSubscriptionMap([...fiveTemplates, fiveTemplates[0]!])).toBe(false);
   });
-  it('allows local development without release metadata', () => {
-    expect(resolveDeployment('develop')).toMatchObject({ apiBaseUrl: 'http://180.76.100.156', authMode: 'demo', demoLoginEnabled: true });
+  it('defaults to the migrated HTTPS target with WeChat auth and preserves explicit local demo', () => {
+    expect(resolveDeployment('develop')).toMatchObject({ apiBaseUrl: 'https://liziqi.icu', authMode: 'wechat', demoLoginEnabled: false });
     expect(resolveDeployment('local')).toMatchObject({ authMode: 'demo', demoLoginEnabled: true });
   });
 
@@ -23,10 +23,10 @@ describe('secure mini-program deployment configuration', () => {
     expect(() => resolveDeployment('release')).toThrow(/deployment\.local/);
   });
 
-  it('only enables demo login for the approved development HTTP targets', () => {
+  it('only enables demo login for the explicit local HTTP targets', () => {
     const remote = resolveDeployment('develop');
     const local = resolveDeployment('local');
-    expect(isDemoDeployment(remote)).toBe(true);
+    expect(isDemoDeployment(remote)).toBe(false);
     expect(isLocalDemoDeployment(remote)).toBe(false);
     expect(isDemoDeployment(local)).toBe(true);
     expect(isLocalDemoDeployment(local)).toBe(true);
@@ -34,8 +34,8 @@ describe('secure mini-program deployment configuration', () => {
     expect(isLocalDemoDeployment({ ...local, authMode: 'wechat' })).toBe(false);
     expect(isLocalDemoDeployment({ ...local, demoLoginEnabled: false })).toBe(false);
     expect(isDemoDeployment({ ...local, apiBaseUrl: 'http://unapproved.example.test' })).toBe(false);
-    expect(isDemoDeployment({ ...remote, apiBaseUrl: 'https://180.76.100.156' })).toBe(false);
-    expect(isDemoDeployment({ ...remote, apiBaseUrl: 'http://180.76.100.156:9999' })).toBe(false);
+    expect(isDemoDeployment({ ...remote, apiBaseUrl: 'https://liziqi.icu' })).toBe(false);
+    expect(isDemoDeployment({ ...remote, apiBaseUrl: 'http://remote.example.test:9999' })).toBe(false);
   });
 
   it('distinguishes a missing optional file from a broken dependency inside it', () => {

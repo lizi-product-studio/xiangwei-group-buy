@@ -327,6 +327,16 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
   await page.unroute("**/api/v1/admin/community/cancellation-requests");
   await expect(financeCancellation.getByRole("button", { name: "执行退款" })).toHaveCount(0);
 
+  // Four one-item orders were paid; cancelA has now been refunded and must
+  // never contribute to arrival or allocation. The rejected cancelB remains.
+  for (const value of [cancelA, qualityA, qualityB, cancelB]) {
+    const response = await request.fetch(`${apiBase}/api/v1/orders/${value.id}`, {
+      headers: { "x-demo-user-id": value.userId, "x-demo-role": "USER" },
+    });
+    expect(response.status(), await response.text()).toBe(200);
+    expect((await response.json()).data.status).toBe(value.id === cancelA.id ? "REFUNDED" : "LOCKED");
+  }
+
   await post(request, `/api/v1/admin/delivery-plans/${campaign.deliveryPlan.id}/book-vehicle`, {
     logisticsPlatform: "P1-C 测试车队",
     vehicleOrderNo: `P1C-${suffix}`,
@@ -346,7 +356,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
         receivedBy: "P1-C 紧急代办人",
         confirmationNote: "为治理角色验收建立到货前置",
         emergencyReason: "浏览器验收的品质售后前置",
-        items: [{ catalogSkuId: sku.id, receivedQuantity: 4, rejectedQuantity: 0, shortQuantity: 0, damagedQuantity: 0, reason: null, evidenceNote: null }],
+        items: [{ catalogSkuId: sku.id, receivedQuantity: 3, rejectedQuantity: 0, shortQuantity: 0, damagedQuantity: 0, reason: null, evidenceNote: null }],
       },
     },
   );

@@ -35,7 +35,7 @@ export const deployments: Partial<Record<'trial' | 'release', MiniProgramDeploym
 
 /**
  * Optional local development override. The default `develop` target is the
- * shared remote demo API; set this only in an ignored local file when the API
+ * HTTPS API with WeChat login; change remote to local only when the API
  * is running on this machine. Never use this override for trial/release.
  */
-export const development = { mode: 'local' as const };
+export const development = { mode: 'remote' as const };

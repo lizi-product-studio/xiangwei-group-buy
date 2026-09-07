@@ -258,6 +258,9 @@ export class AdminAuthService {
     const tokenHash = sessionTokenHash(token);
     const session = await this.store.getAuthSession(tokenHash);
     if (!session) return null;
+    // Consumer and employee tokens share storage. Leave consumer sessions for
+    // the WeChat authenticator instead of revoking them as invalid employees.
+    if (session.roles.length === 1 && session.roles[0] === "USER") return null;
     const [user, credential, staff] = await Promise.all([
       this.store.getUser(session.userId),
       this.store.findAdminCredentialByUserId(session.userId),
@@ -305,7 +308,7 @@ export class AdminAuthService {
       throw new BusinessError("AUTH_REQUIRED", "登录状态已失效，请重新登录", 401);
     if (!(await verifyAdminCredentialPassword(credential, currentPassword)))
       throw new BusinessError("INVALID_CREDENTIALS", "账号或密码不正确", 401);
-    await this.store.transaction(async (store) => {
+    return this.store.transaction(async (store) => {
       const current = await store.findAdminCredentialByUserId(actor.userId);
       const currentStaff = await store.getInternalStaff(actor.userId);
       if (
@@ -331,8 +334,12 @@ export class AdminAuthService {
         afterData: { authorizationVersion: nextVersion },
         createdAt: now,
       });
+      // Issue the replacement session in the same authorized transaction.
+      // A subsequent login/read would still carry this request's old version
+      // and be rejected by MysqlStore after the password change committed.
+      const session = await this.issueSession(current.userId, current.roles, nextVersion);
+      return { nextAction: "LOGIN" as const, ...session };
     });
-    return this.login(credential.username, newPassword);
   }
 
   public async logout(authorization: string | undefined): Promise<void> {

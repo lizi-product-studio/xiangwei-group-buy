@@ -38,10 +38,10 @@ describe("consumer-safe request errors", () => {
     expect(message).not.toMatch(/503|https?:\/\//);
   });
 
-  it("uses a remote-service recovery message for the shared develop demo", async () => {
-    const { customerErrorMessage } = await load({ apiBaseUrl: "http://180.76.100.156" });
-    expect(customerErrorMessage(new Error("HTTP 503 http://180.76.100.156/api/v1/campaigns"))).toBe(
-      "服务暂时不可用，请稍后重试",
+  it("uses a remote-service recovery message for the remote develop target", async () => {
+    const { customerErrorMessage } = await load({ apiBaseUrl: "https://liziqi.icu", authMode: "wechat", demoLoginEnabled: false });
+    expect(customerErrorMessage(new Error("HTTP 503 https://liziqi.icu/api/v1/campaigns"))).toBe(
+      "暂时无法完成请求，请稍后重试",
     );
   });
 

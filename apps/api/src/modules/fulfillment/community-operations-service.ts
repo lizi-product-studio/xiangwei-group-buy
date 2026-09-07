@@ -4,6 +4,7 @@ import type {
   CommunityCancellationRequest,
   FulfillmentAllocation,
   FulfillmentException,
+  Order,
 } from "../core/types.js";
 import type { PaymentService } from "../payments/payment-service.js";
 import type { NotificationService } from "../notifications/notification-service.js";
@@ -37,6 +38,16 @@ export class CommunityOperationsService {
       afterData: value,
       createdAt: this.now(),
     });
+  }
+  private async assertCancellationBeforeDispatch(store: CommunityOperationsStore, order: Order) {
+    // One campaign has one fixed pickup plan. Inspect every matching batch;
+    // a draft batch must not hide another batch that has already departed.
+    const departed = (await store.listDispatchBatches()).some((batch) =>
+      batch.campaignId === order.campaignId &&
+      (batch.status !== "DRAFT" || batch.dispatchedAt !== null),
+    );
+    if (departed || !["PAID_WAITING_CLOSE", "LOCKED", "ALLOCATING"].includes(order.status))
+      throw new BusinessError("INVALID_STATE_TRANSITION", "订单当前不能取消；发车后应进入履约异常或品质售后处理", 409);
   }
   public async requestCancellation(
     orderId: string,
@@ -154,6 +165,11 @@ export class CommunityOperationsService {
           "当前取消申请不能审核",
           409,
         );
+      if (approved) {
+        const order = await store.getOrderForUpdate(orderId);
+        if (!order) throw new BusinessError("RESOURCE_NOT_FOUND", "订单不存在", 404);
+        await this.assertCancellationBeforeDispatch(store, order);
+      }
       value.status = requestedStatus;
       value.reviewedBy = actorId;
       value.reviewedAt = this.now();
@@ -192,6 +208,7 @@ export class CommunityOperationsService {
       const order = await store.getOrderForUpdate(orderId);
       if (!order)
         throw new BusinessError("RESOURCE_NOT_FOUND", "订单不存在", 404);
+      await this.assertCancellationBeforeDispatch(store, order);
       order.status = transitionOrder(order.status, "REFUNDING");
       await store.saveOrderStatus(order);
       await this.payments.ensureOrderRefundIntent(store, order.id);

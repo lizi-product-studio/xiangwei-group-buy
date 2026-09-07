@@ -32,3 +32,11 @@ describe("state machines", () => {
     );
   });
 });
+
+ it("permits approved refunds after completion without reopening fulfillment", () => {
+  expect(transitionOrder("COMPLETED", "REFUNDING")).toBe("REFUNDING");
+  expect(() => transitionOrder("COMPLETED", "READY_FOR_PICKUP")).toThrow();
+  expect(() => transitionOrder("COMPLETED", "PAID_WAITING_CLOSE")).toThrow();
+  expect(() => transitionOrder("REFUNDED", "REFUNDING")).toThrow();
+  expect(() => transitionCampaign("COMPLETED", "OPEN")).toThrow();
+});

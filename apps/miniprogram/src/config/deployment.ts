@@ -77,10 +77,10 @@ if (typeof require === 'function') {
 }
 
 const remoteDevelop: MiniProgramDeployment = {
-  apiBaseUrl: 'http://180.76.100.156',
-  authMode: 'demo',
+  apiBaseUrl: 'https://liziqi.icu',
+  authMode: 'wechat',
   subscriptionTemplates: [],
-  demoLoginEnabled: true,
+  demoLoginEnabled: false,
 };
 const localDevelop: MiniProgramDeployment = {
   apiBaseUrl: 'http://127.0.0.1:3100',
@@ -91,7 +91,6 @@ const localDevelop: MiniProgramDeployment = {
 const develop = developmentMode === 'local' ? localDevelop : remoteDevelop;
 
 const LOCAL_HTTP_HOST = /^http:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?(?:\/|$)/i;
-const REMOTE_DEMO_HTTP_HOST = /^http:\/\/180\.76\.100\.156(?:\/|$)/i;
 
 export function isDemoDeployment(
   deployment: Pick<MiniProgramDeployment, 'apiBaseUrl' | 'authMode' | 'demoLoginEnabled'>,
@@ -99,7 +98,7 @@ export function isDemoDeployment(
   return (
     deployment.authMode === 'demo' &&
     deployment.demoLoginEnabled === true &&
-    (LOCAL_HTTP_HOST.test(deployment.apiBaseUrl) || REMOTE_DEMO_HTTP_HOST.test(deployment.apiBaseUrl))
+    LOCAL_HTTP_HOST.test(deployment.apiBaseUrl)
   );
 }
 

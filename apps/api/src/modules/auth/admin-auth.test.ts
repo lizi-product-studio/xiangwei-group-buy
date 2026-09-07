@@ -501,8 +501,18 @@ describe("AdminAuthService", () => {
     expect(normal.nextAction).toBe("LOGIN");
   });
 
-  it("changes a personal password through the protected route and rotates the bearer session", async () => {
-    const store = new MemoryStore(false);
+  it.each([false, true])("changes a personal password and rotates its bearer session (transactional credential reads: %s)", async (transactionalReads) => {
+    // MysqlStore wraps standalone reads in a transaction, which rechecks the
+    // request actor version. MemoryStore alone cannot expose post-change reads
+    // accidentally performed with the now-revoked request identity.
+    class TransactionalCredentialStore extends MemoryStore {
+      public override async findAdminCredential(username: string) {
+        return this.transaction(() => super.findAdminCredential(username));
+      }
+    }
+    const store = transactionalReads
+      ? new TransactionalCredentialStore(false)
+      : new MemoryStore(false);
     await store.saveUser({
       id: "self-change-user",
       wechatOpenId: null,

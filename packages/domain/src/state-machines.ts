@@ -47,7 +47,8 @@ const ORDER_TRANSITIONS: Readonly<Record<OrderStatus, readonly OrderStatus[]>> =
   // This is fulfilment completion, never a customer order cancellation.
   READY_FOR_PICKUP: ['PICKED_UP', 'REFUNDING', 'COMPLETED'],
   PICKED_UP: ['COMPLETED', 'REFUNDING'],
-  COMPLETED: [],
+  // Fulfillment completion does not remove an approved quality refund right.
+  COMPLETED: ['REFUNDING'],
   CANCELLING: ['CANCELLED', 'REFUNDING'],
   REFUNDING: ['REFUNDED'],
   REFUNDED: [],

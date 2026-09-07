@@ -537,7 +537,29 @@ export class PaymentService {
     payment: Payment,
     providerPaymentId: string,
   ): Promise<void> {
-    if (payment.status === "SUCCEEDED") return;
+    if (["SUCCEEDED", "REFUNDING", "REFUNDED"].includes(payment.status)) {
+      if (payment.providerPaymentId !== providerPaymentId)
+        throw new BusinessError("FINANCIAL_INCONSISTENT", "支付机构交易号不一致", 409);
+      return;
+    }
+    // Cancellation has already released inventory. A verified late success is
+    // money owed back, never a reason to reopen fulfillment or reserve stock.
+    if (order.status === "CANCELLED") {
+      const paidAt = new Date().toISOString();
+      payment.status = "SUCCEEDED";
+      payment.providerPaymentId = providerPaymentId;
+      payment.succeededAt = paidAt;
+      payment.initiationLeaseUntil = null;
+      payment.initiationClaimToken = null;
+      if (!(await store.savePaymentIfStatus(payment, ["CREATED", "FAILED"])))
+        throw new BusinessError("CONCURRENT_MODIFICATION", "支付单状态已变化", 409);
+      order.status = transitionOrder(order.status, "REFUNDING");
+      order.paidAt = paidAt;
+      await store.saveOrderStatus(order);
+      await this.ledger.recordPayment(store, order);
+      await this.ensureOrderRefundIntent(store, order.id);
+      return;
+    }
     if (order.status !== "PENDING_PAYMENT")
       throw new BusinessError(
         "INVALID_STATE_TRANSITION",

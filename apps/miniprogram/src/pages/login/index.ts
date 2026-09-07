@@ -29,9 +29,17 @@ Page({
     statusText: authStatusText(initialAuthState.status),
     loggedIn: false,
     demoLoginAvailable: false,
+    navigationTop: 24,
+    navigationHeight: 32,
   },
 
   onLoad(options: Record<string, string | undefined>) {
+    const menu = typeof wx.getMenuButtonBoundingClientRect === "function"
+      ? wx.getMenuButtonBoundingClientRect()
+      : undefined;
+    if (menu && menu.top > 0 && menu.height > 0) {
+      this.setData({ navigationTop: menu.top, navigationHeight: menu.height });
+    }
     const intent = readAuthIntent();
     const source = (intent?.source ?? options.source ?? "profile") as AuthIntentSource;
     const demoLoginAvailable = customerAuth.isDemoLoginAvailable();
@@ -130,6 +138,7 @@ Page({
   },
 
   cancel() {
+    if (this.data.status === "AUTHENTICATING") return;
     this.setData(this.stateData({ type: "LOGIN_CANCELLED" }));
     cancelCustomerLogin();
   },

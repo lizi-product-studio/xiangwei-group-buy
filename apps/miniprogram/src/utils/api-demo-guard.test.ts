@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { resolveDeployment } from "../config/deployment";
 import { PRIVACY_NOTICE_VERSION } from "../config/legal";
 
 describe("development demo auth guard", () => {
@@ -40,7 +41,7 @@ describe("development demo auth guard", () => {
   it.each([
     ["HTTPS", "https://127.0.0.1:3100", true],
     ["unapproved HTTP", "http://unapproved.example.test", true],
-    ["remote demo with explicit port", "http://180.76.100.156:9999", true],
+    ["production HTTPS even with demo capability", "https://liziqi.icu", true],
     ["demo capability disabled", "http://127.0.0.1:3100", false],
   ])("does not create a demo session for %s", async (_label, apiBaseUrl, enabled) => {
     const { customerAuth } = await loadApi({ apiBaseUrl, demoLoginEnabled: enabled });
@@ -51,7 +52,7 @@ describe("development demo auth guard", () => {
     expect(storage.has("hometown-privacy-notice-version")).toBe(false);
   });
 
-  it("allows demo auth for the approved remote develop HTTP target and does not let stored state bypass the guard", async () => {
+  it("allows demo auth for the explicit local HTTP target and does not let stored state bypass the guard", async () => {
     const { api, customerAuth, app, request } = await loadApi();
     await expect(customerAuth.login(PRIVACY_NOTICE_VERSION)).resolves.toBeUndefined();
     expect(customerAuth.isLoggedIn()).toBe(true);
@@ -63,10 +64,12 @@ describe("development demo auth guard", () => {
     expect(request).not.toHaveBeenCalled();
   });
 
-  it("allows an explicitly configured shared remote demo target", async () => {
-    const { customerAuth } = await loadApi({ apiBaseUrl: "http://180.76.100.156" });
-    await expect(customerAuth.login(PRIVACY_NOTICE_VERSION)).resolves.toBeUndefined();
-    expect(customerAuth.isLoggedIn()).toBe(true);
+  it("rejects remote demo requests even with stored demo identity", async () => {
+    storage.set("hometown-demo-customer-session", true);
+    const { api, customerAuth, request } = await loadApi({ apiBaseUrl: "https://liziqi.icu" });
+    expect(customerAuth.isLoggedIn()).toBe(false);
+    await expect(api.listOrders()).rejects.toThrow("当前环境未启用开发登录");
+    expect(request).not.toHaveBeenCalled();
   });
 
   it("requires the current privacy version before writing any session state", async () => {
@@ -83,4 +86,27 @@ describe("development demo auth guard", () => {
     const { customerAuth } = await loadApi({ authMode: "wechat" });
     expect(customerAuth.isLoggedIn()).toBe(false);
   });
+  it("uses wx.login and bearer auth at the default migrated target without demo headers", async () => {
+    storage.set("hometown-demo-customer-session", true);
+    const { api, customerAuth, request } = await loadApi(resolveDeployment("develop"));
+    const login = vi.fn((options: { success: (result: { code: string }) => void }) => options.success({ code: "test-wechat-code" }));
+    Object.assign(wx, { login });
+    request.mockImplementation((options) => options.success({
+      statusCode: 200,
+      data: { data: options.url.endsWith("/auth/wechat/login") ? { accessToken: "test-wechat-token" } : [] },
+    }));
+    await customerAuth.login(PRIVACY_NOTICE_VERSION);
+    await api.listOrders();
+    expect(login).toHaveBeenCalledOnce();
+    expect(request.mock.calls[0]?.[0]).toMatchObject({
+      url: "https://liziqi.icu/api/v1/auth/wechat/login",
+      data: { code: "test-wechat-code", privacyAccepted: true, privacyVersion: PRIVACY_NOTICE_VERSION },
+    });
+    expect(request.mock.calls[1]?.[0].header.authorization).toBe("Bearer test-wechat-token");
+    for (const [options] of request.mock.calls) {
+      expect(options.header).not.toHaveProperty("x-demo-user-id");
+      expect(options.header).not.toHaveProperty("x-demo-role");
+    }
+  });
+
 });
