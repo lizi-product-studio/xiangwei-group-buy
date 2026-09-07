@@ -33,7 +33,7 @@
 - 已读取官方页面：手机号 code 五分钟一次性，与 wx.login code 不同；稳定 token 与旧 token 接口隔离，普通模式 force_refresh=false 不主动作废其他 token。新 provider 采用稳定 token，避免改动订阅消息链路。
 - 当前服务端官方文档明确提供可选 openid：填入后校验 openid 与 code 绑定关系，不匹配时报错。本实现必须传入，替代早期只凭两个 code 同请求关联的设计假设。
 - 新手机号字段只追加。回滚代码不回滚业务库；旧代码允许未绑定登录，安全语义会回退，发布前需记录该限制，不能声称等价安全回滚。
-- 状态：实施中。尚未发布 API 或完成真实手机号授权验收。
+- 状态：API已发布；用户已确认首次真实手机号授权成功并停留在“我的”页面。后续免重复手机号授权正在复验。
 
 ## 本地验收（2026-09-07）
 
@@ -42,5 +42,15 @@
 - 原始 `pnpm check` 在 lint 阶段失败：21项均来自未跟踪的 `prototypes/ui-redesign-20260907/app.js`、`verify.cjs`。保留原型、原日志与仓库规则，仅本轮 eslint 命令参数排除 prototypes/** 后，全产品 lint 通过，再执行原有全 typecheck/test/build；不宣称原始命令通过。
 - 全量E2E首轮13/14，唯一失败为意向登记测试仍提交旧隐私版本；仅更新其版本数据，原201及业务断言保留。重跑14/14通过。
 - 证据：`/tmp/wechat-phone-full-check.log`、`/tmp/wechat-phone-product-lint.log`、`/tmp/wechat-phone-full-typecheck.log`、`/tmp/wechat-phone-full-test.log`、`/tmp/wechat-phone-full-build.log`、`/tmp/wechat-phone-full-e2e.log`、`/tmp/wechat-phone-full-e2e-final.log`。
-- 微信平台页面自动化访问被工具URL规则阻止，已停止该页面操作。已向用户询问能力与额度，尚未收到结果；不代购、不伪造手机号。真实微信点击授权及成功绑定仍 NOT_RUN；这属于后续外部验收，不能由本地mock替代。
+- 本地验收时微信平台页面自动化访问被工具URL规则阻止，已停止该页面操作；不代购、不伪造手机号。当时真实授权为 NOT_RUN，后由用户实际成功反馈更新，见下节；剩余额度仍未核实。
 - 发布包只更新API与隐私版本，原admin静态/Nginx无需变更。小程序实际本地src已更新，未上传微信。发布后须核服务版本，并由用户完成真实首次授权、保持登录和第二次免重复授权验证。
+
+## 部署与真实授权进展
+
+- 发布代码：本地 `8e508a3`、远端 `849c012`，同 tree `07b65e0`，精确28文件非force同步。
+- 生产API切换至 `hometown-api:849c012`，镜像摘要前缀 `bd7ef8b041d5`；ready全部正常、reconciliation fresh、OOM=false、restart=0。
+- 生产env此前没有显式隐私版本，本次仅新增 `PRIVACY_NOTICE_VERSION=2026-09-07-phone-v1`。其余密钥、AMAP、trial、挂载和端口未变；admin静态与Nginx未改。
+- 用户通过本任务的测试回复明确确认：“授权成功，停留在‘我的’页面”。该结果证明本次实际手机号能力可用及首次登录成功，不代表已核实剩余额度数量。
+- 已请用户退出再登录确认已绑定后不再要求手机号；尚待回复。开发者工具/真机具体设备未独立确认，不把用户反馈扩大为正式版已上传或已发布。
+- 从用户开始实际测试起，用户主动绑定、隐私同意和登录会话属于预期合法写入；不得将数据指纹变化自动视作部署破坏，更不得恢复数据库覆盖这些记录。
+- 发布运维独立生产后验 PASS：三域、ready、reconciliation、401、旧路径410正常，9个静态文件及Nginx不变，切换前后业务数据指纹一致。双端0600备份可读；发布证据 SHA256 `918e00ed081319be30735a18eff6c04a3981e5d81c8ce4e3d8ba2dd93b1cc9da`，本机目录 `/Users/lizi/Backups/TASK-20260907-WECHAT-PHONE/`。首次真实授权按用户反馈通过，重复登录验证仍待用户。
