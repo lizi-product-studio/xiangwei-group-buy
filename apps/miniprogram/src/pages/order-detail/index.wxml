@@ -1,6 +1,6 @@
 <view class="ui-view order-detail">
   <view wx:if="{{loading}}" class="ui-view detail-state">正在加载订单…</view>
-  <view wx:elif="{{error}}" class="ui-view detail-state detail-state--error"><text class="ui-text">{{error}}</text><button class="ui-button" wx:if="{{error === '登录后可查看订单详情'}}" size="mini" bindtap="openLogin">微信快捷登录</button><button class="ui-button" wx:else size="mini" bindtap="loadOrder">重新加载</button></view>
+  <view wx:elif="{{error}}" class="ui-view detail-state detail-state--error"><text class="ui-text">{{error}}</text><button class="ui-button" wx:if="{{error === '登录后可查看订单详情'}}" size="mini" bindtap="openLogin">手机号快捷登录</button><button class="ui-button" wx:else size="mini" bindtap="loadOrder">重新加载</button></view>
   <block wx:else>
     <view class="ui-view status-card"><text class="ui-text">{{order.statusText}}</text><text class="ui-text">{{order.statusHint}}</text><text class="ui-text">订单号：{{order.orderNo}}</text></view>
     <view class="ui-view detail-card pickup-info"><text class="ui-text">本团领取安排</text><text class="ui-text">{{order.deliveryName}}</text><text class="ui-text">{{order.deliveryAddress}}</text><text class="ui-text">{{order.deliveryTime}}</text><text class="ui-text">{{order.pickupDeadlineText}}</text><text class="ui-text" wx:if="{{order.pickupWindowText}}">{{order.pickupWindowText}}</text></view>

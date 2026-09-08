@@ -21,16 +21,14 @@
     <view wx:if="{{error}}" class="ui-view login-page__error" role="alert">{{error}}</view>
     <text wx:if="{{phoneRequired}}" class="ui-text login-page__phone-copy">首次登录需要绑定手机号，用于账号绑定、订单联系、取货及售后，不用于营销。</text>
     <button wx:if="{{!phoneRequired}}" class="ui-button {{status === 'AUTHENTICATING' ? 'ui-disabled' : ''}} login-page__button {{status === 'AUTHENTICATING' ? 'login-page__button--disabled' : ''}}" loading="{{status === 'AUTHENTICATING'}}" disabled="{{status === 'AUTHENTICATING'}}" bindtap="login">
-      <image wx:if="{{status !== 'AUTHENTICATING'}}" class="ui-image login-page__button-icon" src="/assets/wechat-white.png" mode="aspectFit" aria-hidden="true" />
-      <text class="ui-text">{{status === 'ERROR' ? '重新登录' : (status === 'AUTHENTICATING' ? '登录中…' : '微信快捷登录')}}</text>
+      <text class="ui-text">{{status === 'ERROR' ? '重新登录' : (status === 'AUTHENTICATING' ? '登录中…' : '手机号快捷登录')}}</text>
     </button>
     <button wx:else class="ui-button login-page__button {{status === 'AUTHENTICATING' || !privacyAccepted ? 'login-page__button--disabled' : ''}}" open-type="getPhoneNumber" bindgetphonenumber="authorizePhone" loading="{{status === 'AUTHENTICATING'}}" disabled="{{status === 'AUTHENTICATING' || !privacyAccepted}}">
-      <image wx:if="{{status !== 'AUTHENTICATING'}}" class="ui-image login-page__button-icon" src="/assets/wechat-white.png" mode="aspectFit" aria-hidden="true" />
-      <text class="ui-text">{{status === 'AUTHENTICATING' ? '正在绑定…' : '授权手机号并登录'}}</text>
+      <text class="ui-text">{{status === 'AUTHENTICATING' ? '正在绑定…' : '手机号快捷登录'}}</text>
     </button>
     <button wx:if="{{phoneRequired && status === 'ERROR'}}" class="ui-button login-page__retry" bindtap="retryIdentity">已完成授权？重新确认登录</button>
     <button class="ui-button {{status === 'AUTHENTICATING' ? 'ui-disabled' : ''}} login-page__cancel {{status === 'AUTHENTICATING' ? 'login-page__cancel--disabled' : ''}}" bindtap="cancel" disabled="{{status === 'AUTHENTICATING'}}">暂不登录，先逛逛</button>
-    <text class="ui-text login-page__privacy-note">首次授权手机号后，后续可直接微信登录</text>
+    <text class="ui-text login-page__privacy-note">首次授权手机号后，后续可快捷登录</text>
     <view wx:if="{{demoLoginAvailable}}" class="ui-view login-page__dev-zone">
       <text class="ui-text">仅本地开发环境 · 用于预览认证流程</text>
       <button class="ui-button {{status === 'AUTHENTICATING' ? 'ui-disabled' : ''}} login-page__experience-button" loading="{{status === 'AUTHENTICATING'}}" disabled="{{status === 'AUTHENTICATING'}}" bindtap="experienceLogin">开发体验登录</button>

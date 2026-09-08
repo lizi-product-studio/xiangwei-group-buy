@@ -2,7 +2,7 @@
   <view class="ui-view pickup-card__stamp"><image class="ui-image pickup-code__asset" src="/assets/pickup-green.png" mode="aspectFit"/></view>
   <text class="ui-text pickup-card__title">到店后向工作人员出示</text>
   <text wx:if="{{loading}}" class="ui-text pickup-card__hint">正在生成安全取货码…</text>
-  <view wx:elif="{{error}}" class="ui-view pickup-card__error"><text class="ui-text">{{error}}</text><button wx:if="{{error === '登录后可查看取货码'}}" class="ui-button primary-button" bindtap="openLogin">微信快捷登录</button><button wx:else class="ui-button secondary-button" bindtap="loadPickupCode">重新加载</button></view>
+  <view wx:elif="{{error}}" class="ui-view pickup-card__error"><text class="ui-text">{{error}}</text><button wx:if="{{error === '登录后可查看取货码'}}" class="ui-button primary-button" bindtap="openLogin">手机号快捷登录</button><button wx:else class="ui-button secondary-button" bindtap="loadPickupCode">重新加载</button></view>
   <block wx:else>
     <text class="ui-text pickup-card__code">{{code}}</text>
     <text class="ui-text pickup-card__hint">有效期至 {{expiresText}}</text>

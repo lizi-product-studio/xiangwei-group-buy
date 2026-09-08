@@ -1,6 +1,6 @@
 <view class="ui-view after-sale-page">
   <view class="ui-view tip-card"><text class="ui-text">售后申请</text><text class="ui-text">请如实说明问题，客服会结合订单、领货核销与履约记录处理。{{qualityHint}}</text></view>
-  <view wx:if="{{!loggedIn}}" class="ui-view form-card"><text class="ui-text">登录后才能查看可申报商品并提交售后。</text><button class="ui-button primary-button" bindtap="openLogin">微信快捷登录</button></view>
+  <view wx:if="{{!loggedIn}}" class="ui-view form-card"><text class="ui-text">登录后才能查看可申报商品并提交售后。</text><button class="ui-button primary-button" bindtap="openLogin">手机号快捷登录</button></view>
   <view wx:elif="{{loading}}" class="ui-view form-card"><text class="ui-text">正在加载可申报商品…</text></view>
   <view wx:elif="{{error}}" class="ui-view form-card"><text class="ui-text">{{error}}</text><button class="ui-button secondary-button" bindtap="loadOrder">重新加载</button></view>
   <view wx:else class="ui-view form-card">

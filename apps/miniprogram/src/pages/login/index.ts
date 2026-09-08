@@ -14,7 +14,7 @@ import { cancelCustomerLogin, finishCustomerLogin } from "../../utils/auth-navig
 import { customerAuth, customerErrorMessage } from "../../utils/api";
 
 function loginError(error: unknown): string {
-  return customerErrorMessage(error, "微信登录暂时未完成，请检查网络后重试");
+  return customerErrorMessage(error, "登录暂时未完成，请检查网络后重试");
 }
 
 Page({

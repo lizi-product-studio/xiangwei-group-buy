@@ -90,8 +90,8 @@ function wxLogin(): Promise<string> {
   return new Promise((resolve, reject) => {
     wx.login({
       success: (result) =>
-        result.code ? resolve(result.code) : reject(new Error("微信登录失败")),
-      fail: (error) => reject(new Error(customerErrorMessage(error, "微信登录失败"))),
+        result.code ? resolve(result.code) : reject(new Error("登录失败")),
+      fail: (error) => reject(new Error(customerErrorMessage(error, "登录失败"))),
     });
   });
 }
@@ -120,8 +120,8 @@ function loginRequest(
         reject(
           new Error(
             customerErrorMessage(
-              new Error((response.data as unknown as ErrorEnvelope).message ?? "微信登录失败"),
-              "微信登录失败",
+              new Error((response.data as unknown as ErrorEnvelope).message ?? "登录失败"),
+              "登录失败",
             ),
           ),
         );
@@ -441,7 +441,7 @@ export const customerAuth = {
     if (privacyVersion !== PRIVACY_NOTICE_VERSION)
       throw new Error("请先阅读并同意最新隐私说明");
     if (app.globalData.authMode !== "wechat")
-      throw new Error("当前未配置微信快捷登录，请使用开发体验登录");
+      throw new Error("当前未配置手机号快捷登录，请使用开发体验登录");
     return performWechatLogin(privacyVersion, phoneCode);
   },
   async loginDemo(privacyVersion: string): Promise<void> {

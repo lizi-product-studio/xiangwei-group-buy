@@ -155,7 +155,7 @@ describe("consumer login page", () => {
     await instance.login.call(instance);
     expect(storage.has("hometown-demo-customer-session")).toBe(false);
     expect(instance.data.status).toBe("ERROR");
-    expect(instance.data.error).toBe("当前未配置微信快捷登录，请使用开发体验登录");
+    expect(instance.data.error).toBe("当前未配置手机号快捷登录，请使用开发体验登录");
     expect(navigateTo).not.toHaveBeenCalled();
   });
   it("keeps phone authorization refusal unauthenticated and makes it retryable", async () => {
