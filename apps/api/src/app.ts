@@ -737,6 +737,7 @@ export async function buildApp(
     privacyNoticeVersion: config.PRIVACY_NOTICE_VERSION,
   });
   registerPublicCatalogRoutes(app, {
+    readSnapshot: work => store.readSnapshot(work),
     campaigns,
     listServiceAreas: () => store.listServiceAreas(),
     listPickupPoints: (id) => store.listPickupPoints(id),

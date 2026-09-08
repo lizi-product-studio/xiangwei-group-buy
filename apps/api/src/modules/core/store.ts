@@ -38,6 +38,82 @@ import type {
 import { getCurrentInternalWriteActor } from "../auth/internal-write-context.js";
 import { BusinessError, moneyCents } from "@hometown/domain";
 
+export const STORE_READ_METHODS: ReadonlySet<string> = new Set([
+  "findUserByWechatOpenId",
+  "listConsumerUsers",
+  "getUser",
+  "getActiveAuthSession",
+  "getPrivacyConsent",
+  "findAdminCredential",
+  "findAdminCredentialByUserId",
+  "getInternalStaff",
+  "listInternalStaff",
+  "listStaffPickupPointAssignments",
+  "hasActivePickupPointAssignment",
+  "listServiceAreas",
+  "listPickupPoints",
+  "listCatalogSkus",
+  "getCatalogSku",
+  "listProductCategories",
+  "getProductCategory",
+  "listCampaigns",
+  "getCampaign",
+  "hasCampaignBusinessReferences",
+  "getCampaignItem",
+  "getIdempotency",
+  "listOrdersByCampaign",
+  "listOrdersByUser",
+  "listOrders",
+  "listExpiredPendingOrders",
+  "getOrder",
+  "getOrderByNo",
+  "listOrderLinesByCampaign",
+  "listOrderDeliveryFacts",
+  "getPaymentByOrder",
+  "getOrderRefundByOrder",
+  "getOrderRefundByProviderNo",
+  "listOrderRefunds",
+  "listPendingOrderRefunds",
+  "listRefundingOrders",
+  "getPartialRefund",
+  "getPartialRefundByProviderNo",
+  "listPartialRefunds",
+  "listPartialRefundsByOrder",
+  "listPartialRefundsByException",
+  "listPendingPartialRefunds",
+  "listLedgerTransactions",
+  "findLatestAudit",
+  "listAuditLogs",
+  "getDeliveryPlan",
+  "getDeliveryPlanByCampaign",
+  "listDeliveryPlans",
+  "getDispatchBatch",
+  "listDispatchBatches",
+  "getPickupCredential",
+  "listCommunityPickupReceiptsByOrder",
+  "getCommunityDeliveryConfirmationByBatch",
+  "getFulfillmentException",
+  "listFulfillmentExceptions",
+  "listFulfillmentAllocations",
+  "listOperationsQueue",
+  "listCommunityPickupWindowsPastDeadline",
+  "listCommunityPickupWindowsDueBy",
+  "listCommunityPickupWindowsByStatus",
+  "listCommunityCancellationRequests",
+  "listPendingCommunityCancellationRequests",
+  "getCommunityQualityCaseByOrderRequest",
+  "listCommunityQualityCases",
+  "listCommunityQualityCasesByOrder",
+  "getServiceAreaInterest",
+  "listServiceAreaInterests",
+  "listServiceAreaInterestsByUser",
+  "getOrderNotification",
+  "listOrderNotificationsByUser",
+  "listManualOrderNotifications",
+  "getNotificationPreference",
+  "pickupRecordExists",
+]);
+
 export interface IdempotencyRecord {
   fingerprint: string;
   orderId: string;
@@ -85,6 +161,7 @@ export interface OperationsQueuePage<T> {
 
 /** The complete persistence boundary for the single community group-buy product. */
 export interface CommerceStore {
+  readSnapshot<T>(work: (store: CommerceStore) => Promise<T>): Promise<T>;
   listOperationsQueue<K extends keyof OperationsQueueTypes>(kind: K, query: OperationsQueueQuery): Promise<OperationsQueuePage<OperationsQueueTypes[K]>>;
   transaction<T>(work: (store: CommerceStore) => Promise<T>): Promise<T>;
   health(): Promise<"ok">;
@@ -100,6 +177,7 @@ export interface CommerceStore {
     documentVersion: string,
   ): Promise<PrivacyConsent | null>;
   getAuthSession(tokenHash: string): Promise<AuthSession | null>;
+  getActiveAuthSession(tokenHash: string): Promise<AuthSession | null>;
   saveAuthSession(value: AuthSession): Promise<void>;
   deleteAuthSession(tokenHash: string): Promise<void>;
   deleteAuthSessionsByUser(userId: string): Promise<void>;
@@ -632,6 +710,23 @@ export class MemoryStore implements CommerceStore {
     }
     this.data = next;
   }
+  public async readSnapshot<T>(work: (store: CommerceStore) => Promise<T>): Promise<T> {
+    const snapshot = new MemoryStore(false);
+    snapshot.importState(this.exportState());
+    snapshot.controlledDatabaseNow = this.controlledDatabaseNow;
+    let active = true;
+    const facade: CommerceStore = new Proxy(snapshot, {
+      get(target, property) {
+        if (!active) throw new Error("Readonly aggregate snapshot is closed");
+        if (property === "readSnapshot") return <R>(nested: (store: CommerceStore) => Promise<R>) => nested(facade);
+        if (typeof property !== "string" || (!STORE_READ_METHODS.has(property) && property !== "databaseNow" && property !== "health"))
+          return () => { throw new Error(`Readonly aggregate snapshot rejects ${String(property)}`); };
+        const value = Reflect.get(target, property) as unknown;
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    try { return await work(facade); } finally { active = false; }
+  }
   public async transaction<T>(
     work: (store: CommerceStore) => Promise<T>,
   ): Promise<T> {
@@ -720,6 +815,16 @@ export class MemoryStore implements CommerceStore {
   }
   public async getPrivacyConsent(userId: string, version: string) {
     return clone(this.data.privacy.get(`${userId}:${version}`) ?? null);
+  }
+  /** Pure validity lookup: expired sessions are rejected without mutating payload. */
+  public async getActiveAuthSession(hash: string) {
+    const value = this.data.sessions.get(hash);
+    if (!value || value.expiresAt <= new Date().toISOString()) return null;
+    const user = this.data.users.get(value.userId);
+    const staff = this.data.staff.get(value.userId);
+    return user?.status === "ACTIVE" && staff?.status !== "SUSPENDED"
+      ? clone(value)
+      : null;
   }
   public async getAuthSession(hash: string) {
     const v = this.data.sessions.get(hash);

@@ -1,5 +1,7 @@
 # 千人使用上线评估
 
+> 后续状态：本报告记录修复前的评估。两项P1已在 TASK-20260908-READINESS-REPAIR 批次A修复并发布（a904ad9），独立发布后验通过。容量与通知优化及最终验证以 [修复记录](task-20260908-readiness-repair.md) 为准；以下OPEN/未验证描述保留为当时发现，不代表后续修复无效。
+
 - task_id：TASK-20260908-THOUSAND-READINESS
 - confirmed：用户授予产品经理职责，要求评估系统、后台、小程序是否达到上线标准并支持上千人使用。
 - route：GOVERNED_DELIVERY 只读审计；本轮不自动实施架构迁移、生产压测、扩容或真实交易。

@@ -21,10 +21,11 @@ const paidOrderStatuses = new Set([
   "PICKED_UP",
   "COMPLETED",
 ]);
-const deliveryBatchLimit = 5;
-// Five serial provider attempts can include token refresh/retry time; keep the
-// lease comfortably above that normal worst case while the claim token fences
-// a genuinely stalled worker.
+const deliveryBatchLimit = 100;
+const deliveryConcurrency = 5;
+const deliveryTimeBudgetMs = 20_000;
+// Claim one concurrency-sized wave at a time, never a full batch waiting on
+// serial providers. The persisted claim and submission fences remain decisive.
 const deliveryLeaseMilliseconds = 5 * 60_000;
 
 function copy(
@@ -176,20 +177,30 @@ export class NotificationService {
       ? Math.trunc(limit)
       : deliveryBatchLimit;
     const safeLimit = Math.max(1, Math.min(deliveryBatchLimit, requestedLimit));
-    const claimToken = randomUUID();
-    const notifications = await this.store.claimPendingOrderNotifications(
-      safeLimit,
-      deliveryLeaseMilliseconds,
-      claimToken,
-    );
-    for (const notification of notifications)
-      await this.deliver(notification, claimToken);
-    return notifications.length;
+    const deadline = Date.now() + deliveryTimeBudgetMs;
+    let attempted = 0;
+    while (attempted < safeLimit && Date.now() < deadline) {
+      const claimToken = randomUUID();
+      const claimed = await this.store.claimPendingOrderNotifications(
+        Math.min(deliveryConcurrency, safeLimit - attempted),
+        deliveryLeaseMilliseconds,
+        claimToken,
+      );
+      if (!claimed.length) break;
+      attempted += claimed.length;
+      // Settle every in-flight attempt before returning, even if one DB write
+      // fails; the caller must never release ownership while work continues.
+      const outcomes = await Promise.allSettled(claimed.map(notification => this.deliver(notification, claimToken, deadline)));
+      const failed = outcomes.find((value): value is PromiseRejectedResult => value.status === "rejected");
+      if (failed) throw failed.reason;
+    }
+    return attempted;
   }
 
   private async deliver(
     notification: OrderNotification,
     claimToken: string,
+    deadline = Number.POSITIVE_INFINITY,
   ): Promise<void> {
     if (notification.deliveryClaimToken !== claimToken) return;
     // These reads are entirely local prerequisites. A failure here is known to
@@ -231,6 +242,13 @@ export class NotificationService {
       return;
     }
 
+    if (Date.now() >= deadline) {
+      // Still before submission: release only our claim, safely leaving it due.
+      notification.deliveryLeaseUntil = null;
+      notification.deliveryClaimToken = null;
+      await this.store.saveOrderNotificationIfClaimed(notification, claimToken);
+      return;
+    }
     const attemptId = randomUUID();
     // This short transaction fences the provider call but never encloses it.
     // Once it succeeds the durable state is SUBMISSION_UNKNOWN: a crashed or
@@ -245,7 +263,19 @@ export class NotificationService {
     if (!submission || submission.providerSubmissionAttemptId !== attemptId)
       return;
     try {
-      await this.provider.send({ ...input, notification: submission });
+      const remaining = Math.max(0, deadline - Date.now());
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        if (remaining === 0) throw new Error("notification delivery time budget elapsed before provider call");
+        const sending = this.provider.send({ ...input, notification: submission });
+        if (Number.isFinite(remaining)) {
+          await Promise.race([sending, new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error("notification delivery time budget exceeded; submission result unknown")), remaining);
+          })]);
+        } else await sending;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
       await this.store.transaction((store) =>
         store.markOrderNotificationSentIfSubmission(
           submission.id,

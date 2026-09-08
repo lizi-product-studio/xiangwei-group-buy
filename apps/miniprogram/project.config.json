@@ -36,24 +36,24 @@
   "packOptions": {
     "ignore": [
       {
-        "type": "file",
-        "value": "assets/mini-program-avatar-helin.png"
+        "value": "assets/mini-program-avatar-helin.png",
+        "type": "file"
       },
       {
-        "type": "suffix",
-        "value": ".test.ts"
+        "value": ".test.ts",
+        "type": "suffix"
       },
       {
-        "type": "suffix",
-        "value": ".spec.ts"
+        "value": ".spec.ts",
+        "type": "suffix"
       },
       {
-        "type": "suffix",
-        "value": ".test.js"
+        "value": ".test.js",
+        "type": "suffix"
       },
       {
-        "type": "suffix",
-        "value": ".spec.js"
+        "value": ".spec.js",
+        "type": "suffix"
       }
     ],
     "include": []

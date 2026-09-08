@@ -256,7 +256,7 @@ export class AdminAuthService {
     const token = authorization.slice(7).trim();
     if (token.length < 32 || token.length > 128) return null;
     const tokenHash = sessionTokenHash(token);
-    const session = await this.store.getAuthSession(tokenHash);
+    const session = await this.store.getActiveAuthSession(tokenHash);
     if (!session) return null;
     // Consumer and employee tokens share storage. Leave consumer sessions for
     // the WeChat authenticator instead of revoking them as invalid employees.

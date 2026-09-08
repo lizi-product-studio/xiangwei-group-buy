@@ -80,7 +80,7 @@ export class AuthService {
     if (!authorization?.startsWith('Bearer ')) return null;
     const token = authorization.slice(7).trim();
     if (token.length < 32 || token.length > 128) return null;
-    const session = await this.store.getAuthSession(tokenHash(token));
+    const session = await this.store.getActiveAuthSession(tokenHash(token));
     if (!session || session.roles.length !== 1 || session.roles[0] !== 'USER') return null;
     const user = await this.store.getUser(session.userId);
     if (!user || user.status !== 'ACTIVE' || !hasVerifiedPhone(user) || !await this.store.getPrivacyConsent(user.id, this.privacyVersion)) return null;
