@@ -965,7 +965,7 @@ function Products({
             title: "分类/产地",
             render: (_, v) => `${v.product.category} / ${v.product.origin}`,
           },
-          { title: "售价", render: (_, v) => money(v.retailPriceCents) },
+          { title: "默认售价", render: (_, v) => money(v.retailPriceCents) },
           { title: "默认团期可售量", dataIndex: "defaultSellableQuantity" },
           { title: "状态", render: (_, v) => <Status value={v.status} /> },
           {
@@ -1071,7 +1071,7 @@ function Products({
           <div className="form-grid">
             <Form.Item
               name="retailPriceYuan"
-              label="售价（元）"
+              label="默认售价（元）"
               rules={[priceRule]}
             >
               <Input
@@ -1689,6 +1689,9 @@ function Campaigns({
               />
             </Form.Item>
           </div>
+          <Typography.Paragraph type="secondary">
+            选择商品后自动带入商品默认售价，本期可单独调整。
+          </Typography.Paragraph>
           <Form.List name="items">
             {(fields, { add, remove }) => {
               const selectedSkuIds = (form.getFieldValue("items") ?? [])
@@ -1756,9 +1759,11 @@ function Campaigns({
                       >
                         <InputNumber min={1} max={1_000_000} />
                       </Form.Item>
-                      <Button danger onClick={() => remove(field.name)}>
-                        移除
-                      </Button>
+                      <Form.Item label={<span aria-hidden="true">&nbsp;</span>} colon={false}>
+                        <Button danger onClick={() => remove(field.name)}>
+                          移除
+                        </Button>
+                      </Form.Item>
                     </Space>
                   </Card>
                 ))}
