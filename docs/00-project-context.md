@@ -98,6 +98,6 @@ source_of_truth: project-document-set
 |---|---|---|---|---|
 | FACT-001 | 产品只做单一社区集中自提模式 | CONFIRMED | 用户说明、README/PRD | 禁止扩展第二业务模型 |
 | FACT-002 | 真实微信预发布尚无本轮证据 | CONFIRMED | `docs/go-live-checklist.md` | 阻塞 RELEASE_READY |
-| FACT-003 | 当前无必须保留的生产数据 | CONFIRMED | `docs/architecture.md` | 只允许新空库基线迁移 |
+| FACT-003 | 旧“当前无必须保留的生产数据”已被迁移后事实替代；现有生产业务与用户操作必须保留 | CONFIRMED | `AGENTS.md` 3.1、`docs/task-20260907-wechat-phone.md` 部署与真实授权进展 | 不得据早期空库结论清库或恢复覆盖当前数据；回归测试使用隔离模拟环境 |
 | FACT-004 | 客服使用哪条外部合规联系渠道 | BLOCKING_UNKNOWN | 无批准渠道/CRM 契约 | 阻塞“人工已联系”发布声明 |
 | FACT-005 | 商业成团率与规模阈值 | BLOCKING_UNKNOWN | 无生产数据 | 受控试运营后决定是否扩张 |

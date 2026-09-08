@@ -523,7 +523,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   await expect(labelsDialog.getByText(normalOrder.orderNo, { exact: true })).toBeVisible();
   await expect(labelsDialog.getByText(unpaidOrder.orderNo, { exact: true })).toHaveCount(0);
   await expect(labelsDialog.getByText(`E2E 社区点 ${suffix}`, { exact: true })).toBeVisible();
-  await expect(labelsDialog.getByText(`一份 × 2`, { exact: true })).toBeVisible();
+  await expect(labelsDialog.getByText(`E2E 时蔬 ${suffix} · 一份 × 2`, { exact: true })).toBeVisible();
   await expect(labelsDialog.getByRole("button", { name: "打印标签" })).toBeEnabled();
   await expect(labelsDialog.getByRole("button", { name: "导出标签" })).toBeEnabled();
   await labelsDialog.locator(".ant-modal-close").click();
@@ -583,7 +583,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
     .click();
   await page.getByPlaceholder("订单号").fill(normalOrder.orderNo);
   await page.getByRole("button", { name: "查询订单" }).click();
-  const quantityInput = page.getByLabel("一份 本次领取数量");
+  const quantityInput = page.getByLabel(`E2E 时蔬 ${suffix} · 一份 本次领取数量`, { exact: true });
   await expect(quantityInput).toBeVisible();
   await page.getByPlaceholder("6 位取货码").fill(pickupValue.code);
   await page.getByRole("button", { name: "确认本次领取" }).click();

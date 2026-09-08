@@ -12,6 +12,14 @@ import { isDeliveryPlanReadyForSale } from "../campaigns/sellability.js";
 import type { CommerceStore } from "../core/store.js";
 import type { Order, OrderItem } from "../core/types.js";
 
+/** Capture the campaign's product identity; never rebuild history from catalog. */
+export function orderItemSnapshotName(title: string, skuName: string): string {
+  const productTitle = title.trim();
+  const specification = skuName.trim();
+  if (!productTitle || productTitle === specification) return specification;
+  return specification ? `${productTitle} · ${specification}` : productTitle;
+}
+
 export class OrderService {
   public constructor(
     private readonly store: CommerceStore,
@@ -103,7 +111,7 @@ export class OrderService {
         orderLineId: null,
         skuId,
         productId: item.productId,
-        name: item.skuName,
+        name: orderItemSnapshotName(item.title, item.skuName),
         quantity,
         unitPriceCents: item.retailPriceCents,
         amountCents,

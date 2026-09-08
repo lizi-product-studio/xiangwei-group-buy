@@ -3752,7 +3752,7 @@ function PointWorkbench({
             dataSource={order.items}
             columns={[
               { title: "商品", dataIndex: "name" },
-              { title: "可领取", dataIndex: "readyQuantity" },
+              { title: "到货可领总量", dataIndex: "readyQuantity" },
               { title: "已领取", dataIndex: "alreadyPickedQuantity" },
               { title: "本次最多领取", dataIndex: "remainingPickupQuantity" },
               {
