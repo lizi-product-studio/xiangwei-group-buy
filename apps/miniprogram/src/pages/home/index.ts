@@ -27,6 +27,12 @@ const CATEGORY_ICON_PATHS = [
 ];
 
 Page({
+  onShareAppMessage() {
+    return { title: "乡味集｜好味道，一起分享", path: "/pages/home/index" };
+  },
+  onShareTimeline() {
+    return { title: "乡味集｜好味道，一起分享", query: "" };
+  },
   data: {
     loading: true, error: '', campaigns: [] as CampaignView[], allProducts: [] as CampaignView[], categories: [] as string[], categoryItems: [] as CategoryItem[],
     activeCategory: '全部', area: null as ServiceAreaSelection | null,pickupPoint:null as PickupPointSelection|null,
@@ -35,6 +41,9 @@ Page({
     availableAreaCount: 0,
   },
 
+  onLoad() {
+    if (typeof wx.showShareMenu === "function") wx.showShareMenu({ menus: ["shareAppMessage", "shareTimeline"] });
+  },
   onShow() { void this.loadCampaigns(); },
   onPullDownRefresh() { void this.loadCampaigns().finally(() => wx.stopPullDownRefresh()); },
 

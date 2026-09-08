@@ -18,6 +18,12 @@ function loginError(error: unknown): string {
 }
 
 Page({
+  onShareAppMessage() {
+    return { title: "乡味集｜好味道，一起分享", path: "/pages/login/index" };
+  },
+  onShareTimeline() {
+    return { title: "乡味集｜好味道，一起分享", query: "" };
+  },
   pageActive: true,
   data: {
     status: initialAuthState.status,
@@ -36,6 +42,7 @@ Page({
   },
 
   onLoad(options: Record<string, string | undefined>) {
+    if (typeof wx.showShareMenu === "function") wx.showShareMenu({ menus: ["shareAppMessage", "shareTimeline"] });
     this.pageActive = true;
     const menu = typeof wx.getMenuButtonBoundingClientRect === "function"
       ? wx.getMenuButtonBoundingClientRect()
