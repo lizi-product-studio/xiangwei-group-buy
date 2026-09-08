@@ -25,6 +25,9 @@ export interface CommunityStore {
   listPickupPoints(serviceAreaId?: string): Promise<PickupPoint[]>;
   getCatalogSku(id: string): Promise<CatalogSku | null>;
   saveCampaign(campaign: Campaign): Promise<void>;
+  updateCampaign(campaign: Campaign, expectedVersion: number): Promise<boolean>;
+  deleteDraftCampaign(id: string, expectedVersion: number): Promise<boolean>;
+  hasCampaignBusinessReferences(id: string): Promise<boolean>;
   replaceCampaignItems(
     campaignId: string,
     items: CampaignItem[],

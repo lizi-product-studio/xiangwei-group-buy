@@ -71,6 +71,7 @@ export interface CommerceStore {
   close(): Promise<void>;
   findUserByWechatOpenId(openId: string): Promise<User | null>;
   getUser(id: string): Promise<User | null>;
+  listConsumerUsers(): Promise<User[]>;
   saveUser(value: User): Promise<void>;
   savePrivacyConsent(userId: string, documentVersion: string): Promise<void>;
   getPrivacyConsent(
@@ -128,6 +129,8 @@ export interface CommerceStore {
   getCampaignForUpdate(id: string): Promise<Campaign | null>;
   saveCampaign(value: Campaign): Promise<void>;
   updateCampaign(value: Campaign, expectedVersion: number): Promise<boolean>;
+  deleteDraftCampaign(id: string, expectedVersion: number): Promise<boolean>;
+  hasCampaignBusinessReferences(id: string): Promise<boolean>;
   replaceCampaignItems(
     campaignId: string,
     items: CampaignItem[],
@@ -676,6 +679,9 @@ export class MemoryStore implements CommerceStore {
         null,
     );
   }
+  public async listConsumerUsers() {
+    return clone([...this.data.users.values()].filter(user => user.wechatOpenId !== null && !this.data.staff.has(user.id)));
+  }
   public async getUser(id: string) {
     return clone(this.data.users.get(id) ?? null);
   }
@@ -876,6 +882,22 @@ export class MemoryStore implements CommerceStore {
     const current = this.data.campaigns.get(v.id);
     if (!current || current.version !== version) return false;
     this.data.campaigns.set(v.id, clone(v));
+    return true;
+  }
+  public async hasCampaignBusinessReferences(id: string) {
+    const plans = new Set([...this.data.plans.values()].filter(plan => plan.campaignId === id).map(plan => plan.id));
+    return [this.data.orders, this.data.batches, this.data.deliveries, this.data.exceptions, this.data.drafts].some(values => [...values.values()].some(value => value.campaignId === id))
+      || [...this.data.pickupReceipts.values()].some(value => plans.has(value.deliveryPlanId))
+      || [...this.data.windows.values()].some(value => plans.has(value.deliveryPlanId));
+  }
+  public async deleteDraftCampaign(id: string, expectedVersion: number) {
+    const campaign = this.data.campaigns.get(id);
+    if (!campaign || campaign.status !== "DRAFT" || campaign.version !== expectedVersion) return false;
+    if (await this.hasCampaignBusinessReferences(id)) return false;
+    this.data.campaigns.delete(id);
+    for (const [planId, plan] of this.data.plans) {
+      if (plan.campaignId === id) this.data.plans.delete(planId);
+    }
     return true;
   }
   public async replaceCampaignItems(id: string, items: CampaignItem[]) {

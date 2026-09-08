@@ -1,3 +1,4 @@
+import type { ConsumerSummary, ConsumerDetail } from "./consumers-page.tsx";
 export type StaffRole =
   | "SUPER_ADMIN"
   | "OPERATOR"
@@ -70,6 +71,22 @@ export interface ProductCategory {
   createdAt: string;
   updatedAt: string;
 }
+export type CampaignInput = {
+    title: string;
+    serviceAreaId: string;
+    pickupPointId: string;
+    cutoffAt: string;
+    dispatchAt: string;
+    estimatedArrivalStartAt: string;
+    estimatedArrivalEndAt: string;
+    minTotalQuantity: number;
+    failureAction: "CANCEL_AND_REFUND" | "POSTPONE";
+    items: Array<{
+      catalogSkuId: string;
+      retailPriceCents: number;
+      sellableQuantity: number;
+    }>;
+  };
 export interface Campaign {
   id: string;
   title: string;
@@ -786,23 +803,12 @@ export const api = {
     defaultSellableQuantity: number;
     status: "ACTIVE" | "INACTIVE";
   }) => post<CatalogSku>("/api/v1/admin/catalog/skus", body),
+  consumers: (query: {query:string;page:number;pageSize:number}) => request<{items:ConsumerSummary[];total:number;page:number;pageSize:number}>(`/api/v1/admin/consumers?${new URLSearchParams({query:query.query,page:String(query.page),pageSize:String(query.pageSize)})}`),
+  consumerDetail: (id:string) => request<ConsumerDetail>(`/api/v1/admin/consumers/${encodeURIComponent(id)}`),
   campaigns: () => request<Campaign[]>("/api/v1/admin/campaigns"),
-  createCampaign: (body: {
-    title: string;
-    serviceAreaId: string;
-    pickupPointId: string;
-    cutoffAt: string;
-    dispatchAt: string;
-    estimatedArrivalStartAt: string;
-    estimatedArrivalEndAt: string;
-    minTotalQuantity: number;
-    failureAction: "CANCEL_AND_REFUND" | "POSTPONE";
-    items: Array<{
-      catalogSkuId: string;
-      retailPriceCents: number;
-      sellableQuantity: number;
-    }>;
-  }) => post<Campaign>("/api/v1/admin/campaigns", body),
+  createCampaign: (body: CampaignInput) => post<Campaign>("/api/v1/admin/campaigns", body),
+  updateCampaign: (id: string, body: CampaignInput & {version: number}) => patch<Campaign>(`/api/v1/admin/campaigns/${id}`, body),
+  deleteCampaign: (id: string, version: number) => request<{id:string;deleted:boolean}>(`/api/v1/admin/campaigns/${id}`, {method:"DELETE",body:JSON.stringify({version})}),
   campaignAction: (
     id: string,
     action: "open" | "close" | "cancel",

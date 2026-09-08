@@ -186,7 +186,7 @@ test("超管从网页创建员工，临时密码改密与撤权后的默认页�
     .filter({ hasText: "点位负责人" })
     .click();
   await page.keyboard.press("Escape");
-  await page.getByLabel("授权自提点").click();
+  await page.getByLabel("授权自提点").fill(`P1-A 授权点 ${suffix}`);
   await page
     .locator(".ant-select-item-option")
     .filter({ hasText: `P1-A 授权点 ${suffix}` })

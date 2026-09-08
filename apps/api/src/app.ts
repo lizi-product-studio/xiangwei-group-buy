@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { ProductImages } from './modules/media/product-images.js';
 import { registerProductImageRoutes } from './routes/product-image-routes.js';
 import { WechatApiPhoneExchange, type WechatPhoneExchange } from './modules/auth/wechat-phone.js';
@@ -1421,6 +1422,29 @@ export async function buildApp(
     );
     return reply.status(existing ? 200 : 201).send({ data: value });
   });
+  const consumerSummary = async (user: NonNullable<Awaited<ReturnType<CommerceStore["getUser"]>>>) => ({
+    id: user.id,
+    maskedPhone: user.phoneNumber ? maskPhone(user.phoneNumber) : null,
+    status: user.status,
+    createdAt: user.createdAt,
+    phoneVerified: Boolean(user.phoneVerifiedAt),
+    orderCount: (await store.listOrdersByUser(user.id)).length,
+  });
+  app.get("/api/v1/admin/consumers", async (request) => {
+    requireActor(request, ["SUPER_ADMIN", "CUSTOMER_SERVICE"]);
+    const query = z.object({query:z.string().trim().max(80).default(""),page:z.coerce.number().int().min(1).max(100000).default(1),pageSize:z.coerce.number().int().min(1).max(100).default(20)}).parse(request.query);
+    const needle = query.query.toLowerCase();
+    const users = (await store.listConsumerUsers()).filter(user => !needle || user.id.toLowerCase().includes(needle) || (user.phoneNumber ?? "").includes(needle)).sort((a,b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id));
+    return {data:{items:await Promise.all(users.slice((query.page-1)*query.pageSize,query.page*query.pageSize).map(consumerSummary)),total:users.length,page:query.page,pageSize:query.pageSize}};
+  });
+  app.get("/api/v1/admin/consumers/:id", async (request) => {
+    requireActor(request, ["SUPER_ADMIN", "CUSTOMER_SERVICE"]);
+    const id = identifierSchema.parse((request.params as {id:string}).id);
+    const user = (await store.listConsumerUsers()).find(value => value.id === id);
+    if (!user) throw new BusinessError("RESOURCE_NOT_FOUND", "消费者不存在", 404);
+    const orders = (await store.listOrdersByUser(id)).sort((a,b) => b.createdAt.localeCompare(a.createdAt)).slice(0,50).map(order => ({id:order.id,status:order.status,totalAmountCents:order.totalCents,createdAt:order.createdAt}));
+    return {data:{...await consumerSummary(user),orders}};
+  });
   app.get("/api/v1/admin/campaigns", async (request) => {
     requireActor(request, ["OPERATOR", "FINANCE", "SUPER_ADMIN"]);
     return {
@@ -1435,6 +1459,19 @@ export async function buildApp(
       request.id,
     );
     return reply.status(201).send({ data: await campaignView(value) });
+  });
+  app.patch("/api/v1/admin/campaigns/:id", async (request) => {
+    const actor = requireActor(request, ["OPERATOR", "SUPER_ADMIN"]);
+    const id = identifierSchema.parse((request.params as { id: string }).id);
+    const version = z.object({ version: z.int().min(1) }).parse(request.body).version;
+    const value = await communityFulfillment.createCampaign(communityCampaignSchema.parse(request.body), actor.userId, request.id, { id, version });
+    return { data: await campaignView(value) };
+  });
+  app.delete("/api/v1/admin/campaigns/:id", async (request) => {
+    const actor = requireActor(request, ["OPERATOR", "SUPER_ADMIN"]);
+    const id = identifierSchema.parse((request.params as { id: string }).id);
+    const version = z.object({ version: z.int().min(1) }).parse(request.body).version;
+    return { data: await communityFulfillment.deleteCampaign(id, version, actor.userId, request.id) };
   });
   for (const [suffix] of [
     ["open", "open"],

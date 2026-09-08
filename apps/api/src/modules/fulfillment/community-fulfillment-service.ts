@@ -107,12 +107,36 @@ export class CommunityFulfillmentService {
     });
   }
 
+  private async editableDraft(store: CommunityStore, id: string, version: number, deleting = false) {
+    const campaign = await store.getCampaignForUpdate(id);
+    if (!campaign) throw new BusinessError("RESOURCE_NOT_FOUND", "团期不存在", 404);
+    if (campaign.status !== "DRAFT") throw new BusinessError("CAMPAIGN_NOT_DRAFT", "仅从未开售的草稿团期可以编辑或删除", 409);
+    if (campaign.version !== version) throw new BusinessError("CAMPAIGN_VERSION_CONFLICT", "团期已被修改，请刷新后重新操作", 409);
+    const plan = await store.getDeliveryPlanByCampaign(id);
+    if (await store.hasCampaignBusinessReferences(id))
+      throw new BusinessError("CAMPAIGN_HAS_REFERENCES", "团期已有订单、发车批次或后续履约记录，不能编辑或删除", 409);
+    if (plan && (deleting ? (plan.status !== "SITE_CONFIRMED" || plan.vehicleOrderNo || plan.driverName || plan.driverPhone || plan.vehiclePlate || plan.logisticsPlatform || plan.bookedAt || plan.dispatchedAt || plan.arrivedAt) : !["SITE_CONFIRMED", "VEHICLE_BOOKED"].includes(plan.status)))
+      throw new BusinessError("CAMPAIGN_HAS_REFERENCES", "团期已登记运输或履约信息，不能编辑或删除", 409);
+    return { campaign, plan };
+  }
+
+  public async deleteCampaign(id: string, version: number, actorId: string, requestId: string) {
+    return this.store.transaction(async (store) => {
+      const before = await this.editableDraft(store, id, version, true);
+      if (!await store.deleteDraftCampaign(id, version)) throw new BusinessError("CAMPAIGN_VERSION_CONFLICT", "团期已被修改，请刷新后重新操作", 409);
+      await this.audit(store, actorId, requestId, "COMMUNITY_CAMPAIGN_DELETED", "CAMPAIGN", id, before, null);
+      return { id, deleted: true };
+    });
+  }
+
   public async createCampaign(
     input: CommunityCampaignInput,
     actorId: string,
     requestId: string,
+    edit?: { id: string; version: number },
   ): Promise<Campaign> {
     return this.store.transaction(async (store) => {
+      const before = edit ? await this.editableDraft(store, edit.id, edit.version) : null;
       const area = (await store.listServiceAreas()).find(
         (item) =>
           item.id === input.serviceAreaId &&
@@ -128,6 +152,10 @@ export class CommunityFulfillmentService {
           "服务区域或固定自提点不可用",
           404,
         );
+      if (before?.plan?.status === "VEHICLE_BOOKED" && (before.campaign.serviceAreaId !== input.serviceAreaId || before.plan.pickupPointId !== input.pickupPointId))
+        throw new BusinessError("CAMPAIGN_HAS_REFERENCES", "已登记运输的草稿不能更换区域或自提点，请保留原配送安排", 409);
+      if (before?.plan?.estimatedArrivalAt && Date.parse(before.plan.estimatedArrivalAt) < Date.parse(input.dispatchAt))
+        throw new BusinessError("CAMPAIGN_TRANSPORT_CONFLICT", "计划发车时间不能晚于已登记运输的预计到达时间，请先调整运输安排", 409);
       const seen = new Set<string>();
       const items: CampaignItem[] = [];
       for (const requested of input.items) {
@@ -157,7 +185,7 @@ export class CommunityFulfillmentService {
       }
       const now = this.now();
       const campaign: Campaign = {
-        id: randomUUID(),
+        id: before?.campaign.id ?? randomUUID(),
         title: input.title,
         serviceAreaId: input.serviceAreaId,
         cutoffAt: input.cutoffAt,
@@ -168,13 +196,15 @@ export class CommunityFulfillmentService {
         failureAction: input.failureAction,
         items,
         status: "DRAFT",
-        version: 1,
-        createdAt: now,
+        version: before ? before.campaign.version + 1 : 1,
+        createdAt: before?.campaign.createdAt ?? now,
       };
-      await store.saveCampaign(campaign);
+      if (before) {
+        if (!await store.updateCampaign(campaign, before.campaign.version)) throw new BusinessError("CAMPAIGN_VERSION_CONFLICT", "团期已被修改，请刷新后重新操作", 409);
+      } else await store.saveCampaign(campaign);
       await store.replaceCampaignItems(campaign.id, items);
       await store.saveDeliveryPlan({
-        id: randomUUID(),
+        id: before?.plan?.id ?? randomUUID(),
         campaignId: campaign.id,
         serviceAreaId: campaign.serviceAreaId,
         pickupPointId: point.id,
@@ -198,15 +228,21 @@ export class CommunityFulfillmentService {
         arrivedAt: null,
         createdAt: now,
         updatedAt: now,
+        ...(before?.plan?.status === "VEHICLE_BOOKED" ? {
+          ...before.plan,
+          arrivalStartAt: campaign.estimatedArrivalStartAt,
+          arrivalEndAt: campaign.estimatedArrivalEndAt,
+          updatedAt: now,
+        } : {}),
       });
       await this.audit(
         store,
         actorId,
         requestId,
-        "COMMUNITY_CAMPAIGN_CREATED",
+        before ? "COMMUNITY_CAMPAIGN_UPDATED" : "COMMUNITY_CAMPAIGN_CREATED",
         "CAMPAIGN",
         campaign.id,
-        null,
+        before,
         { campaign, items },
       );
       return campaign;

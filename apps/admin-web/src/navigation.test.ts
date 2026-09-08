@@ -42,12 +42,18 @@ describe("admin navigation", () => {
       "订单管理",
       "配送与到货",
       "区域与自提点",
+      "消费者管理",
       "售后与异常",
       "运营治理",
       "财务管理",
       "审计记录",
       "人员与权限",
     ]);
+  });
+
+  it("limits the consumer directory to super administrators and customer service", () => {
+    for (const role of ["SUPER_ADMIN", "CUSTOMER_SERVICE"]) expect(isAllowedAdminPage([role], "consumers")).toBe(true);
+    for (const role of ["OPERATOR", "FINANCE", "PICKUP_MANAGER", "USER"]) expect(isAllowedAdminPage([role], "consumers")).toBe(false);
   });
 
   it("keeps a pickup manager in the isolated point workbench", () => {

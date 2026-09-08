@@ -5,6 +5,7 @@ export type AdminPage =
   | "orders"
   | "logistics"
   | "pickup-points"
+  | "consumers"
   | "service"
   | "governance"
   | "finance"
@@ -53,6 +54,11 @@ const mainNavigation: readonly AdminNavigationGroup[] = [
     key: "customers-finance",
     label: "客户与资金",
     items: [
+      {
+        key: "consumers",
+        label: "消费者管理",
+        roles: ["CUSTOMER_SERVICE"],
+      },
       {
         key: "service",
         label: "售后与异常",

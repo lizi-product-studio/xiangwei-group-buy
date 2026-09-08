@@ -1,3 +1,4 @@
+import { Consumers } from "./consumers-page.tsx";
 import { ProductImageField, ProductPicture } from "./ProductImageField.tsx";
 import { getEntryBranding } from "./entry-branding.ts";
 import {
@@ -843,6 +844,14 @@ function PageLoadError({
     </Card>
   );
 }
+function ListFilters({label,query,onQuery,status,onStatus,statuses}: {label:string;query:string;onQuery:(value:string)=>void;status:string;onStatus:(value:string)=>void;statuses:Array<{value:string;label:string}>}) {
+  return <Space wrap style={{marginBottom:16}}>
+    <Input allowClear aria-label={`${label}关键词`} placeholder={`${label}关键词`} value={query} onChange={event=>onQuery(event.target.value)} style={{width:260}} />
+    <Select aria-label={`${label}状态`} value={status} onChange={onStatus} style={{width:170}} options={[{value:"ALL",label:"全部状态"},...statuses]} />
+  </Space>;
+}
+const matchesKeyword = (query:string,...values:unknown[]) => !query.trim() || values.some(value => String(value ?? "").toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+
 function Products({
   values,
   categories,
@@ -852,6 +861,8 @@ function Products({
   categories: ProductCategory[];
   reload: () => Promise<void>;
 }) {
+  const [query,setQuery] = useState("");
+  const [filterStatus,setFilterStatus] = useState("ALL");
   const { message } = AntApp.useApp();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<CatalogSku | null>(null);
@@ -952,9 +963,10 @@ function Products({
           </Space>
         }
       />
+      <ListFilters label="商品" query={query} onQuery={setQuery} status={filterStatus} onStatus={setFilterStatus} statuses={[{value:"ACTIVE",label:"启用"},{value:"INACTIVE",label:"已停用"}]} />
       <Table
         rowKey="id"
-        dataSource={values}
+        dataSource={values.filter(v => (filterStatus === "ALL" || v.status === filterStatus) && matchesKeyword(query,...[v.product.title,v.name,v.product.category,v.product.origin]))}
         locale={{ emptyText: "暂无商品，请先创建商品" }}
         columns={[
           {
@@ -1244,8 +1256,13 @@ function Campaigns({
   skus: CatalogSku[];
   reload: () => Promise<void>;
 }) {
+  const [query,setQuery] = useState("");
+  const [filterStatus,setFilterStatus] = useState("ALL");
   const { message } = AntApp.useApp();
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<Campaign | null>(null);
+  const [deleteReview, setDeleteReview] = useState<Campaign | null>(null);
+  const [reviewNow, setReviewNow] = useState(Date.now());
   const [createReview, setCreateReview] = useState<CampaignDraftValues | null>(
     null,
   );
@@ -1271,12 +1288,56 @@ function Campaigns({
   const [postponeForm] = Form.useForm();
   const [form] = Form.useForm();
   const areaId = Form.useWatch("serviceAreaId", form);
+  useEffect(() => {
+    if (!openReview) return;
+    setReviewNow(Date.now());
+    const timer = window.setInterval(() => setReviewNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [openReview]);
+  const openExpired = !!openReview && Date.parse(openReview.cutoffAt) <= reviewNow;
+  const campaignError = (error: unknown) => {
+    if (error instanceof AdminApiError) {
+      const texts: Record<string, string> = {
+        CAMPAIGN_CLOSED: "截单时间已过，不能开售。请编辑草稿，将截单及后续时间调整后重新复核。",
+        CAMPAIGN_NOT_DRAFT: "团期已不再是草稿，不能编辑或删除。请刷新查看当前状态。",
+        CAMPAIGN_VERSION_CONFLICT: "团期已被其他操作修改，请刷新后重新编辑。",
+        CAMPAIGN_TRANSPORT_CONFLICT: "计划发车时间晚于已登记运输的预计到达时间。请先在配送与到货中调整运输安排，再修改草稿。",
+        CAMPAIGN_HAS_REFERENCES: "团期已有订单、批次或运输登记，不能删除；已登记运输的草稿编辑时须保留原区域和自提点。",
+        DELIVERY_SITE_NOT_CONFIRMED: "固定自提点尚不可用，请编辑草稿选择可用区域和自提点后开售。",
+      };
+      if (error.code && texts[error.code]) return texts[error.code];
+    }
+    return mutationErrorText(error);
+  };
+  const editDraft = (campaign: Campaign) => {
+    setOpenReview(null);
+    setEditing(campaign);
+    form.setFieldsValue({
+      ...campaign,
+      pickupPointId: campaign.deliveryPlan?.pickupPointId,
+      cutoffAt: dayjs(campaign.cutoffAt), dispatchAt: dayjs(campaign.dispatchAt),
+      estimatedArrivalStartAt: dayjs(campaign.estimatedArrivalStartAt),
+      estimatedArrivalEndAt: dayjs(campaign.estimatedArrivalEndAt),
+      items: campaign.items.map(item => ({catalogSkuId:item.skuId,retailPriceYuan:(item.unitPriceCents/100).toFixed(2),sellableQuantity:item.stock})),
+    });
+    setOpen(true);
+  };
+  const removeDraft = async () => {
+    if (!deleteReview || submitting) return;
+    setSubmitting(true);
+    try {
+      await api.deleteCampaign(deleteReview.id, deleteReview.version);
+      setDeleteReview(null);
+      await refreshAfterMutation(reload, message, "草稿团期已删除");
+    } catch(error) { void message.error(campaignError(error)); }
+    finally { setSubmitting(false); }
+  };
   const create = async () => {
     if (!createReview) return;
     setSubmitting(true);
     try {
       const { items, ...campaign } = createReview;
-      await api.createCampaign({
+      const body = {
         ...campaign,
         cutoffAt: campaign.cutoffAt.toISOString(),
         dispatchAt: campaign.dispatchAt.toISOString(),
@@ -1287,15 +1348,17 @@ function Campaigns({
           ...item,
           retailPriceCents: yuanToCents(retailPriceYuan),
         })),
-      });
+      };
+      if (editing) await api.updateCampaign(editing.id, {...body,version:editing.version});
+      else await api.createCampaign(body);
       setOpen(false);
       setCreateReview(null);
       form.resetFields();
-      await refreshAfterMutation(reload, message, "团期已创建，开售前请再次复核");
+      await refreshAfterMutation(reload, message, editing ? "草稿已更新，开售前请再次复核" : "团期已创建，开售前请再次复核");
     } catch (error) {
       // Keep the draft/review open so the operator can fix the exact field
       // rejected by the API instead of losing all entered values.
-      void message.error(mutationErrorText(error));
+      void message.error(campaignError(error));
     } finally {
       setSubmitting(false);
     }
@@ -1312,7 +1375,7 @@ function Campaigns({
         });
         setCancelReason("");
       } catch (error) {
-        void message.error(mutationErrorText(error));
+        void message.error(campaignError(error));
       }
       return;
     }
@@ -1321,13 +1384,21 @@ function Campaigns({
       if (campaign) setCloseReview(campaign);
       return;
     }
+    if (name === "open") {
+      const campaign = values.find(value => value.id === id);
+      if (campaign && Date.parse(campaign.cutoffAt) <= Date.now()) {
+        void message.error("截单时间已过，请编辑草稿调整时间后再开售");
+        setReviewNow(Date.now());
+        return;
+      }
+    }
     try {
       setSubmitting(true);
       await api.campaignAction(id, name);
       await refreshAfterMutation(reload, message, name === "open" ? "团期已开售" : "团期操作已完成");
       if (name === "open") setOpenReview(null);
     } catch (error) {
-      void message.error(mutationErrorText(error));
+      void message.error(campaignError(error));
     } finally {
       setSubmitting(false);
     }
@@ -1459,6 +1530,8 @@ function Campaigns({
                       value.serviceAreaId === area.id,
                   ))
                 : undefined;
+              setEditing(null);
+              form.resetFields();
               form.setFieldsValue({
                 serviceAreaId: area?.id,
                 pickupPointId: point?.id,
@@ -1470,9 +1543,13 @@ function Campaigns({
           </Button>
         }
       />
+      <Modal open={!!deleteReview} title="删除草稿团期" okText="确认删除" okButtonProps={{danger:true}} confirmLoading={submitting} onOk={() => void removeDraft()} onCancel={() => setDeleteReview(null)}>
+        <p>确认删除“{deleteReview?.title}”？仅允许删除没有订单或运输履约记录的草稿，同时移除其自动生成的配送计划。删除后不能恢复，审计记录保留。</p>
+      </Modal>
+      <ListFilters label="团期" query={query} onQuery={setQuery} status={filterStatus} onStatus={setFilterStatus} statuses={["DRAFT","OPEN","CLOSING","LOCKED","FULFILLING","POSTPONED","COMPLETED","CANCELLED"].map(value=>({value,label:displayLabel(value)}))} />
       <Table
         rowKey="id"
-        dataSource={values}
+        dataSource={values.filter(v => (filterStatus === "ALL" || v.status === filterStatus) && matchesKeyword(query,...[v.title,v.deliveryPlan?.siteName]))}
         locale={{ emptyText: "暂无团期，请先配置商品、区域和自提点" }}
         columns={[
           {
@@ -1502,6 +1579,10 @@ function Campaigns({
             title: "操作",
             render: (_, v) => (
               <Space>
+                {v.status === "DRAFT" && <>
+                  <Button disabled={submitting} onClick={() => editDraft(v)}>编辑</Button>
+                  <Button danger disabled={submitting} onClick={() => setDeleteReview(v)}>删除</Button>
+                </>}
                 {v.status === "DRAFT" && (
                   <Button loading={submitting} disabled={submitting} onClick={() => setOpenReview(v)}>
                     开售
@@ -1547,7 +1628,7 @@ function Campaigns({
       <Modal
         width={760}
         open={open}
-        title="创建社区团期"
+        title={editing ? "编辑草稿团期" : "创建社区团期"}
         footer={null}
         onCancel={() => setOpen(false)}
       >
@@ -1561,6 +1642,7 @@ function Campaigns({
           }}
           onFinish={(v: CampaignDraftValues) => setCreateReview(v)}
         >
+          {editing?.deliveryPlan?.status === "VEHICLE_BOOKED" && <Alert style={{marginBottom:16}} type="info" message="已登记运输：保留原区域、自提点及车辆信息。修改发车时间不得晚于已登记的预计到达时间。" />}
           <Form.Item
             name="title"
             label="团期名称"
@@ -1575,6 +1657,7 @@ function Campaigns({
               rules={[{ required: true }]}
             >
               <Select
+                disabled={editing?.deliveryPlan?.status === "VEHICLE_BOOKED"}
                 options={areas
                   .filter((v) => v.orderEnabled)
                   .map((v) => ({ value: v.id, label: v.name }))}
@@ -1586,6 +1669,7 @@ function Campaigns({
               rules={[{ required: true }]}
             >
               <Select
+                disabled={editing?.deliveryPlan?.status === "VEHICLE_BOOKED"}
                 options={points
                   .filter(
                     (v) => v.status === "ACTIVE" && v.serviceAreaId === areaId,
@@ -1869,8 +1953,8 @@ function Campaigns({
       <Modal
         width={760}
         open={!!createReview}
-        title="创建前发布复核"
-        okText="确认创建团期"
+        title={editing ? "保存草稿前复核" : "创建前发布复核"}
+        okText={editing ? "确认保存草稿" : "确认创建团期"}
         cancelText="返回修改"
         confirmLoading={submitting}
         onOk={() => void create()}
@@ -1902,11 +1986,17 @@ function Campaigns({
         width={760}
         open={!!openReview}
         title="开售前二次确认"
+        confirmLoading={submitting}
+        okButtonProps={{disabled: openExpired || submitting}}
         okText="已复核，确认开售"
         cancelText="暂不开售"
         onOk={() => openReview && void action(openReview.id, "open")}
         onCancel={() => setOpenReview(null)}
       >
+        {openReview && <Alert style={{marginBottom:16}} type={openExpired ? "error" : "info"}
+          message={openExpired ? "截单时间已过，不能开售" : "请确认时间与商品信息后开售"}
+          description={openExpired ? "请编辑草稿，调整截单、发车及到货时间后重新复核。" : "开售后商品价格与固定自提点将锁定。"}
+          action={<Button onClick={() => editDraft(openReview)}>编辑草稿</Button>} />}
         {openReview && (
           <CampaignReview
             title={openReview.title}
@@ -3044,6 +3134,10 @@ function Areas({
   points: PickupPoint[];
   reload: () => Promise<void>;
 }) {
+  const [areaQuery,setAreaQuery] = useState("");
+  const [areaStatus,setAreaStatus] = useState("ALL");
+  const [pointQuery,setPointQuery] = useState("");
+  const [pointStatus,setPointStatus] = useState("ALL");
   const { message } = AntApp.useApp();
   const [areaOpen, setAreaOpen] = useState(false);
   const [pointOpen, setPointOpen] = useState(false);
@@ -3122,9 +3216,10 @@ function Areas({
         }
       />
       <Typography.Title level={4}>服务区域</Typography.Title>
+      <ListFilters label="区域" query={areaQuery} onQuery={setAreaQuery} status={areaStatus} onStatus={setAreaStatus} statuses={[{value:"ENABLED",label:"接单中"},{value:"DISABLED",label:"已暂停接单"}]} />
       <Table
         rowKey="id"
-        dataSource={areas}
+        dataSource={areas.filter(v=>(areaStatus === "ALL" || (v.orderEnabled ? "ENABLED" : "DISABLED") === areaStatus) && matchesKeyword(areaQuery,v.name,v.regionCode))}
         locale={{ emptyText: "暂无服务区域，请从行政目录开通" }}
         columns={[
           { title: "区域", dataIndex: "name" },
@@ -3175,9 +3270,10 @@ function Areas({
         ]}
       />
       <Typography.Title level={4}>自提点</Typography.Title>
+      <ListFilters label="自提点" query={pointQuery} onQuery={setPointQuery} status={pointStatus} onStatus={setPointStatus} statuses={[{value:"ACTIVE",label:"启用"},{value:"INACTIVE",label:"停用"}]} />
       <Table
         rowKey="id"
-        dataSource={points}
+        dataSource={points.filter(v=>(pointStatus === "ALL" || v.status === pointStatus) && matchesKeyword(pointQuery,v.name,v.address,v.contactName,areas.find(area=>area.id===v.serviceAreaId)?.name))}
         locale={{ emptyText: "暂无自提点，请先选择服务区域并新增" }}
         columns={[
           { title: "名称", dataIndex: "name" },
@@ -4691,6 +4787,8 @@ function Settings({
   reload: () => Promise<void>;
   currentUserId: string | null;
 }) {
+  const [query,setQuery] = useState("");
+  const [filterStatus,setFilterStatus] = useState("ALL");
   const { message } = AntApp.useApp();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<InternalStaff | null>(null);
@@ -4823,9 +4921,10 @@ function Settings({
           </Button>
         }
       />
+      <ListFilters label="员工" query={query} onQuery={setQuery} status={filterStatus} onStatus={setFilterStatus} statuses={["ACTIVE","SUSPENDED","PASSWORD_SETUP_REQUIRED"].map(value=>({value,label:displayLabel(value)}))} />
       <Table
         rowKey="userId"
-        dataSource={staff}
+        dataSource={staff.filter(v => (filterStatus === "ALL" || v.status === filterStatus) && matchesKeyword(query,...[v.displayName,v.staffNo,v.phone]))}
         columns={[
           {
             title: "员工",
@@ -4926,7 +5025,8 @@ function Settings({
                   <Select
                     mode="multiple"
                     getPopupContainer={(node) => node.parentElement ?? document.body}
-                    options={pointOptions}
+                    optionFilterProp="label"
+                  options={pointOptions}
                   />
                 </Form.Item>
               ) : null
@@ -4978,6 +5078,7 @@ function Settings({
                 <Select
                   mode="multiple"
                   getPopupContainer={(node) => node.parentElement ?? document.body}
+                  optionFilterProp="label"
                   options={pointOptions}
                 />
               </Form.Item>
@@ -5113,6 +5214,19 @@ export function App() {
   const currentPage: AdminPage = isAllowedAdminPage(roles, page)
     ? page
     : defaultPage ?? "settings";
+  useEffect(() => {
+    if (!authenticated) return;
+    const frame = window.requestAnimationFrame(() => {
+      const menu = document.querySelector<HTMLElement>(".app-sider > .ant-layout-sider-children > .ant-menu");
+      const selected = menu?.querySelector<HTMLElement>(".ant-menu-item-selected");
+      if (!menu || !selected) return;
+      const bounds = menu.getBoundingClientRect();
+      const item = selected.getBoundingClientRect();
+      if (item.bottom > bounds.bottom) menu.scrollTop += Math.ceil(item.bottom - bounds.bottom);
+      else if (item.top < bounds.top) menu.scrollTop -= Math.ceil(bounds.top - item.top);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [authenticated, currentPage]);
   const clearWorkspace = useCallback((nextPage: AdminPage = "settings") => {
     identityEpoch.current += 1;
     reloadGeneration.current += 1;
@@ -5341,6 +5455,8 @@ export function App() {
       <PointWorkbench
         {...{ deliveries, roles, loading, error: loadError, reload }}
       />
+    ) : currentPage === "consumers" ? (
+      <Consumers loadPage={api.consumers} loadDetail={api.consumerDetail} />
     ) : currentPage === "service" ? (
       <Service
         {...{
