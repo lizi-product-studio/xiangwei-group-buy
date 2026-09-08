@@ -103,6 +103,8 @@ import { displayLabel, STAFF_ROLE_OPTIONS } from "./labels.ts";
 import {
   adminLoadErrorText,
   getDeliveryActionLabels,
+  dispatchBlockReason,
+  dispatchFailureText,
   getLogisticsViewState,
 } from "./logistics-ui.ts";
 import {
@@ -1772,9 +1774,11 @@ function Campaigns({
               );
             }}
           </Form.List>
-          <Button type="primary" htmlType="submit" style={{ marginTop: 16 }}>
-            下一步：发布复核
-          </Button>
+          <div style={{ marginTop: 24 }}>
+            <Button type="primary" htmlType="submit">
+              下一步：发布复核
+            </Button>
+          </div>
         </Form>
       </Modal>
       <Modal
@@ -2548,7 +2552,6 @@ function Logistics({
   deliveries,
   batches,
   campaigns,
-  orders,
   roles,
   loading,
   error,
@@ -2575,6 +2578,35 @@ function Logistics({
   const [dispatchReview, setDispatchReview] = useState<DeliveryPlan | null>(
     null,
   );
+  const [dispatchLabels, setDispatchLabels] = useState<PackingLabel[] | null>(null);
+  const [dispatchLoadError, setDispatchLoadError] = useState<string | null>(null);
+  const [dispatchError, setDispatchError] = useState<string | null>(null);
+  const [reviewReload, setReviewReload] = useState(0);
+  const reviewCampaign = campaigns.find((value) => value.id === dispatchReview?.campaignId);
+  const reviewBatch = batches.find((value) => value.campaignId === dispatchReview?.campaignId);
+  const reviewBlock = dispatchReview ? dispatchBlockReason({
+    ...(reviewCampaign ? { campaignStatus: reviewCampaign.status } : {}),
+    planStatus: dispatchReview.status,
+    ...(reviewBatch ? { batchStatus: reviewBatch.status } : {}),
+  }) : null;
+  useEffect(() => {
+    let cancelled = false;
+    setDispatchLabels(null);
+    setDispatchLoadError(null);
+    setDispatchError(null);
+    if (dispatchReview && !reviewBlock) {
+      void api.packingLabels(dispatchReview.campaignId).then((values) => {
+        if (!cancelled) setDispatchLabels(values);
+      }).catch((error: unknown) => {
+        if (!cancelled) setDispatchLoadError(`无法核实本团待发货订单：${dispatchFailureText(error, mutationErrorText(error))}`);
+      });
+    }
+    return () => { cancelled = true; };
+  }, [dispatchReview, reviewBlock, reviewReload]);
+  const dispatchQuantity = dispatchLabels?.flatMap((value) => value.items).reduce((sum, item) => sum + item.quantity, 0) ?? 0;
+  const cannotDispatch = reviewBlock ?? dispatchLoadError ??
+    (dispatchLabels === null ? "正在核实本团已付款待发货订单，请稍候" :
+      dispatchLabels.length === 0 || dispatchQuantity === 0 ? "本团没有可发货的已付款订单，请先到订单管理核实付款与订单状态" : null);
   const [dispatchSubmitting, setDispatchSubmitting] = useState(false);
   const [vehicleSubmitting, setVehicleSubmitting] = useState(false);
   const canOperate =
@@ -2601,19 +2633,27 @@ function Logistics({
     });
   };
   const dispatch = async () => {
-    if (!dispatchReview) return;
+    if (!dispatchReview || cannotDispatch || dispatchSubmitting) return;
     const campaignId = dispatchReview.campaignId;
     const existing = batches.find((value) => value.campaignId === campaignId);
     setDispatchSubmitting(true);
+    setDispatchError(null);
+    let createdBatch = existing;
     try {
       const batch = existing ?? (await api.createBatch(campaignId));
-      if (batch.status === "DRAFT") await api.dispatch(batch.id);
+      createdBatch = batch;
+      if (batch.status !== "DRAFT") {
+        setDispatchError("该批次已不处于待发车状态，请刷新查看最新运输状态");
+        return;
+      }
+      await api.dispatch(batch.id);
       setDispatchReview(null);
       await refreshAfterMutation(reload, message, "批次已发车");
     } catch (error) {
-      void message.error(
-        `${mutationErrorText(error)}；已创建的批次可继续复用，不会重复建批次`,
-      );
+      const reason = dispatchFailureText(error, mutationErrorText(error));
+      setDispatchError(createdBatch
+        ? `发车未完成：${reason}。已创建的批次保留，可在条件满足后重试发车。`
+        : `批次创建未确认：${reason}。请刷新核实后重试。`);
     } finally {
       setDispatchSubmitting(false);
     }
@@ -2940,16 +2980,24 @@ function Logistics({
         open={!!dispatchReview}
         title="发车前复核"
         confirmLoading={dispatchSubmitting}
+        okButtonProps={{ disabled: Boolean(cannotDispatch) }}
         okText="确认发车"
         cancelText="返回修改"
         onCancel={() => setDispatchReview(null)}
         onOk={() => void dispatch()}
       >
         {dispatchReview && (
+          <>
+          {cannotDispatch && <Alert type={dispatchLabels === null && !reviewBlock && !dispatchLoadError ? "info" : "warning"} showIcon message={cannotDispatch} style={{ marginBottom: 16 }}
+            action={dispatchLoadError ? <Button size="small" onClick={() => setReviewReload((value) => value + 1)}>重试核实</Button> : undefined} />}
+          {dispatchError && <Alert type="error" showIcon message={dispatchError} style={{ marginBottom: 16 }} />}
           <Descriptions column={1} bordered size="small">
             <Descriptions.Item label="团期">
               {campaigns.find((value) => value.id === dispatchReview.campaignId)?.title ??
                 dispatchReview.campaignId}
+            </Descriptions.Item>
+            <Descriptions.Item label="团期状态">
+              {reviewCampaign ? <Status value={reviewCampaign.status} /> : "尚未加载"}
             </Descriptions.Item>
             <Descriptions.Item label="自提点">
               {dispatchReview.siteName}
@@ -2970,15 +3018,11 @@ function Logistics({
                 ? dateTime(dispatchReview.estimatedArrivalAt)
                 : "—"}
             </Descriptions.Item>
-            <Descriptions.Item label="订单 / 商品数量">
-              {orders.filter((value) => value.campaignId === dispatchReview.campaignId)
-                .length}
-              单 / {orders
-                .filter((value) => value.campaignId === dispatchReview.campaignId)
-                .flatMap((value) => value.items)
-                .reduce((sum, item) => sum + item.quantity, 0)} 件
+            <Descriptions.Item label="已付款发货订单 / 商品数量">
+              {dispatchLabels === null ? "待核实" : `${dispatchLabels.length} 单 / ${dispatchQuantity} 件`}
             </Descriptions.Item>
           </Descriptions>
+          </>
         )}
       </Modal>
       <ArrivalConfirmationModal

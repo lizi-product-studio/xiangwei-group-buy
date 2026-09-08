@@ -43,9 +43,8 @@ export function getDeliveryActionLabels(input: {
     labels.push("登记运输信息");
   if (input.canOperate && input.status === "VEHICLE_BOOKED") {
     labels.push("编辑运输信息");
-    labels.push(
-      input.batchStatus === "DRAFT" ? "确认发车" : "创建批次并发车",
-    );
+    if (!input.batchStatus || input.batchStatus === "DRAFT")
+      labels.push(input.batchStatus === "DRAFT" ? "确认发车" : "创建批次并发车");
   }
   if (
     input.emergencyProxy &&
@@ -53,4 +52,32 @@ export function getDeliveryActionLabels(input: {
   )
     labels.push("紧急纠正运输信息");
   return labels;
+}
+
+export function dispatchBlockReason(input: {
+  campaignStatus?: string;
+  planStatus: string;
+  batchStatus?: string;
+}): string | null {
+  if (!input.campaignStatus) return "团期信息尚未加载，请刷新后重试";
+  if (input.batchStatus && input.batchStatus !== "DRAFT")
+    return "该批次已发车或已完成，请刷新查看最新运输状态";
+  if (input.planStatus !== "VEHICLE_BOOKED") return "请先完成运输信息登记";
+  if (input.campaignStatus === "CANCELLED") return "团期已取消，不能发车";
+  if (input.campaignStatus === "COMPLETED") return "团期已完成，不能再次发车";
+  if (input.campaignStatus === "LOCKED" ||
+      (input.campaignStatus === "FULFILLING" && input.batchStatus === "DRAFT")) return null;
+  return "团期尚未成团锁单，请先到团期管理完成截单并确认成团，再安排发车";
+}
+
+/** Keep contextual business errors specific without exposing arbitrary backend text. */
+export function dispatchFailureText(error: unknown, fallback: string): string {
+  const value = error as { code?: string; message?: string };
+  if (value.code === "DELIVERY_PLAN_NOT_READY") return "运输信息尚未完成，请重新登记后发车";
+  if (value.code === "INVALID_STATE_TRANSITION") {
+    if (value.message === "只有已成团锁单的团期可以创建发车批次")
+      return "团期尚未成团锁单，请先完成截单并确认成团";
+    if (value.message === "批次当前不能发车") return "批次已不处于待发车状态，请刷新查看最新运输状态";
+  }
+  return fallback;
 }

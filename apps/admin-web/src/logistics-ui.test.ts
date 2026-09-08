@@ -3,6 +3,8 @@ import {
   adminLoadErrorText,
   apiUnavailableMessage,
   getDeliveryActionLabels,
+  dispatchBlockReason,
+  dispatchFailureText,
   getLogisticsViewState,
 } from "./logistics-ui.ts";
 
@@ -62,5 +64,26 @@ describe("logistics loading and action states", () => {
         emergencyProxy: true,
       }),
     ).toEqual(["紧急纠正运输信息"]);
+  });
+});
+
+
+describe("dispatch review prerequisites", () => {
+  it("blocks an unclosed campaign even after booking transport", () => {
+    expect(dispatchBlockReason({ campaignStatus: "OPEN", planStatus: "VEHICLE_BOOKED" })).toContain("成团锁单");
+    expect(dispatchBlockReason({ campaignStatus: "CANCELLED", planStatus: "VEHICLE_BOOKED" })).toContain("已取消");
+    expect(dispatchBlockReason({ planStatus: "VEHICLE_BOOKED" })).toContain("尚未加载");
+  });
+  it("allows a locked campaign and retries its existing draft batch during fulfillment", () => {
+    expect(dispatchBlockReason({ campaignStatus: "LOCKED", planStatus: "VEHICLE_BOOKED" })).toBeNull();
+    expect(dispatchBlockReason({ campaignStatus: "FULFILLING", planStatus: "VEHICLE_BOOKED", batchStatus: "DRAFT" })).toBeNull();
+    expect(dispatchBlockReason({ campaignStatus: "FULFILLING", planStatus: "IN_TRANSIT", batchStatus: "IN_TRANSIT" })).toContain("已发车");
+    expect(getDeliveryActionLabels({ status: "VEHICLE_BOOKED", batchStatus: "IN_TRANSIT", canOperate: true, emergencyProxy: false })).toEqual(["编辑运输信息"]);
+    expect(dispatchBlockReason({ campaignStatus: "LOCKED", planStatus: "SITE_CONFIRMED" })).toContain("运输信息");
+  });
+  it("explains dispatch-specific 409s without displaying arbitrary server messages", () => {
+    expect(dispatchFailureText({ code: "INVALID_STATE_TRANSITION", message: "只有已成团锁单的团期可以创建发车批次" }, "通用提示")).toContain("尚未成团锁单");
+    expect(dispatchFailureText({ code: "DELIVERY_PLAN_NOT_READY" }, "通用提示")).toContain("重新登记");
+    expect(dispatchFailureText({ code: "INVALID_STATE_TRANSITION", message: "untrusted detail" }, "通用提示")).toBe("通用提示");
   });
 });
