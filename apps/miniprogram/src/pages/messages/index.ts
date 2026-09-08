@@ -1,7 +1,6 @@
 import { api, AuthExpiredError, customerAuth, customerErrorMessage } from '../../utils/api';
 import { formatDateTime } from '../../utils/format';
 import { navigateToCustomerLogin } from '../../utils/auth-navigation';
-import { consumeCancelReturnSuppression } from '../../utils/auth-intent';
 import { notificationEnableDecision } from '../../utils/notification-guard';
 import { PageLoadCoordinator } from '../../utils/page-load-guard';
 import { PageActionCoordinator, isOwnedAuthExpiry } from '../../utils/page-action-coordinator';
@@ -35,8 +34,6 @@ Page({
     this.setData({ loading: true, error: '', messages: [] });
     if (!customerAuth.isLoggedIn()) {
       this.setData({ loading: false, error: '登录后可查看订单消息', messages: [] });
-      if (consumeCancelReturnSuppression({ source: 'messages', returnUrl: '/pages/messages/index' })) return;
-      navigateToCustomerLogin('messages', '/pages/messages/index');
       return;
     }
     try {

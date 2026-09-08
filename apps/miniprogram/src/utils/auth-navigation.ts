@@ -12,6 +12,8 @@ import {
   type AuthWriteAction,
 } from "./auth-intent";
 
+let loginNavigationPending: symbol | null = null;
+
 export function navigateToCustomerLogin(
   source: AuthIntentSource,
   returnUrl: string,
@@ -27,15 +29,27 @@ export function navigateToCustomerLogin(
     void wx.switchTab({ url: "/pages/profile/index" });
     return;
   }
+  const pages = typeof getCurrentPages === "function" ? getCurrentPages() : [];
+  if (loginNavigationPending || pages[pages.length - 1]?.route === "pages/login/index") return;
   const normalizedReturnUrl = returnUrl;
   const existing = readAuthIntent();
   const intent = existing && existing.source === source && existing.returnUrl === normalizedReturnUrl && existing.writeAction === writeAction
     ? existing
     : createAuthIntent(source, normalizedReturnUrl, writeAction);
   saveAuthIntent(intent);
-  void wx.navigateTo({
-    url: `/pages/login/index?source=${encodeURIComponent(intent.source)}`,
-  });
+  const navigationId = Symbol("login-navigation");
+  loginNavigationPending = navigationId;
+  const release = () => { if (loginNavigationPending === navigationId) loginNavigationPending = null; };
+  try {
+    wx.navigateTo({
+      url: `/pages/login/index?source=${encodeURIComponent(intent.source)}`,
+      complete: release,
+    });
+
+  } catch {
+    release();
+    void wx.showToast({ title: "暂时无法打开登录页，请重试", icon: "none" });
+  }
 }
 
 export function finishCustomerLogin(): void {

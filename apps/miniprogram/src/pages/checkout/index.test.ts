@@ -245,7 +245,7 @@ describe("checkout page guest/auth handoff", () => {
     await page.submitOrder.call(instance);
     const writes = requests.filter((request) => request.method === "POST" && request.url.includes("/api/v1/orders"));
     expect(writes).toHaveLength(0);
-    expect(navigateTo).toHaveBeenCalledWith({ url: expect.stringContaining("/pages/login/index") });
+    expect(navigateTo).toHaveBeenCalledWith({ url: expect.stringContaining("/pages/login/index") , complete: expect.any(Function) });
     expect(JSON.parse(String(storage.get("hometown-auth-intent")))).toMatchObject({
       source: "checkout",
       writeAction: "submit-order",

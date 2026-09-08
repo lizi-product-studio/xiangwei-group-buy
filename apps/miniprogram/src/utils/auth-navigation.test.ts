@@ -21,7 +21,7 @@ describe("customer auth navigation", () => {
       getStorageSync: (key: string) => storage.get(key),
       removeStorageSync: (key: string) => storage.delete(key),
       navigateBack: vi.fn(() => Promise.resolve()),
-      navigateTo: vi.fn(() => Promise.resolve()),
+      navigateTo: vi.fn((options: { complete?: () => void }) => { options.complete?.(); }),
       switchTab: vi.fn(() => Promise.resolve()),
       redirectTo: vi.fn(() => Promise.resolve()),
       showToast: vi.fn(() => Promise.resolve()),

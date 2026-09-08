@@ -69,7 +69,7 @@ describe("profile page protected entry behavior", () => {
     });
 
     expect(storage.get("orderFilter")).toBe("READY");
-    expect(navigateTo).toHaveBeenCalledWith({ url: "/pages/login/index?source=orders" });
+    expect(navigateTo).toHaveBeenCalledWith({ url: "/pages/login/index?source=orders" , complete: expect.any(Function) });
     expect(switchTab).not.toHaveBeenCalled();
   });
 
