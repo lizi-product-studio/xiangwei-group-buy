@@ -1,3 +1,4 @@
+import { OperationsQueueTable } from "./operations-queue-table.tsx";
 import { Consumers } from "./consumers-page.tsx";
 import { ProductImageField, ProductPicture } from "./ProductImageField.tsx";
 import { getEntryBranding } from "./entry-branding.ts";
@@ -4067,9 +4068,9 @@ function PickupWindowQueue({
   return (
     <>
       <Typography.Title level={4}>逾期领取处理</Typography.Title>
-      <Table
+      <OperationsQueueTable
         rowKey="orderId"
-        dataSource={values}
+        loadPage={api.pickupWindowsPage} refreshToken={values} statuses={["EXPIRED_PENDING", "REFUND_PENDING", "ACTIVE", "EXTENDED", "LOSS_RECORDED", "CLOSED"]}
         locale={{ emptyText: "暂无需要运营处理的领取窗口" }}
         columns={[
           { title: "订单", render: (_, value) => value.orderNo ?? value.orderId },
@@ -4239,9 +4240,9 @@ function Service({
         />
       )}
       <Typography.Title level={4}>品质售后</Typography.Title>
-      <Table
+      <OperationsQueueTable
         rowKey="id"
-        dataSource={quality}
+        loadPage={api.qualityPage} refreshToken={quality} statuses={["REGISTERED", "ACCEPTED", "REFUNDING", "REJECTED", "RESOLVED"]}
         columns={[
           { title: "订单", render: (_, value) => value.orderNo ?? value.orderId },
           {
@@ -4291,9 +4292,9 @@ function Service({
         ]}
       />
       <Typography.Title level={4}>取消申请</Typography.Title>
-      <Table
+      <OperationsQueueTable
         rowKey="id"
-        dataSource={cancellations}
+        loadPage={api.cancellationsPage} refreshToken={cancellations} statuses={["PENDING_REVIEW", "APPROVED_WAITING_FINANCE", "DIRECT_REFUNDING", "REFUNDING", "REFUNDED", "REJECTED"]}
         columns={[
           { title: "订单", render: (_, value) => value.orderNo ?? value.orderId },
           { title: "原因", dataIndex: "reason" },
@@ -4324,9 +4325,9 @@ function Service({
         ]}
       />
       <Typography.Title level={4}>履约差异</Typography.Title>
-      <Table
+      <OperationsQueueTable
         rowKey="id"
-        dataSource={exceptions}
+        loadPage={api.exceptionsPage} refreshToken={exceptions} statuses={["REGISTERED", "REFUND_CONFIRMED", "REFUND_PROCESSING", "RESOLVED"]}
         columns={[
           { title: "订单", render: (_, value) => value.orderNo ?? value.orderId ?? "—" },
           { title: "自提点", render: (_, value) => value.pickupPointName ?? value.pickupPointId ?? "—" },
@@ -4338,7 +4339,7 @@ function Service({
                 .map((item) => `${item.name} × ${item.affectedQuantity}`)
                 .join("；"),
           },
-          { title: "可复算金额", render: (_, value) => money(value.refundAmountCents) },
+          { title: "可复算金额", render: (_, value) => value.refundAmountCents === null ? (value.financialFactsError ?? "金额不可计算") : money(value.refundAmountCents) },
           { title: "状态", render: (_, v) => <Status value={v.status} /> },
           { title: "运营确认说明", dataIndex: "resolutionNote" },
         ]}
@@ -4471,7 +4472,7 @@ function Finance({
     return "退款处理中";
   };
   const executeExceptionRefund = async () => {
-    if (!refundDraft) return;
+    if (!refundDraft || refundDraft.exception.financialFactsError || refundDraft.exception.refundAmountCents === null) return;
     setSubmitting(true);
     try {
       await api.refundException(refundDraft.exception.id, refundDraft.note);
@@ -4567,9 +4568,9 @@ function Finance({
       />
       <section aria-label="品质售后退款">
         <Typography.Title level={4}>品质售后退款</Typography.Title>
-        <Table
+        <OperationsQueueTable
           rowKey="id"
-          dataSource={quality.filter((value) => value.status === "REFUNDING")}
+          loadPage={api.qualityPage} refreshToken={quality} fixedStatus="REFUNDING"
           locale={{ emptyText: "暂无待执行的品质退款" }}
           columns={[
             { title: "订单", render: (_, value) => value.orderNo ?? value.orderId },
@@ -4599,9 +4600,9 @@ function Finance({
       </section>
       <section aria-label="截单后取消退款">
         <Typography.Title level={4}>截单后取消退款</Typography.Title>
-        <Table
+        <OperationsQueueTable
           rowKey="id"
-          dataSource={cancellations.filter((value) => value.status === "APPROVED_WAITING_FINANCE")}
+          loadPage={api.cancellationsPage} refreshToken={cancellations} fixedStatus="APPROVED_WAITING_FINANCE"
           locale={{ emptyText: "暂无待执行的截单后取消退款" }}
           columns={[
             { title: "订单", render: (_, value) => value.orderNo ?? value.orderId },
@@ -4623,23 +4624,23 @@ function Finance({
       </section>
       <section aria-label="到货差异退款">
         <Typography.Title level={4}>到货差异退款</Typography.Title>
-        <Table
+        <OperationsQueueTable
           rowKey="id"
-          dataSource={exceptions}
+          loadPage={api.exceptionsPage} refreshToken={exceptions} statuses={["REGISTERED", "REFUND_CONFIRMED", "REFUND_PROCESSING", "RESOLVED"]}
           locale={{ emptyText: "暂无履约差异退款" }}
           columns={[
           { title: "订单", render: (_, value) => value.orderNo ?? value.orderId ?? "—" },
           { title: "自提点", render: (_, value) => value.pickupPointName ?? value.pickupPointId ?? "—" },
           { title: "异常类型", render: (_, value) => value.items.map((item) => displayLabel(item.reason)).join("、") },
           { title: "逐商品数量", render: (_, value) => value.items.map((item) => `${item.name} × ${item.affectedQuantity}`).join("；") },
-          { title: "退款金额", render: (_, value) => money(value.refundAmountCents) },
+          { title: "退款金额", render: (_, value) => value.refundAmountCents === null ? (value.financialFactsError ?? "金额不可计算") : money(value.refundAmountCents) },
           { title: "运营确认说明", dataIndex: "resolutionNote" },
           { title: "状态", render: (_, value) => <Status value={value.status} /> },
           {
             title: "操作",
             render: (_, value) =>
               canExecuteRefund && value.status === "REFUND_CONFIRMED" ? (
-                <Button type="primary" onClick={() => setRefundTarget(value)}>
+                <Button type="primary" disabled={Boolean(value.financialFactsError) || value.refundAmountCents === null} title={value.financialFactsError ?? undefined} onClick={() => setRefundTarget(value)}>
                   执行退款
                 </Button>
               ) : (
@@ -4651,9 +4652,9 @@ function Finance({
       </section>
       <section aria-label="逾期领取退款">
         <Typography.Title level={4}>逾期领取退款</Typography.Title>
-        <Table
+        <OperationsQueueTable
           rowKey="orderId"
-          dataSource={pickupWindows.filter((window) => window.status === "REFUND_PENDING")}
+          loadPage={api.pickupWindowsPage} refreshToken={pickupWindows} fixedStatus="REFUND_PENDING"
           locale={{ emptyText: "暂无待执行的逾期领取退款" }}
           columns={[
           { title: "订单", render: (_, value) => value.orderNo ?? value.orderId },
@@ -4735,7 +4736,7 @@ function Finance({
       >
         <Typography.Paragraph>
           将对订单 {refundDraft?.exception.orderNo ?? refundDraft?.exception.orderId} 执行
-          {money(refundDraft?.exception.refundAmountCents ?? 0)} 的差异退款。
+          {refundDraft?.exception.refundAmountCents == null ? "金额不可计算" : money(refundDraft.exception.refundAmountCents)} 的差异退款。
         </Typography.Paragraph>
         <Typography.Paragraph>确认说明：{refundDraft?.note}</Typography.Paragraph>
       </Modal>
@@ -5266,7 +5267,7 @@ export function App() {
     clearWorkspace(nextDefault ?? "settings");
     setAuthenticated(true);
   }, [clearWorkspace]);
-  const reload = async () => {
+  const reload = async (initial = false) => {
     const epoch = identityEpoch.current;
     const generation = ++reloadGeneration.current;
     const isCurrentReload = () =>
@@ -5318,57 +5319,25 @@ export function App() {
         work.push(api.deliveries().then(commit(setDeliveries)));
       if (currentPage === "settings")
         work.push(api.staff().then(commit(setStaff)), api.points().then(commit(setPoints)));
-      if (currentPage === "service")
-        work.push(
-          Promise.allSettled([api.quality(), api.cancellations(), api.exceptions()]).then(
-            ([qualityResult, cancellationResult, exceptionResult]) => {
-              if (qualityResult.status === "fulfilled") commit(setQuality)(qualityResult.value);
-              if (cancellationResult.status === "fulfilled") commit(setCancellations)(cancellationResult.value);
-              if (exceptionResult.status === "fulfilled") commit(setExceptions)(exceptionResult.value);
-              const failed = [qualityResult, cancellationResult, exceptionResult].find(
-                (result): result is PromiseRejectedResult => result.status === "rejected",
-              );
-              if (failed) throw failed.reason;
-            },
-          ),
-        );
-      if (
-        currentPage === "service" &&
-        (roles.includes("OPERATOR") || roles.includes("SUPER_ADMIN"))
-      )
-        work.push(api.pickupWindows().then(commit(setPickupWindows)));
+      // Paged queues own their requests. Only explicit refreshes invalidate them;
+      // initial page mounting performs one request per queue.
+      if (!initial && isCurrentReload()) {
+        if (currentPage === "service" || currentPage === "finance") {
+          setQuality(value => [...value]);
+          setCancellations(value => [...value]);
+          setExceptions(value => [...value]);
+          setPickupWindows(value => [...value]);
+        }
+        if (currentPage === "governance") setNotifications(value => [...value]);
+      }
       if (currentPage === "governance")
-        work.push(
-          Promise.all([
-            roles.includes("CUSTOMER_SERVICE") || roles.includes("SUPER_ADMIN")
-              ? api.manualNotifications()
-              : Promise.resolve([]),
-            api.serviceAreaInterests(),
-          ]).then(([nextNotifications, nextInterests]) => {
-            commit(setNotifications)(nextNotifications);
-            commit(setInterests)(nextInterests);
-          }),
-        );
+        work.push(api.serviceAreaInterests().then(commit(setInterests)));
       if (currentPage === "finance")
         work.push(
-          Promise.allSettled([
-            api.finance(),
-            api.ledger(),
-            api.exceptions(),
-            api.pickupWindows(),
-            api.quality(),
-            api.cancellations(),
-          ]).then((results) => {
-            const [nextRefunds, nextLedger, nextExceptions, nextWindows, nextQuality, nextCancellations] = results;
+          Promise.allSettled([api.finance(), api.ledger()]).then(([nextRefunds, nextLedger]) => {
             if (nextRefunds.status === "fulfilled") commit(setRefunds)(nextRefunds.value);
             if (nextLedger.status === "fulfilled") commit(setLedger)(nextLedger.value);
-            if (nextExceptions.status === "fulfilled") commit(setExceptions)(nextExceptions.value);
-            if (nextWindows.status === "fulfilled") commit(setPickupWindows)(nextWindows.value);
-            if (nextQuality.status === "fulfilled") commit(setQuality)(nextQuality.value);
-            if (nextCancellations.status === "fulfilled") commit(setCancellations)(nextCancellations.value);
-            const failed = results.find(
-              (result): result is PromiseRejectedResult => result.status === "rejected",
-            );
+            const failed = [nextRefunds, nextLedger].find((result): result is PromiseRejectedResult => result.status === "rejected");
             if (failed) throw failed.reason;
           }),
         );
@@ -5404,7 +5373,7 @@ export function App() {
       setPage(defaultPage);
       return () => window.removeEventListener("admin-auth-expired", expired);
     }
-    void reload().catch(() => undefined);
+    void reload(true).catch(() => undefined);
     return () => window.removeEventListener("admin-auth-expired", expired);
   }, [authenticated, page, roles.join(","), clearWorkspace]);
   if (!authenticated)

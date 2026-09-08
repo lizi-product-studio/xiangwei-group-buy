@@ -122,16 +122,16 @@ test("治理和审计读取的同身份迟到响应不会覆盖最新 generation
   const account = await createLogin(request, "SUPER_ADMIN", Date.now().toString());
   let releaseGovernance!: () => void;
   let governanceCalls = 0;
-  await page.route("**/api/v1/admin/notifications/manual", async (route) => {
+  await page.route("**/api/v1/admin/notifications/manual?*", async (route) => {
     governanceCalls += 1;
     if (governanceCalls === 1) {
       await new Promise<void>((resolve) => {
         releaseGovernance = resolve;
       });
-      return route.fulfill({ json: { data: [] } });
+      return route.fulfill({ json: { pagination: {page: 1, pageSize: 20, total: 2}, data: [] } });
     }
     return route.fulfill({
-      json: {
+      json: { pagination: {page: 1, pageSize: 20, total: 2},
         data: [
           notification("current-governance", "CURRENT-GOVERNANCE"),
           {
@@ -194,18 +194,18 @@ test("跨身份后迟到的治理和审计响应不会泄露前一身份数据",
   const operator = await createLogin(request, "OPERATOR", `${suffix}1`);
   let releaseGovernance!: () => void;
   let governanceCalls = 0;
-  await page.route("**/api/v1/admin/notifications/manual", async (route) => {
+  await page.route("**/api/v1/admin/notifications/manual?*", async (route) => {
     governanceCalls += 1;
     if (governanceCalls === 1) {
       await new Promise<void>((resolve) => {
         releaseGovernance = resolve;
       });
       return route.fulfill({
-        json: { data: [notification("previous-governance", "PREVIOUS-GOVERNANCE")] },
+        json: { pagination: {page: 1, pageSize: 20, total: 2}, data: [notification("previous-governance", "PREVIOUS-GOVERNANCE")] },
       });
     }
     return route.fulfill({
-      json: { data: [notification("current-operator", "CURRENT-OPERATOR")] },
+      json: { pagination: {page: 1, pageSize: 20, total: 2}, data: [notification("current-operator", "CURRENT-OPERATOR")] },
     });
   });
   await page.route("**/api/v1/admin/service-area-interests", (route) =>

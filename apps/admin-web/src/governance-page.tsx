@@ -1,3 +1,4 @@
+import { OperationsQueueTable } from "./operations-queue-table.tsx";
 import { useState } from "react";
 import dayjs from "dayjs";
 import {
@@ -184,9 +185,9 @@ export function GovernancePage({
           description="人工完成只记录已通过既有合规渠道处理的结果，不代表本系统提供联系方式。"
           style={{ marginBottom: 16 }}
         />
-        <Table
+        <OperationsQueueTable
           rowKey="id"
-          dataSource={notifications}
+          loadPage={api.manualNotificationsPage} refreshToken={notifications} statuses={["MANUAL_REQUIRED", "SUBMISSION_UNKNOWN", "PENDING_DELIVERY"]}
           locale={{ emptyText: "暂无需要人工处理或重试的通知" }}
           columns={[
             { title: "通知类型", render: (_, value: Notification) => displayLabel(value.type) },

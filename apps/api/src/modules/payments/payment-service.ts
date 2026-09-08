@@ -311,7 +311,10 @@ export class PaymentService {
       const allocations = (
         await store.listFulfillmentAllocations(exception.id)
       ).filter((value) => value.exceptionQuantity > value.refundedQuantity);
-      if (!allocations.length) return [];
+      if (!allocations.length) {
+        if (exception.status === "REFUND_CONFIRMED") throw new BusinessError("FINANCIAL_INCONSISTENT", "退款分配事实缺失，暂不可执行退款", 409);
+        return [];
+      }
       const created: PartialRefund[] = [];
       const byOrder = new Map<string, typeof allocations>();
       for (const allocation of allocations) {

@@ -93,11 +93,9 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
         response.url().endsWith("/api/v1/admin/catalog/skus")) ||
       (response.status() === 503 &&
         ((allowExpectedQualityRefreshFailure &&
-          response.url().endsWith("/api/v1/admin/quality-cases")) ||
+          new URL(response.url()).pathname === "/api/v1/admin/quality-cases") ||
           (allowExpectedCancellationRefreshFailure &&
-            response.url().endsWith(
-              "/api/v1/admin/community/cancellation-requests",
-            )))),
+            new URL(response.url()).pathname === "/api/v1/admin/community/cancellation-requests"))),
   );
   const suffix = `${Date.now()}${Math.floor(Math.random() * 10_000)}`;
   const password = "p1c governance browser password";
@@ -305,7 +303,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
   ).toBeVisible();
   let failedCancellationRefreshes = 0;
   await page.route(
-    "**/api/v1/admin/community/cancellation-requests",
+    "**/api/v1/admin/community/cancellation-requests?*",
     async (route) => {
       if (!allowExpectedCancellationRefreshFailure) return route.continue();
       failedCancellationRefreshes += 1;
@@ -324,7 +322,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
   await page.getByRole("dialog", { name: "二次确认执行取消退款" }).getByRole("button", { name: "确认执行退款" }).click();
   await expect.poll(() => failedCancellationRefreshes).toBe(1);
   allowExpectedCancellationRefreshFailure = false;
-  await page.unroute("**/api/v1/admin/community/cancellation-requests");
+  await page.unroute("**/api/v1/admin/community/cancellation-requests?*");
   await expect(financeCancellation.getByRole("button", { name: "执行退款" })).toHaveCount(0);
 
   // Four one-item orders were paid; cancelA has now been refunded and must
@@ -511,7 +509,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
     qualityFinanceRow.getByRole("button", { name: "执行退款" }),
   ).toBeVisible();
   let failedQualityRefreshes = 0;
-  await page.route("**/api/v1/admin/quality-cases", async (route) => {
+  await page.route("**/api/v1/admin/quality-cases?*", async (route) => {
     if (!allowExpectedQualityRefreshFailure) return route.continue();
     failedQualityRefreshes += 1;
     return route.fulfill({
@@ -525,7 +523,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
   await page.getByRole("dialog", { name: "二次确认执行品质退款" }).getByRole("button", { name: "确认执行退款" }).click();
   await expect.poll(() => failedQualityRefreshes).toBe(1);
   allowExpectedQualityRefreshFailure = false;
-  await page.unroute("**/api/v1/admin/quality-cases");
+  await page.unroute("**/api/v1/admin/quality-cases?*");
   await expect(qualityFinanceRow.getByRole("button", { name: "执行退款" })).toHaveCount(0);
   await expect(page.getByText("已平衡", { exact: true }).first()).toBeVisible();
   for (const width of [375, 768, 1440]) {

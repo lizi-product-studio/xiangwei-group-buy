@@ -63,8 +63,29 @@ export interface NewOrderLine {
   amountCents: number;
 }
 
+export interface OperationsQueueTypes {
+  cancellations: CommunityCancellationRequest;
+  quality: CommunityQualityCase;
+  windows: CommunityPickupWindow;
+  exceptions: FulfillmentException;
+  notifications: OrderNotification;
+}
+export interface OperationsQueueQuery {
+  page: number;
+  pageSize: number;
+  status?: string | undefined;
+  allowedStatuses?: readonly string[];
+}
+export interface OperationsQueuePage<T> {
+  items: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 /** The complete persistence boundary for the single community group-buy product. */
 export interface CommerceStore {
+  listOperationsQueue<K extends keyof OperationsQueueTypes>(kind: K, query: OperationsQueueQuery): Promise<OperationsQueuePage<OperationsQueueTypes[K]>>;
   transaction<T>(work: (store: CommerceStore) => Promise<T>): Promise<T>;
   health(): Promise<"ok">;
   databaseNow(): Promise<string>;
@@ -1596,6 +1617,22 @@ export class MemoryStore implements CommerceStore {
     if (existing && existing.id !== v.id) return false;
     this.data.drafts.set(v.id, clone(v));
     return true;
+  }
+  public async listOperationsQueue<K extends keyof OperationsQueueTypes>(kind: K, query: OperationsQueueQuery): Promise<OperationsQueuePage<OperationsQueueTypes[K]>> {
+    const source = this.data[kind] as Map<string, OperationsQueueTypes[K]>;
+    const sortKey = (value: OperationsQueueTypes[K]) => {
+      if ("requestedAt" in value) return value.requestedAt;
+      if ("registeredAt" in value) return value.registeredAt;
+      if ("deadlineAt" in value) return value.deadlineAt;
+      return value.createdAt;
+    };
+    const key = (value: OperationsQueueTypes[K]) => "id" in value ? value.id : value.orderId;
+    const values = [...source.values()]
+      .filter(value => kind !== "notifications" || value.status === "MANUAL_REQUIRED" || value.status === "SUBMISSION_UNKNOWN" || (value.status === "PENDING_DELIVERY" && "lastDeliveryError" in value && Boolean(value.lastDeliveryError)))
+      .filter(value => (!query.allowedStatuses || query.allowedStatuses.includes(value.status)) && (!query.status || value.status === query.status))
+      .sort((a, b) => sortKey(b).localeCompare(sortKey(a)) || key(a).localeCompare(key(b)));
+    const offset = (query.page - 1) * query.pageSize;
+    return {items: clone(values.slice(offset, offset + query.pageSize)), total: values.length, page: query.page, pageSize: query.pageSize};
   }
   public async getCommunityPickupWindowForUpdate(id: string) {
     return clone(this.data.windows.get(id) ?? null);

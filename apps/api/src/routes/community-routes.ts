@@ -1,3 +1,4 @@
+import { operationsPageSchema } from "./operations-pagination.js";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import {
   communityArrivalSchema,
@@ -226,20 +227,17 @@ export function registerCommunityRoutes(
       "CUSTOMER_SERVICE",
       "SUPER_ADMIN",
     ]);
-    const [requests, orders] = await Promise.all([
-      store.listCommunityCancellationRequests(500),
-      store.listOrders(500),
-    ]);
-    const orderById = new Map(orders.map((order) => [order.id, order]));
-    const visibleStatuses = actor.roles.includes("SUPER_ADMIN") ||
-      actor.roles.includes("OPERATOR") ||
-      actor.roles.includes("CUSTOMER_SERVICE")
-      ? null
-      : new Set(["APPROVED_WAITING_FINANCE", "REFUNDING", "REFUNDED"]);
+    const visibleStatuses = actor.roles.includes("SUPER_ADMIN") || actor.roles.includes("OPERATOR") || actor.roles.includes("CUSTOMER_SERVICE")
+      ? undefined : ["APPROVED_WAITING_FINANCE", "REFUNDING", "REFUNDED"];
+    const page = await store.listOperationsQueue("cancellations", {
+      ...operationsPageSchema.parse(request.query),
+      ...(visibleStatuses ? {allowedStatuses: visibleStatuses} : {}),
+    });
+    const orders = await Promise.all([...new Set(page.items.map(value => value.orderId))].map(id => store.getOrder(id)));
+    const orderById = new Map(orders.filter(value => value !== null).map(order => [order.id, order]));
     return {
-      data: requests
-        .filter((value) => !visibleStatuses || visibleStatuses.has(value.status))
-        .map((value) => {
+      pagination: {total: page.total, page: page.page, pageSize: page.pageSize},
+      data: page.items.map((value) => {
           const order = orderById.get(value.orderId);
           return {
             id: value.id,
@@ -316,25 +314,16 @@ export function registerCommunityRoutes(
   );
   app.get("/api/v1/admin/community/pickup-windows", async (request) => {
     requireActor(request, ["OPERATOR", "FINANCE", "SUPER_ADMIN"]);
-    const [windows, orders, points] = await Promise.all([
-      store.listCommunityPickupWindowsByStatus(
-        [
-          "ACTIVE",
-          "EXTENDED",
-          "EXPIRED_PENDING",
-          "REFUND_PENDING",
-          "LOSS_RECORDED",
-          "CLOSED",
-        ],
-        500,
-      ),
-      store.listOrders(500),
+    const page = await store.listOperationsQueue("windows", operationsPageSchema.parse(request.query));
+    const [orders, points] = await Promise.all([
+      Promise.all(page.items.map(value => store.getOrder(value.orderId))),
       store.listPickupPoints(),
     ]);
-    const orderById = new Map(orders.map((order) => [order.id, order]));
+    const orderById = new Map(orders.filter(value => value !== null).map(order => [order.id, order]));
     const pointById = new Map(points.map((point) => [point.id, point]));
     return {
-      data: windows.map((window) => {
+      pagination: {total: page.total, page: page.page, pageSize: page.pageSize},
+      data: page.items.map((window) => {
         const order = orderById.get(window.orderId) ?? null;
         return {
           ...window,

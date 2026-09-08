@@ -1,3 +1,5 @@
+import { exceptionReadModel } from "./modules/fulfillment/exception-readmodel.js";
+import { operationsPageSchema } from "./routes/operations-pagination.js";
 import { z } from "zod";
 import { ProductImages } from './modules/media/product-images.js';
 import { registerProductImageRoutes } from './routes/product-image-routes.js';
@@ -1783,26 +1785,26 @@ export async function buildApp(
       "FINANCE",
       "SUPER_ADMIN",
     ]);
-    const [cases, orders, partialRefunds] = await Promise.all([
-      store.listCommunityQualityCases(500),
-      store.listOrders(500),
-      store.listPartialRefunds(500),
-    ]);
-    const orderById = new Map(orders.map((order) => [order.id, order]));
-    const partialRefundByException = new Map(
-      partialRefunds.map((refund) => [refund.exceptionId, refund]),
-    );
     const visibleStatuses = actor.roles.includes("SUPER_ADMIN")
-      ? null
+      ? undefined
       : actor.roles.includes("CUSTOMER_SERVICE")
-        ? new Set(["REGISTERED", "ACCEPTED", "REJECTED"])
+        ? ["REGISTERED", "ACCEPTED", "REJECTED"]
         : actor.roles.includes("OPERATOR")
-          ? new Set(["ACCEPTED", "REFUNDING", "REJECTED", "RESOLVED"])
-          : new Set(["REFUNDING", "RESOLVED"]);
+          ? ["ACCEPTED", "REFUNDING", "REJECTED", "RESOLVED"]
+          : ["REFUNDING", "RESOLVED"];
+    const page = await store.listOperationsQueue("quality", {
+      ...operationsPageSchema.parse(request.query),
+      ...(visibleStatuses ? {allowedStatuses: visibleStatuses} : {}),
+    });
+    const [orders, refunds] = await Promise.all([
+      Promise.all([...new Set(page.items.map(value => value.orderId))].map(id => store.getOrder(id))),
+      Promise.all(page.items.filter(value => value.refundExceptionId).map(value => store.listPartialRefundsByException(value.refundExceptionId!))),
+    ]);
+    const orderById = new Map(orders.filter(value => value !== null).map(order => [order.id, order]));
+    const partialRefundByException = new Map(refunds.flat().map(value => [value.exceptionId, value]));
     return {
-      data: cases
-        .filter((value) => !visibleStatuses || visibleStatuses.has(value.status))
-        .map((value) => {
+      pagination: {total: page.total, page: page.page, pageSize: page.pageSize},
+      data: page.items.map((value) => {
           const order = orderById.get(value.orderId);
           const orderItemById = new Map(
             order?.items
@@ -1911,77 +1913,10 @@ export async function buildApp(
       "CUSTOMER_SERVICE",
       "SUPER_ADMIN",
     ]);
-    const [exceptions, orders, points] = await Promise.all([
-      store.listFulfillmentExceptions(500),
-      store.listOrders(500),
-      store.listPickupPoints(),
-    ]);
-    const facts = await store.listOrderDeliveryFacts(
-      orders.map((order) => order.id),
-    );
-    const orderById = new Map(orders.map((order) => [order.id, order]));
-    const pointById = new Map(points.map((point) => [point.id, point]));
-    const allocationsByException = new Map<string, typeof facts.allocations>();
-    for (const allocation of facts.allocations)
-      allocationsByException.set(allocation.exceptionId, [
-        ...(allocationsByException.get(allocation.exceptionId) ?? []),
-        allocation,
-      ]);
+    const page = await store.listOperationsQueue("exceptions", operationsPageSchema.parse(request.query));
     return {
-      data: exceptions.map((exception) => {
-        const allocationOrderIds = [
-          ...new Set(
-            (allocationsByException.get(exception.id) ?? []).map(
-              (allocation) => allocation.orderId,
-            ),
-          ),
-        ];
-        const relatedOrders = (exception.orderId
-          ? [exception.orderId]
-          : allocationOrderIds
-        )
-          .map((orderId) => orderById.get(orderId))
-          .filter((order): order is NonNullable<typeof order> => Boolean(order));
-        const order = relatedOrders[0] ?? null;
-        const orderItemBySku = new Map(
-          order?.items.map((item) => [item.skuId, item]) ?? [],
-        );
-        const items = [...exception.items]
-          .sort((left, right) =>
-            left.catalogSkuId.localeCompare(right.catalogSkuId),
-          )
-          .map((item) => {
-            const orderItem = orderItemBySku.get(item.catalogSkuId);
-            const affectedQuantity = Math.max(
-              0,
-              item.expectedQuantity - item.acceptedQuantity,
-            );
-            const unitPriceCents = Number(orderItem?.unitPriceCents ?? 0);
-            return {
-              ...item,
-              name: orderItem?.name ?? item.catalogSkuId,
-              affectedQuantity,
-              unitPriceCents,
-              amountCents: affectedQuantity * unitPriceCents,
-            };
-          });
-        return {
-          ...exception,
-          orderNo: relatedOrders.length
-            ? relatedOrders.map((related) => related.orderNo).join("、")
-            : null,
-          relatedOrderIds: relatedOrders.map((related) => related.id),
-          pickupPointId: order?.pickupPointId ?? null,
-          pickupPointName: order
-            ? (pointById.get(order.pickupPointId)?.name ?? null)
-            : null,
-          refundAmountCents: items.reduce(
-            (total, item) => total + item.amountCents,
-            0,
-          ),
-          items,
-        };
-      }),
+      pagination: {total: page.total, page: page.page, pageSize: page.pageSize},
+      data: await Promise.all(page.items.map(value => exceptionReadModel(store, value))),
     };
   });
   app.post(
@@ -1990,6 +1925,11 @@ export async function buildApp(
       const actor = requireActor(request, ["FINANCE", "SUPER_ADMIN"]);
       const id = identifierSchema.parse((request.params as { id: string }).id);
       const input = partialRefundExecutionSchema.parse(request.body);
+      const exception = await store.getFulfillmentException(id);
+      if (exception) {
+        const facts = await exceptionReadModel(store, exception);
+        if (facts.financialFactsError) throw new BusinessError("FINANCIAL_INCONSISTENT", facts.financialFactsError, 409);
+      }
       await payments.executePartialRefund(id, {
         actorId: actor.userId,
         requestId: request.id,
@@ -2246,13 +2186,12 @@ export async function buildApp(
   });
   app.get("/api/v1/admin/notifications/manual", async (request) => {
     requireActor(request, ["CUSTOMER_SERVICE", "SUPER_ADMIN"]);
-    const [notifications, orders] = await Promise.all([
-      store.listManualOrderNotifications(500),
-      store.listOrders(500),
-    ]);
-    const orderById = new Map(orders.map((order) => [order.id, order]));
+    const page = await store.listOperationsQueue("notifications", operationsPageSchema.parse(request.query));
+    const orders = await Promise.all([...new Set(page.items.map(value => value.orderId))].map(id => store.getOrder(id)));
+    const orderById = new Map(orders.filter(value => value !== null).map(order => [order.id, order]));
     return {
-      data: notifications.map((value) => ({
+      pagination: {total: page.total, page: page.page, pageSize: page.pageSize},
+      data: page.items.map((value) => ({
         id: value.id,
         orderId: value.orderId,
         orderNo: orderById.get(value.orderId)?.orderNo ?? null,

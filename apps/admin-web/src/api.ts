@@ -317,7 +317,8 @@ export interface FulfillmentException {
   orderNo: string | null;
   pickupPointId: string | null;
   pickupPointName: string | null;
-  refundAmountCents: number;
+  refundAmountCents: number | null;
+  financialFactsError?: string | null;
   items: Array<{
     catalogSkuId: string;
     name: string;
@@ -327,8 +328,8 @@ export interface FulfillmentException {
     shortQuantity: number;
     damagedQuantity: number;
     affectedQuantity: number;
-    unitPriceCents: number;
-    amountCents: number;
+    unitPriceCents: number | null;
+    amountCents: number | null;
     reason: string;
     description: string;
   }>;
@@ -640,7 +641,7 @@ function headers(json = true): Record<string, string> {
   }
   return value;
 }
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function request<T>(path: string, init: RequestInit = {}, includeEnvelope = false): Promise<T> {
   let response: Response;
   try {
     response = await fetch(path, {
@@ -676,7 +677,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw error;
   }
   if (response.status === 204) return undefined as T;
-  return ((await response.json()) as Envelope<T>).data;
+  const body = (await response.json()) as Envelope<T>;
+  return includeEnvelope ? body as T : body.data;
 }
 const post = <T>(path: string, body?: unknown) =>
   request<T>(path, {
@@ -686,7 +688,16 @@ const post = <T>(path: string, body?: unknown) =>
 const patch = <T>(path: string, body: unknown) =>
   request<T>(path, { method: "PATCH", body: JSON.stringify(body) });
 
+export interface QueuePage<T> { data: T[]; pagination: {total: number; page: number; pageSize: number} }
+export interface QueueQuery {page: number; pageSize: number; status?: string}
+const queuePage = <T,>(path: string, query: QueueQuery) => request<QueuePage<T>>(`${path}?${new URLSearchParams({page: String(query.page), pageSize: String(query.pageSize), ...(query.status ? {status: query.status} : {})})}`, {}, true);
+
 export const api = {
+  qualityPage: (query: QueueQuery) => queuePage<QualityCase>("/api/v1/admin/quality-cases", query),
+  cancellationsPage: (query: QueueQuery) => queuePage<CancellationRequest>("/api/v1/admin/community/cancellation-requests", query),
+  pickupWindowsPage: (query: QueueQuery) => queuePage<PickupWindow>("/api/v1/admin/community/pickup-windows", query),
+  exceptionsPage: (query: QueueQuery) => queuePage<FulfillmentException>("/api/v1/admin/fulfillment-exceptions", query),
+  manualNotificationsPage: (query: QueueQuery) => queuePage<Notification>("/api/v1/admin/notifications/manual", query),
   login: async (username: string, password: string) => {
     const v = await post<
       | { nextAction: "LOGIN"; accessToken: string; roles: string[]; userId: string }
