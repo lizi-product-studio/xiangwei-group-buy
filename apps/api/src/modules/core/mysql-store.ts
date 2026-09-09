@@ -61,10 +61,10 @@ export class MysqlStore extends MemoryStore implements CommerceStore {
       typeof payload === "string" ? payload : JSON.stringify(payload),
     );
   }
-  private async persist(connection: PoolConnection): Promise<void> {
+  private async persist(connection: PoolConnection, payload: string): Promise<void> {
     await connection.query(
       "UPDATE community_product_state SET payload=?,updated_at=UTC_TIMESTAMP(3) WHERE id=1",
-      [this.exportState()],
+      [payload],
     );
   }
   private async invoke(property: string, args: unknown[]): Promise<unknown> {
@@ -94,10 +94,13 @@ export class MysqlStore extends MemoryStore implements CommerceStore {
     try {
       await connection.beginTransaction();
       await this.load(connection);
+      const stateBeforeWork = this.exportState();
       const result = await this.context.run(connection, () =>
         super.transaction(() => work(this)),
       );
-      await this.persist(connection);
+      const stateAfterWork = this.exportState();
+      if (stateAfterWork !== stateBeforeWork)
+        await this.persist(connection, stateAfterWork);
       await connection.commit();
       return result;
     } catch (error) {

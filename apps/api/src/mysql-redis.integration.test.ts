@@ -3,6 +3,7 @@ import { MysqlStore } from "./modules/core/mysql-store.js";
 import { RedisCampaignScheduler } from "./modules/campaigns/campaign-scheduler.js";
 import type { OrderNotification } from "./modules/core/types.js";
 import { Redis } from "ioredis";
+import mysql, { type Connection, type RowDataPacket } from "mysql2/promise";
 
 const databaseUrl = process.env.INTEGRATION_DATABASE_URL;
 const redisUrl = process.env.INTEGRATION_REDIS_URL;
@@ -62,14 +63,16 @@ describe.skipIf(!databaseUrl || !redisUrl)(
     let second: MysqlStore;
     let scheduler: RedisCampaignScheduler;
     let secondScheduler: RedisCampaignScheduler;
-    beforeAll(() => {
+    let inspector: Connection;
+    beforeAll(async () => {
       first = MysqlStore.create(databaseUrl!);
       second = MysqlStore.create(databaseUrl!);
+      inspector = await mysql.createConnection(databaseUrl!);
       scheduler = new RedisCampaignScheduler(redisUrl!, async () => undefined);
       secondScheduler = new RedisCampaignScheduler(redisUrl!, async () => undefined);
     });
     afterAll(async () => {
-      await Promise.all([first.close(), second.close(), scheduler.close(), secondScheduler.close()]);
+      await Promise.all([first.close(), second.close(), inspector.end(), scheduler.close(), secondScheduler.close()]);
     });
     it("persists a community aggregate across independent MySQL pools", async () => {
       const id = `integration-${Date.now()}`;
@@ -80,6 +83,17 @@ describe.skipIf(!databaseUrl || !redisUrl)(
         createdAt: new Date().toISOString(),
       });
       expect(await second.getUser(id)).toMatchObject({ id, status: "ACTIVE" });
+    });
+    it("does not rewrite the aggregate for a read-only store call", async () => {
+      const updatedAt = async () => {
+        const [rows] = await inspector.query<(RowDataPacket & { updatedAt: string })[]>(
+          "SELECT CAST(updated_at AS CHAR) AS updatedAt FROM community_product_state WHERE id=1",
+        );
+        return rows[0]!.updatedAt;
+      };
+      const before = await updatedAt();
+      await first.getUser(`read-only-miss-${Date.now()}`);
+      expect(await updatedAt()).toBe(before);
     });
     it("persists exact notification refund linkage and account-template preferences across pools", async () => {
       const id = `subscription-${Date.now()}`;
