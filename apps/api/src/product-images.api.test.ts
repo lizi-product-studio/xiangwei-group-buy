@@ -38,6 +38,7 @@ describe('product image HTTP boundary', () => {
     const image = await app.inject({ method: 'GET', url: imageUrl });
     expect(image.statusCode).toBe(200);
     expect(image.headers['content-type']).toBe('image/webp');
+    expect(image.headers['cross-origin-resource-policy']).toBe('cross-origin');
     expect(image.headers['x-content-type-options']).toBe('nosniff');
     expect(image.headers['cache-control']).toContain('immutable');
     expect((await app.inject({ method: 'GET', url: '/api/v1/product-images/not-a-file.webp' })).statusCode).toBe(404);

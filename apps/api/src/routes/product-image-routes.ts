@@ -16,7 +16,15 @@ export function registerProductImageRoutes(app: FastifyInstance, images: Product
     });
     scope.get<{ Params: { filename: string } }>('/api/v1/product-images/:filename', async (request, reply) => {
       const image = await images.read(request.params.filename);
-      return reply.type('image/webp').header('X-Content-Type-Options', 'nosniff').header('Cache-Control', 'public, max-age=31536000, immutable').send(image);
+      return reply
+        .type('image/webp')
+        // The WeChat renderer fetches remote images from its own webview
+        // origin. Helmet's default same-origin policy makes a successful
+        // image response unusable there.
+        .header('Cross-Origin-Resource-Policy', 'cross-origin')
+        .header('X-Content-Type-Options', 'nosniff')
+        .header('Cache-Control', 'public, max-age=31536000, immutable')
+        .send(image);
     });
     scope.setErrorHandler((error, _request, reply) => {
       const status = typeof error === 'object' && error !== null && 'statusCode' in error ? error.statusCode : undefined;
