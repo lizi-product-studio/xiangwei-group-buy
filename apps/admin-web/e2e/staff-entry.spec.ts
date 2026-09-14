@@ -360,7 +360,6 @@ test("同一标签切换账号会清空旧工作区，客服和财务刷新只�
       response.request().method() === "GET" &&
       [
         "/api/v1/admin/quality-cases",
-        "/api/v1/admin/community/cancellation-requests",
         "/api/v1/admin/fulfillment-exceptions",
       ].some((path) => response.url().includes(path))
     ) {
@@ -369,10 +368,11 @@ test("同一标签切换账号会清空旧工作区，客服和财务刷新只�
   });
   await loginWithTemporaryPassword(customerService);
   await expect(page.getByRole("heading", { name: "售后与异常" })).toBeVisible();
-  await expect.poll(() => serviceReads.length).toBeGreaterThanOrEqual(3);
+  // Cancellation requests have their own page; this view owns two queues.
+  await expect.poll(() => serviceReads.length).toBeGreaterThanOrEqual(2);
   const serviceBeforeRefresh = serviceReads.length;
   await page.getByRole("button", { name: "刷新" }).click();
-  await expect.poll(() => serviceReads.length).toBeGreaterThanOrEqual(serviceBeforeRefresh + 3);
+  await expect.poll(() => serviceReads.length).toBeGreaterThanOrEqual(serviceBeforeRefresh + 2);
 
   await logout();
   const financeReads: string[] = [];
@@ -389,6 +389,8 @@ test("同一标签切换账号会清空旧工作区，客服和财务刷新只�
   await loginWithTemporaryPassword(finance);
   await expect(page.getByRole("heading", { name: "退款待办" })).toBeVisible();
   await expect.poll(() => financeReads.length).toBeGreaterThanOrEqual(2);
+  await page.getByRole("menuitem", { name: "账务流水", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "账务流水", level: 2 })).toBeVisible();
   // Create a payment after the finance page's initial read.  The only way it
   // can appear in the visible ledger is the current-page refresh below.
   const sku = await post<{ id: string }>(request, "/api/v1/admin/catalog/skus", {
