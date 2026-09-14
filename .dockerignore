@@ -8,3 +8,27 @@
 coverage
 miniprogram_npm
 
+# Rebuildable local test and compiler output.
+**/coverage
+**/test-results
+**/playwright-report
+**/*.tsbuildinfo
+.pnpm-store
+
+# Project records and local assets are retained on disk, not Docker build inputs.
+docs
+tasks
+evidence
+.dingxinglizi
+.codex
+prototypes
+.audit
+tmp
+.ops-closure-audit-*
+.product-review-*
+.profile-audit-*
+.runtime-diagnosis-*
+.ux-audit-*
+.visual-audit-*
+infra/secrets
+.DS_Store

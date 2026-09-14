@@ -15,6 +15,7 @@
     "db:migrate": "pnpm --filter @hometown/api db:migrate",
     "admin:bootstrap": "pnpm --filter @hometown/api admin:bootstrap",
     "assets:tabs": "node scripts/generate-mini-tab-icons.mjs",
+    "clean:artifacts": "node scripts/clean-build-artifacts.mjs",
     "build": "pnpm -r build",
     "typecheck": "pnpm --filter @hometown/domain build && pnpm --filter @hometown/api-contracts build && pnpm -r typecheck && pnpm typecheck:e2e",
     "typecheck:e2e": "tsc -p apps/admin-web/tsconfig.e2e.json --pretty false",
