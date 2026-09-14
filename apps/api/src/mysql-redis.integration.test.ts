@@ -116,12 +116,14 @@ describe.skipIf(!databaseUrl || !redisUrl)(
       // Claim ordering is by the earliest due time, so unrelated pending rows
       // left by concurrent integration files cannot occupy this test's limit.
       row.nextAttemptAt = "1900-01-01T00:00:00.000Z";
-      await first.createOrderNotificationIfAbsent(row);
-      const claim = (await first.claimPendingOrderNotifications(
-        1,
-        1,
-        `claim-${id}`,
-      )).find((value) => value.id === id);
+      const claim = await first.transaction(async (store) => {
+        await store.createOrderNotificationIfAbsent(row);
+        return (await store.claimPendingOrderNotifications(
+          1,
+          1,
+          `claim-${id}`,
+        )).find((value) => value.id === id);
+      });
       expect(claim).toBeTruthy();
       await new Promise((resolve) => setTimeout(resolve, 20));
       await expect(second.beginOrderNotificationSubmission({
