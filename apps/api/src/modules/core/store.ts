@@ -1937,6 +1937,15 @@ export class MemoryStore implements CommerceStore {
           (!v.nextAttemptAt || v.nextAttemptAt <= now) &&
           (!v.deliveryLeaseUntil || v.deliveryLeaseUntil <= now),
       )
+      .sort((left, right) => {
+        const leftDueAt = left.nextAttemptAt ?? left.createdAt;
+        const rightDueAt = right.nextAttemptAt ?? right.createdAt;
+        return (
+          leftDueAt.localeCompare(rightDueAt) ||
+          left.createdAt.localeCompare(right.createdAt) ||
+          left.id.localeCompare(right.id)
+        );
+      })
       .slice(0, Math.min(5, limit));
     for (const v of values) {
       v.deliveryLeaseUntil = lease;

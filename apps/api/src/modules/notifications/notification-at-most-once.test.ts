@@ -72,6 +72,31 @@ const reply = (body: unknown, status = 200) =>
 afterEach(() => vi.unstubAllGlobals());
 
 describe("notification at-most-once provider fence", () => {
+  it("claims the oldest due notification before later inserted work", async () => {
+    const store = await fixture();
+    store.setDatabaseNowForTests("2026-09-14T00:00:00.000Z");
+    const later = {
+      ...notification(),
+      id: "later-notification",
+      eventKey: "notice:later",
+      createdAt: "2026-09-13T00:00:00.000Z",
+      nextAttemptAt: "2026-09-13T00:00:00.000Z",
+    };
+    const earlier = {
+      ...notification(),
+      id: "earlier-notification",
+      eventKey: "notice:earlier",
+      createdAt: "2026-09-12T00:00:00.000Z",
+      nextAttemptAt: "2026-09-12T00:00:00.000Z",
+    };
+    await store.createOrderNotificationIfAbsent(later);
+    await store.createOrderNotificationIfAbsent(earlier);
+
+    await expect(
+      store.claimPendingOrderNotifications(1, 60_000, "worker"),
+    ).resolves.toMatchObject([{ id: earlier.id }]);
+  });
+
   it("fences an expired worker before it can call the provider after manual retry succeeds", async () => {
     const store = await fixture();
     await store.createOrderNotificationIfAbsent(notification());

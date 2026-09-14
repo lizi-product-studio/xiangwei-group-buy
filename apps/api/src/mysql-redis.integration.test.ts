@@ -112,7 +112,11 @@ describe.skipIf(!databaseUrl || !redisUrl)(
     });
     it("uses MySQL UTC_TIMESTAMP(3) to reject an expired claim across pools", async () => {
       const id = `integration-notification-${Date.now()}`;
-      await first.createOrderNotificationIfAbsent(notification(id));
+      const row = notification(id);
+      // Claim ordering is by the earliest due time, so unrelated pending rows
+      // left by concurrent integration files cannot occupy this test's limit.
+      row.nextAttemptAt = "1900-01-01T00:00:00.000Z";
+      await first.createOrderNotificationIfAbsent(row);
       const claim = (await first.claimPendingOrderNotifications(
         1,
         1,
