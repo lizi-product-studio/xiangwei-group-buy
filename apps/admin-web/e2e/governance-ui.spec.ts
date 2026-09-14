@@ -531,11 +531,12 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
   allowExpectedQualityRefreshFailure = false;
   await page.unroute("**/api/v1/admin/quality-cases?*");
   await expect(qualityFinanceRow.getByRole("button", { name: "执行退款" })).toHaveCount(0);
+  await page.getByRole("menuitem", { name: "账务流水", exact: true }).click();
   await expect(page.getByText("已平衡", { exact: true }).first()).toBeVisible();
   for (const width of [375, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    await expect(page.getByRole("heading", { name: "退款待办" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "账务流水", level: 2 })).toBeVisible();
   }
 
   await logout(page);
