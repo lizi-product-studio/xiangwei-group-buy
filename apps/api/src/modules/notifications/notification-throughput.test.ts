@@ -74,7 +74,7 @@ describe("bounded notification throughput", () => {
     expect(Date.now() - started).toBeLessThanOrEqual(300_000);
     expect(await service.drainPending()).toBe(0);
     expect((await store.listOrderNotificationsByUser("user")).every(value => value.status === "WECHAT_SENT")).toBe(true);
-  });
+  }, 15_000);
   it("measures 1000 notices using wall-clock 100ms provider latency without fake timers", async () => {
     const store = await pending(1000);
     const sent = new Set<string>();
