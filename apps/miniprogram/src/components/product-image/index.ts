@@ -1,4 +1,3 @@
-import { resolveProductImageUrl } from '../../utils/product-image';
 import { resetProductImageState } from '../../utils/product-image-state';
 
 Component({
