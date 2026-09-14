@@ -122,7 +122,7 @@ const state = {
   loggedIn: false, consent: false, returnTo: "profile", loginBack: "profile-guest",
   legalBack: "profile", legalTab: "terms", pickupBack: "home", point: "happy", region: "central",
   orderFilter: "全部", scenario: "success", pageState: "ready", busy: false, pending: null,
-  requestVersion: 0, cancelUnpaid: false, error: "", reminder: "accept", reminders: 0, reminderRefused: false,
+  requestVersion: 0, cancelUnpaid: false, error: "", reminder: "accept", reminders: 0, reminderRefused: false, reminderGranted: false,
   afterSubmitted: false, afterSku: "potato",
   after: { selected: true, quantity: 1, reason: "品质问题", detail: "" },
   interest: { area: "", name: "", phone: "" }, interestSubmitted: false,
@@ -787,7 +787,7 @@ function renderMessages(empty) {
   if (empty) {
     return `
       <div class="page">
-        ${notice("订单提醒", reminderCopy(), `<button class="btn btn--mini btn--soft" type="button" data-action="reminder">开启微信提醒</button>`)}
+        ${notice("订单提醒", reminderCopy(), reminderAction())}
         <div class="state"><h3>暂时没有订单消息</h3><p>团期地点确认、发车或到货后，消息会出现在这里。</p></div>
       </div>`;
   }
@@ -798,7 +798,7 @@ function renderMessages(empty) {
   ];
   return `
     <div class="page">
-      ${notice("订单提醒", reminderCopy(), `<button class="btn btn--mini btn--soft" type="button" data-action="reminder">继续授权</button>`)}
+      ${notice("订单提醒", reminderCopy(), reminderAction())}
       ${items
         .map(
           ([go, title, copy, time]) => `
@@ -939,7 +939,13 @@ function paintBoard() {
 }
 
 function reminderCopy() {
-  return `${state.reminderRefused ? "本次未同意提醒，可继续查看站内消息。" : "可按需开启订阅提醒；是否送达取决于授权与平台结果。"}模拟剩余授权次数：${state.reminders}。`;
+  if (state.reminderGranted) return "本次订单提醒已订阅。后续进度也会同步保留在订单消息中。";
+  if (state.reminderRefused) return "本次未订阅提醒，仍可随时在订单消息中查看进度。";
+  return "可选择接收本次订单的到货、领取和退款提醒；不订阅也能正常使用。";
+}
+function reminderAction() {
+  if (state.reminderGranted) return `<span class="notice-status">本次已完成</span>`;
+  return `<button class="btn btn--mini btn--soft" type="button" data-action="reminder">${state.reminderRefused ? "重新订阅" : "订阅本次提醒"}</button>`;
 }
 function navigate(target) {
   if (state.busy) { feedback("请求处理中，请稍候；可在设备外控制器完成模拟请求。"); return; }
@@ -1005,7 +1011,7 @@ document.body.addEventListener("change", event => {
   if (id === "demoWidth") $("device").style.setProperty("--device-w", `${value}px`);
   if (id === "demoScenario") { state.scenario = value; if (value === "consent") { state.consent = false; if (!state.busy && state.screen !== "login") navigate("login"); else render(); } }
   if (id === "demoPage") { state.pageState = value; render(); }
-  if (id === "demoReminder") state.reminder = value;
+  if (id === "demoReminder") { state.reminder = value; state.reminderGranted = false; state.reminderRefused = false; }
   if (id === "pickupRegion") { state.region = value; render(); }
 });
 document.body.addEventListener("submit", event => {
@@ -1039,10 +1045,11 @@ document.body.addEventListener("click", event => {
   if (action === "retry-page") { state.pageState = "ready"; $("demoPage").value = "ready"; render(); return; }
   if (action === "clear-cart") { state.cart = {}; render(); return; }
   if (action === "add-cart" || action === "buy-now") { state.cart[state.sku] = (state.cart[state.sku] || 0) + state.quantity; if (action === "buy-now") navigate("checkout"); else feedback("已加入模拟购物车。"); return; }
-  if (action === "reminder" || /开启微信提醒|继续授权/.test(target.textContent)) {
+  if (action === "reminder" || /订阅本次提醒|重新订阅/.test(target.textContent)) {
     state.reminderRefused = state.reminder === "refuse";
-    if (!state.reminderRefused) state.reminders += 1;
-    render(); feedback(state.reminderRefused ? "模拟拒绝授权：仍可在订单与站内消息查看进度。" : `模拟授权次数已更新为 ${state.reminders}，不会实际发送通知。`); return;
+    state.reminderGranted = !state.reminderRefused;
+    if (state.reminderGranted) state.reminders = 1;
+    render(); feedback(state.reminderRefused ? "模拟拒绝订阅：仍可在订单消息中查看进度。" : "模拟订阅已完成，本次不会重复要求授权。"); return;
   }
   if (/联系客服|^客服/.test(target.textContent.trim())) { feedback("模拟客服入口：正式渠道需在实际产品中接入，本次未联系任何人。"); return; }
   if (/^(导航|电话)$/.test(target.textContent.trim())) { feedback(`模拟${target.textContent.trim()}入口：本次不会打开地图或拨出电话。`); return; }

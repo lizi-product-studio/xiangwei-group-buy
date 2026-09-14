@@ -83,6 +83,7 @@ export function GovernancePage({
   error,
   reload,
   canHandleNotifications,
+  canHandleInterests,
 }: {
   notifications: Notification[];
   interests: ServiceAreaInterest[];
@@ -90,6 +91,7 @@ export function GovernancePage({
   error: string | null;
   reload: () => Promise<void>;
   canHandleNotifications: boolean;
+  canHandleInterests: boolean;
 }) {
   const { message } = AntApp.useApp();
   const [notificationAction, setNotificationAction] =
@@ -156,9 +158,13 @@ export function GovernancePage({
     <>
       <header className="section-header">
         <div>
-          <Typography.Title level={2}>运营治理</Typography.Title>
+          <Typography.Title level={2}>
+            {canHandleInterests ? "运营治理" : "通知处理"}
+          </Typography.Title>
           <Typography.Paragraph type="secondary">
-            处理通知失败与开通意向；仅记录合规渠道的处理结果。
+            {canHandleInterests
+              ? "处理通知失败与区域开通意向；仅记录可复核的处理结果。"
+              : "处理未成功送达的订单提醒，并记录可复核的联系结果。"}
           </Typography.Paragraph>
         </div>
         <Button loading={loading} onClick={() => void reload().catch(() => undefined)}>
@@ -264,7 +270,7 @@ export function GovernancePage({
         </Typography.Paragraph>
       </Modal>
 
-      <section aria-label="区域开通意向">
+      {canHandleInterests && <section aria-label="区域开通意向">
         <Typography.Title level={4}>区域开通意向</Typography.Title>
         <Table
           rowKey="id"
@@ -297,7 +303,7 @@ export function GovernancePage({
             },
           ]}
         />
-      </section>
+      </section>}
 
       <Modal
         open={notificationAction?.stage === "form"}
@@ -386,7 +392,7 @@ export function GovernancePage({
         <Typography.Paragraph>处理说明：{notificationAction?.stage === "confirm" ? notificationAction.note : ""}</Typography.Paragraph>
       </Modal>
 
-      <Modal
+      {canHandleInterests && <Modal
         open={interestAction?.stage === "form"}
         title={interestAction?.status === "CONTACTED" ? "登记已联系" : "关闭区域意向"}
         footer={null}
@@ -405,8 +411,8 @@ export function GovernancePage({
           </Form.Item>
           <Button type="primary" htmlType="submit">继续复核</Button>
         </Form>
-      </Modal>
-      <Modal
+      </Modal>}
+      {canHandleInterests && <Modal
         open={interestAction?.stage === "confirm"}
         title="二次确认意向状态"
         okText="确认更新"
@@ -416,7 +422,7 @@ export function GovernancePage({
         onCancel={() => !submitting && setInterestAction(null)}
       >
         确认将“{interestAction?.interest.regionText}”更新为 {interestAction?.status}？
-      </Modal>
+      </Modal>}
     </>
   );
 }

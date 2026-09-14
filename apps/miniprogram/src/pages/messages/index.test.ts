@@ -4,7 +4,7 @@ const templates: SubscriptionTemplate[] = [
   { type: 'SITE_CONFIRMED', templateId: 'site' }, { type: 'CAMPAIGN_POSTPONED', templateId: 'site' }, { type: 'PICKUP_EXPIRED', templateId: 'site' },
   { type: 'VEHICLE_DISPATCHED', templateId: 'dispatch' }, { type: 'ARRIVED', templateId: 'arrival' }, { type: 'PICKUP_DEADLINE', templateId: 'deadline' }, { type: 'PARTIAL_REFUND', templateId: 'refund' },
 ];
-type TestPage = { data: { cycleRequestedTypes: NotificationType[]; enableLabel: string; enabling: boolean }; setData: (patch: Record<string, unknown>) => void; onShow: () => void; onHide: () => void; load: () => Promise<void>; enable: () => Promise<void> };
+type TestPage = { data: { cycleRequestedTypes: NotificationType[]; enableLabel: string; enabling: boolean; subscriptionComplete: boolean; subscriptionOutcome: string }; setData: (patch: Record<string, unknown>) => void; onShow: () => void; onHide: () => void; load: () => Promise<void>; enable: () => Promise<void> };
 beforeEach(() => vi.resetModules());
 afterEach(() => { vi.unstubAllGlobals(); vi.doUnmock('../../utils/api'); });
 async function fixture() {
@@ -27,13 +27,14 @@ async function fixture() {
   return { page, requestSubscribeMessage, save, switchAccount: () => { epoch++; page.onShow(); } };
 }
 describe('message page explicit five-template subscriptions', () => {
-  it('requests 3 then 2 templates, binds only actually accepted IDs and allows a fresh cycle', async () => {
+  it('requests 3 then 2 templates, binds only accepted IDs and finishes the current cycle', async () => {
     const { page, requestSubscribeMessage, save } = await fixture();
     await page.enable(); expect(requestSubscribeMessage.mock.calls[0]![0].tmplIds).toEqual(['site', 'dispatch', 'arrival']);
     expect(save.mock.calls[0]![0]).not.toContain('PICKUP_DEADLINE'); // old accepted types cannot grant the new ID
     await page.enable(); expect(requestSubscribeMessage.mock.calls[1]![0].tmplIds).toEqual(['deadline', 'refund']);
-    expect(page.data.enableLabel).toBe('再次订阅');
-    await page.enable(); expect(requestSubscribeMessage.mock.calls[2]![0].tmplIds).toEqual(['site', 'dispatch', 'arrival']);
+    expect(page.data.enableLabel).toBe('本次已完成');
+    expect(page.data.subscriptionComplete).toBe(true);
+    await page.enable(); expect(requestSubscribeMessage).toHaveBeenCalledTimes(2);
   });
   it('advances after rejection without fabricating accepted preferences', async () => {
     const { page, requestSubscribeMessage, save } = await fixture();
@@ -47,6 +48,6 @@ describe('message page explicit five-template subscriptions', () => {
     requestSubscribeMessage.mockImplementationOnce((options) => { deliver = options.success; });
     const pending = page.enable(); await Promise.resolve(); await Promise.resolve();
     page.onHide(); deliver({ site: 'accept' }); await pending; expect(save).not.toHaveBeenCalled();
-    switchAccount(); await page.load(); expect(page.data.cycleRequestedTypes).toEqual([]);
+    switchAccount(); await page.load(); expect(page.data.cycleRequestedTypes).toEqual([]); expect(page.data.subscriptionComplete).toBe(false);
   });
 });

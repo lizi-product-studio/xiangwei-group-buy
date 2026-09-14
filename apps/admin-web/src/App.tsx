@@ -105,6 +105,7 @@ import { displayLabel, STAFF_ROLE_OPTIONS } from "./labels.ts";
 import {
   adminLoadErrorText,
   getDeliveryActionLabels,
+  getDeliveryNextStep,
   dispatchBlockReason,
   dispatchFailureText,
   getLogisticsViewState,
@@ -115,23 +116,25 @@ import {
 } from "./campaign-form.ts";
 
 const { Header, Sider, Content } = Layout;
-const statusColor = (value: string) =>
-  value.includes("ACTIVE") ||
-  value.includes("OPEN") ||
-  value.includes("SUCCEEDED") ||
-  value.includes("ARRIVED")
-    ? "green"
-    : value.includes("PENDING") ||
-        value.includes("DRAFT") ||
-        value.includes("WAITING")
-      ? "gold"
-      : value.includes("FAILED") ||
-          value.includes("REJECTED") ||
-          value.includes("CANCEL")
-        ? "red"
-        : "blue";
+const statusColor = (value: string) => {
+  if (
+    ["ACTIVE", "OPEN", "SUCCEEDED", "ARRIVED", "COMPLETED", "PICKED_UP", "REFUNDED", "RESOLVED", "CONFIRMED", "MANUAL_COMPLETED"].includes(value)
+  ) return "green";
+  if (
+    ["FAILED", "RETRYABLE_FAILURE", "MANUAL_HOLD", "SUBMISSION_UNKNOWN", "BLOCKED", "EXCEPTION"].includes(value)
+  ) return "red";
+  if (
+    ["PENDING_PAYMENT", "PENDING_REVIEW", "REGISTERED", "ACCEPTED", "CANCELLING", "PENDING_OPERATOR_CONFIRMATION", "APPROVED_WAITING_FINANCE", "REFUND_CONFIRMED", "MANUAL_REQUIRED", "EXPIRED_PENDING"].includes(value)
+  ) return "gold";
+  if (["CANCELLED", "REJECTED", "CLOSED", "INACTIVE", "SUSPENDED", "DISABLED"].includes(value))
+    return "default";
+  return "blue";
+};
 const Status = ({ value }: { value: string }) => (
-  <Tag color={statusColor(value)}>{displayLabel(value)}</Tag>
+  <Tag className="status-tag" color={statusColor(value)}>
+    <span className="status-tag__dot" aria-hidden="true" />
+    {displayLabel(value)}
+  </Tag>
 );
 const money = (cents: number) => `¥${centsToYuan(cents)}`;
 const normalizePickupLocationText = (value: string) =>
@@ -796,7 +799,7 @@ function Dashboard({
         <Card title="订单履约概览" extra={<Button type="link" onClick={() => onNavigate("orders")}>查看订单</Button>}>
           <div className="dashboard-order-stages">
             {[
-              { label: "已支付待截单", statuses: ["PAID_WAITING_CLOSE"] },
+              { label: "待履约", statuses: ["PAID_WAITING_CLOSE"] },
               { label: "备货与运输", statuses: ["LOCKED", "ALLOCATING", "IN_TRANSIT"] },
               { label: "待领取", statuses: ["READY_FOR_PICKUP"] },
               { label: "退款处理中", statuses: ["REFUNDING"] },
@@ -1302,7 +1305,7 @@ function Campaigns({
         CAMPAIGN_CLOSED: "截单时间已过，不能开售。请编辑草稿，将截单及后续时间调整后重新复核。",
         CAMPAIGN_NOT_DRAFT: "团期已不再是草稿，不能编辑或删除。请刷新查看当前状态。",
         CAMPAIGN_VERSION_CONFLICT: "团期已被其他操作修改，请刷新后重新编辑。",
-        CAMPAIGN_TRANSPORT_CONFLICT: "计划发车时间晚于已登记运输的预计到达时间。请先在配送与到货中调整运输安排，再修改草稿。",
+        CAMPAIGN_TRANSPORT_CONFLICT: "计划发车时间晚于已登记运输的预计到达时间。请先在发货与运输中调整运输安排，再修改草稿。",
         CAMPAIGN_HAS_REFERENCES: "团期已有订单、批次或运输登记，不能删除；已登记运输的草稿编辑时须保留原区域和自提点。",
         DELIVERY_SITE_NOT_CONFIRMED: "固定自提点尚不可用，请编辑草稿选择可用区域和自提点后开售。",
       };
@@ -2274,8 +2277,8 @@ function Orders({
   return (
     <>
       <PageTitle
-        title="订单管理"
-        subtitle="按完整订单号搜索并查看支付、履约、领取、退款和售后事实"
+        title="订单列表"
+        subtitle="查看订单的支付、履约、领取、退款与售后进度"
         action={
           <Space>
             <Input.Search
@@ -2300,7 +2303,7 @@ function Orders({
         locale={{ emptyText: query.trim() ? "未找到匹配订单，请检查完整订单号" : "暂无订单" }}
         columns={[
           { title: "订单号", dataIndex: "orderNo" },
-          { title: "金额", render: (_, v) => money(v.totalCents) },
+          { title: "实付金额", render: (_, v) => money(v.totalCents) },
           {
             title: "商品",
             render: (_, v) =>
@@ -2311,7 +2314,7 @@ function Orders({
             render: (_, v) =>
               v.paidAt ? dayjs(v.paidAt).format("MM-DD HH:mm") : "未支付",
           },
-          { title: "状态", render: (_, v) => <Status value={v.status} /> },
+          { title: "订单状态", render: (_, v) => <Status value={v.status} /> },
           {
             title: "操作",
             render: (_, v) => (
@@ -2345,7 +2348,7 @@ function Orders({
               <Descriptions.Item label="支付截止">
                 {selected.expiresAt ? dateTime(selected.expiresAt) : "—"}
               </Descriptions.Item>
-              <Descriptions.Item label="订单金额">{money(selected.totalCents)}</Descriptions.Item>
+              <Descriptions.Item label="实付金额">{money(selected.totalCents)}</Descriptions.Item>
               <Descriptions.Item label="领取进度">
                 {selected.items.reduce((sum, item) => sum + item.pickedUpQuantity, 0)} /
                 {selected.items.reduce((sum, item) => sum + item.fulfilledQuantity, 0)} 件
@@ -2788,7 +2791,7 @@ function Logistics({
     setAllocationSubmitting(true);
     try {
       await api.confirmAllocation(communityDeliveryId);
-      await refreshAfterMutation(reload, message, "差异分配已确认");
+      await refreshAfterMutation(reload, message, "到货异常范围已确认");
     } catch (error) {
       void message.error(mutationErrorText(error));
     } finally {
@@ -2798,14 +2801,14 @@ function Logistics({
   return (
     <>
       <PageTitle
-        title="配送与到货"
-        subtitle="运营登记车辆，点位负责人逐商品确认实到；差异先生成草案"
+        title="发货与运输"
+        subtitle="管理已成团订单的运输信息和发车进度；发车后由对应自提点确认到货"
       />
       {viewState === "error" ? (
         <Alert
           type="error"
           showIcon
-          message="配送数据加载失败"
+          message="发货数据加载失败"
           description={error}
           action={
             <Button aria-label="重试" onClick={() => void reload().catch(() => undefined)}>
@@ -2814,8 +2817,8 @@ function Logistics({
           }
         />
       ) : viewState === "empty" ? (
-        <Card title="可配送团期">
-          <Empty description="暂无可配送团期，请先创建商品和团期">
+        <Card title="发货任务">
+          <Empty description="暂无可发货团期，请先创建商品和团期">
             <Typography.Paragraph type="secondary">
               创建团期并绑定自提点后，运营可在此登记运输信息；登记后仍可在发车前编辑。
             </Typography.Paragraph>
@@ -2831,14 +2834,30 @@ function Logistics({
           dataSource={plans}
           columns={[
           {
-            title: "团期",
-            render: (_, v) =>
-              campaigns.find((c) => c.id === v.campaignId)?.title ??
-              v.campaignId,
+            title: "团期与车辆",
+            render: (_, v) => (
+              <Space direction="vertical" size={2}>
+                <Typography.Text strong>
+                  {campaigns.find((c) => c.id === v.campaignId)?.title ?? v.campaignId}
+                </Typography.Text>
+                <Typography.Text type="secondary">
+                  {v.vehicleOrderNo ? `运输单 ${v.vehicleOrderNo}` : "运输信息未登记"}
+                </Typography.Text>
+              </Space>
+            ),
           },
-          { title: "自提点", dataIndex: "siteName" },
-          { title: "车辆", render: (_, v) => v.vehicleOrderNo ?? "未登记" },
-          { title: "状态", render: (_, v) => <Status value={v.status} /> },
+          { title: "履约状态", render: (_, v) => <Status value={v.status} /> },
+          {
+            title: "下一步",
+            render: (_, v) => {
+              const batch = batches.find((value) => value.campaignId === v.campaignId);
+              return getDeliveryNextStep({
+                status: v.status,
+                ...(batch ? { batchStatus: batch.status } : {}),
+              });
+            },
+          },
+          { title: "送达自提点", dataIndex: "siteName" },
           {
             title: "操作",
             render: (_, v) => {
@@ -2877,9 +2896,7 @@ function Logistics({
                             ? "确认发车"
                             : "创建批次并发车"}
                         </Button>
-                      ) : (
-                        <Tag color="green">已发车</Tag>
-                      )}
+                      ) : null}
                     </>
                   )}
                   {actionLabels.includes("紧急纠正运输信息") && (
@@ -2887,15 +2904,6 @@ function Logistics({
                         紧急纠正运输信息
                       </Button>
                   )}
-                  <Typography.Text type="secondary">
-                    {v.status === "SITE_CONFIRMED"
-                      ? "等待运营登记运输信息"
-                      : v.status === "VEHICLE_BOOKED"
-                        ? "等待运营发车"
-                        : v.status === "IN_TRANSIT"
-                          ? "等待点位负责人确认到货"
-                          : "运输已到达"}
-                  </Typography.Text>
                   {batch?.status === "DRAFT" && !canOperate && (
                     <Typography.Text type="secondary">
                       批次已创建，等待运营确认发车
@@ -2911,12 +2919,12 @@ function Logistics({
         ]}
         />
       )}
-      <Typography.Title level={4}>点位到货</Typography.Title>
+      <Typography.Title level={4}>到货与异常</Typography.Title>
       {viewState === "error" ? null : deliveries.length === 0 && !loading ? (
-        <Card title="点位到货">
+        <Card title="到货与异常">
           <Empty description="暂无点位到货记录">
             <Typography.Paragraph type="secondary">
-              团期发车并到达后，授权点位负责人负责逐商品确认到货；如有差异，再由运营确认分配草案。
+              团期发车后，由授权点位负责人逐商品确认到货；如有短少或破损，由运营确认受影响订单后交财务处理。
             </Typography.Paragraph>
           </Empty>
         </Card>
@@ -2928,9 +2936,9 @@ function Logistics({
           columns={[
           { title: "团期", dataIndex: "campaignTitle" },
           { title: "自提点", dataIndex: "siteName" },
-          { title: "状态", render: (_, v) => <Status value={v.status} /> },
+          { title: "到货状态", render: (_, v) => <Status value={v.status} /> },
           {
-            title: "差异草案",
+            title: "异常处理",
             render: (_, v) =>
               v.allocationDraftStatus
                 ? displayLabel(v.allocationDraftStatus)
@@ -2955,7 +2963,7 @@ function Logistics({
                       disabled={allocationSubmitting}
                       onClick={() => void confirmAllocation(v.communityDeliveryId!)}
                     >
-                      确认差异分配
+                      确认异常范围
                     </Button>
                   )}
                 {!v.arrivalConfirmed && !v.dispatchBatchId && (
@@ -2975,7 +2983,7 @@ function Logistics({
                   v.allocationDraftStatus ===
                     "PENDING_OPERATOR_CONFIRMATION" && (
                     <Typography.Text type="warning">
-                      待运营确认差异分配
+                      待运营确认异常范围
                     </Typography.Text>
                   )}
                 {v.arrivalConfirmed &&
@@ -3725,6 +3733,16 @@ function PointWorkbench({
   const pendingArrivals = deliveries.filter(
     (delivery) => delivery.dispatchBatchId && !delivery.arrivalConfirmed,
   );
+  const processingArrivals = deliveries.filter(
+    (delivery) =>
+      delivery.arrivalConfirmed &&
+      delivery.allocationDraftStatus === "PENDING_OPERATOR_CONFIRMATION",
+  );
+  const completedArrivals = deliveries.filter(
+    (delivery) =>
+      delivery.arrivalConfirmed &&
+      delivery.allocationDraftStatus !== "PENDING_OPERATOR_CONFIRMATION",
+  );
   const setLookupOrder = (nextOrder: PickupLookup) => {
     setOrder(nextOrder);
     setPickupQuantities(
@@ -3802,7 +3820,7 @@ function PointWorkbench({
           closable
           onClose={() => setArrivalNotice(false)}
           message="到货事实已登记"
-          description="配送已进入后续差异分配或领取准备流程。"
+          description="数量一致的商品可进入领取；短少或破损商品由平台继续处理。"
           style={{ marginBottom: 16 }}
         />
       )}
@@ -3848,6 +3866,49 @@ function PointWorkbench({
                   </Button>
                 ),
               },
+            ]}
+          />
+        </Card>
+      )}
+      {processingArrivals.length > 0 && (
+        <Card title="平台处理中" style={{ marginTop: 16 }}>
+          <Alert
+            type="warning"
+            showIcon
+            message="仅异常商品暂不可领取"
+            description="平台正在核对短少或破损对应的订单；同一批次中数量一致的商品可继续领取。"
+            style={{ marginBottom: 16 }}
+          />
+          <Table
+            rowKey="id"
+            pagination={false}
+            dataSource={processingArrivals}
+            columns={[
+              { title: "团期", dataIndex: "campaignTitle" },
+              { title: "自提点", dataIndex: "siteName" },
+              {
+                title: "处理状态",
+                render: () => <Status value="PENDING_OPERATOR_CONFIRMATION" />,
+              },
+              {
+                title: "说明",
+                render: () => "平台确认异常范围后会更新可领取数量",
+              },
+            ]}
+          />
+        </Card>
+      )}
+      {completedArrivals.length > 0 && (
+        <Card title="近期到货记录" style={{ marginTop: 16 }}>
+          <Table
+            rowKey="id"
+            pagination={false}
+            dataSource={completedArrivals}
+            columns={[
+              { title: "团期", dataIndex: "campaignTitle" },
+              { title: "自提点", dataIndex: "siteName" },
+              { title: "到货结果", render: () => "数量已确认" },
+              { title: "状态", render: () => <Status value="CONFIRMED" /> },
             ]}
           />
         </Card>
@@ -4339,7 +4400,7 @@ function Service({
                 .map((item) => `${item.name} × ${item.affectedQuantity}`)
                 .join("；"),
           },
-          { title: "可复算金额", render: (_, value) => value.refundAmountCents === null ? (value.financialFactsError ?? "金额不可计算") : money(value.refundAmountCents) },
+          { title: "预计退款", render: (_, value) => value.refundAmountCents === null ? (value.financialFactsError ?? "金额不可计算") : money(value.refundAmountCents) },
           { title: "状态", render: (_, v) => <Status value={v.status} /> },
           { title: "运营确认说明", dataIndex: "resolutionNote" },
         ]}
@@ -5449,6 +5510,8 @@ export function App() {
           reload,
           canHandleNotifications:
             roles.includes("CUSTOMER_SERVICE") || roles.includes("SUPER_ADMIN"),
+          canHandleInterests:
+            roles.includes("OPERATOR") || roles.includes("SUPER_ADMIN"),
         }}
       />
     ) : currentPage === "finance" ? (

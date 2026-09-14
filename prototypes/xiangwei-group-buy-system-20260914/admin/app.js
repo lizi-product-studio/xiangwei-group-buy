@@ -10,7 +10,7 @@
     { id: "PICKUP_MANAGER", label: "点位负责人" },
   ];
   const DEFAULT_PAGE = {
-    SUPER_ADMIN: "staff",
+    SUPER_ADMIN: "workbench",
     OPERATOR: "workbench",
     CUSTOMER_SERVICE: "quality",
     FINANCE: "finance-todo",
@@ -59,8 +59,8 @@
       label: "履约管理",
       icon: "route",
       items: [
-        { key: "delivery", label: "发货管理", hint: "全部自提点，不按当前自提点过滤" },
-        { key: "refund-confirm", label: "确认退款订单", hint: "全部自提点的短少/破损订单" },
+        { key: "delivery", label: "发货与运输", hint: "装袋、车辆和发车进度" },
+        { key: "refund-confirm", label: "到货异常处理", hint: "处理短少、破损及受影响订单" },
       ],
     },
     {
@@ -133,7 +133,7 @@
       CUSTOMER_SERVICE: [
         "orders", "cancellations",
         "consumers",
-        "quality", "notifications", "interests",
+        "quality", "notifications",
       ],
       FINANCE: ["orders", "finance-todo", "finance-refunds", "finance-ledger"],
       PICKUP_MANAGER: POINT_PAGES.slice(),
@@ -159,34 +159,34 @@
     NOT_FORMED: "未成团",
     CANCELLED: "已取消",
     PENDING_PAYMENT: "待支付",
-    PAID: "已支付",
+    PAID: "待履约",
     READY_FOR_PICKUP: "待领取",
     PARTIAL_PICKED: "部分领取",
-    CANCELLING: "取消中",
-    REFUNDING: "退款中",
+    CANCELLING: "取消审核中",
+    REFUNDING: "退款处理中",
     REFUNDED: "退款成功",
-    REFUND_HOLD: "退款失败/挂起",
-    PACKING: "待装袋",
-    DISPATCHED: "已发车",
+    REFUND_HOLD: "退款异常",
+    PACKING: "待发车",
+    DISPATCHED: "运输中",
     PENDING: "待确认",
     CONFIRMED: "已确认",
     LINE_OK: "正常",
     SHORT_RECEIPT: "短少",
     PACKAGE_DAMAGED: "破损",
-    PENDING_CONFIRM: "待确认",
-    PENDING_EXECUTE: "待执行",
-    EXECUTING: "执行中",
-    SUCCEEDED: "成功",
-    FAILED_HOLD: "失败挂起",
-    PENDING_ACCEPT: "待受理",
-    PENDING_OPERATOR: "待运营决定",
-    PENDING_FINANCE: "待财务退款",
+    PENDING_CONFIRM: "待运营确认",
+    PENDING_EXECUTE: "待退款",
+    EXECUTING: "退款处理中",
+    SUCCEEDED: "退款成功",
+    FAILED_HOLD: "退款异常",
+    PENDING_ACCEPT: "待客服受理",
+    PENDING_OPERATOR: "待运营审核",
+    PENDING_FINANCE: "待退款",
     REJECTED: "已驳回",
     OVERDUE: "逾期未领",
     ENABLED: "启用",
     DISABLED: "停用",
-    MANUAL_REQUIRED: "需人工处理",
-    SUBMISSION_UNKNOWN: "结果核验中",
+    MANUAL_REQUIRED: "待人工通知",
+    SUBMISSION_UNKNOWN: "结果待核实",
     MANUAL_COMPLETED: "已人工完成",
     NEW: "待处理",
     CONTACTED: "已联系",
@@ -201,23 +201,23 @@
     CAMPAIGN: "团期",
     INTERNAL_STAFF: "内部员工",
     SERVICE_AREA: "服务区域",
-    PAID_WAITING_CLOSE: "已支付",
-    ALLOCATING: "已支付",
-    IN_TRANSIT: "已支付",
+    PAID_WAITING_CLOSE: "待履约",
+    ALLOCATING: "备货中",
+    IN_TRANSIT: "运输中",
     PICKED_UP: "已完成",
     AUTO_REFUNDED: "退款成功",
-    PENDING_REVIEW: "取消中",
-    APPROVED_WAITING_FINANCE: "退款中",
-    REFUND_CONFIRMED: "待执行",
-    REFUND_PENDING: "退款中",
-    MANUAL_HOLD: "失败挂起",
-    FAILED: "失败挂起",
-    REGISTERED: "待受理",
-    ACCEPTED: "待运营决定",
+    PENDING_REVIEW: "取消审核中",
+    APPROVED_WAITING_FINANCE: "待退款",
+    REFUND_CONFIRMED: "待退款",
+    REFUND_PENDING: "退款处理中",
+    MANUAL_HOLD: "退款异常",
+    FAILED: "处理失败",
+    REGISTERED: "待客服受理",
+    ACCEPTED: "待运营审核",
     RESOLVED: "已完成",
-    SITE_CONFIRMED: "待装袋",
-    VEHICLE_BOOKED: "待装袋",
-    VEHICLE_DISPATCHED: "已发车",
+    SITE_CONFIRMED: "待发车",
+    VEHICLE_BOOKED: "待发车",
+    VEHICLE_DISPATCHED: "运输中",
     PENDING_OPERATOR_CONFIRMATION: "已确认",
     EXPIRED_PENDING: "待领取",
     LOSS_RECORDED: "已取消",
@@ -228,18 +228,18 @@
     LOCKED: "green", COMPLETED: "green", ACTIVE: "green", ENABLED: "green",
     REFUNDED: "green", SUCCEEDED: "green", CONFIRMED: "green", LINE_OK: "green",
     AUTO_REFUNDED: "green", MANUAL_COMPLETED: "green", PICKED_UP: "green", RESOLVED: "green",
-    OPEN: "brand", FULFILLING: "brand", REFUNDING: "brand", READY_FOR_PICKUP: "brand",
-    PACKING: "brand", DISPATCHED: "brand", PAID: "blue", PAID_WAITING_CLOSE: "blue",
-    ALLOCATING: "blue", IN_TRANSIT: "blue", EXECUTING: "brand", PENDING_EXECUTE: "brand",
-    PENDING_FINANCE: "brand", APPROVED_WAITING_FINANCE: "brand", REFUND_PENDING: "brand",
-    DRAFT: "wait", PENDING: "wait", PENDING_PAYMENT: "wait", INACTIVE: "wait", DISABLED: "wait",
-    SUSPENDED: "wait", PENDING_CONFIRM: "wait", PENDING_ACCEPT: "wait", REGISTERED: "wait",
-    PASSWORD_SETUP_REQUIRED: "wait", CLOSED: "wait",
+    OPEN: "blue", FULFILLING: "blue", REFUNDING: "blue", READY_FOR_PICKUP: "blue",
+    DISPATCHED: "blue", PAID: "blue", PAID_WAITING_CLOSE: "blue",
+    ALLOCATING: "blue", IN_TRANSIT: "blue", EXECUTING: "blue", REFUND_PENDING: "blue",
+    DRAFT: "wait", PENDING: "wait", INACTIVE: "wait", DISABLED: "wait",
+    SUSPENDED: "wait", PASSWORD_SETUP_REQUIRED: "wait", CLOSED: "wait", CANCELLED: "wait", REJECTED: "wait",
     NOT_FORMED: "amber", PARTIAL_PICKED: "amber", CANCELLING: "amber", PENDING_OPERATOR: "amber",
     PENDING_REVIEW: "amber", ACCEPTED: "amber", OVERDUE: "amber", SHORT_RECEIPT: "amber",
     PACKAGE_DAMAGED: "amber", MANUAL_REQUIRED: "amber", NEW: "amber", CONTACTED: "amber",
-    REFUND_CONFIRMED: "amber",
-    CANCELLED: "red", REJECTED: "red", REFUND_HOLD: "red", FAILED_HOLD: "red",
+    REFUND_CONFIRMED: "amber", PACKING: "amber", PENDING_PAYMENT: "amber", PENDING_CONFIRM: "amber",
+    PENDING_ACCEPT: "amber", REGISTERED: "amber", PENDING_EXECUTE: "amber", PENDING_FINANCE: "amber",
+    APPROVED_WAITING_FINANCE: "amber",
+    REFUND_HOLD: "red", FAILED_HOLD: "red",
     MANUAL_HOLD: "red", FAILED: "red", SUBMISSION_UNKNOWN: "red", BLOCKED: "red",
   };
 
@@ -384,7 +384,7 @@
       },
       {
         id: "ar2", campaign: "日常蛋品", point: "幸福路自提点", pointId: "pt1", batch: "B08",
-        status: "CONFIRMED", next: "确认退款订单", due: "已超时 2 小时", diff: "鲜蛋短少 2 盒",
+        status: "CONFIRMED", next: "平台处理到货异常", due: "已超时 2 小时", diff: "鲜蛋短少 2 盒",
         createdAt: ago(11), updatedAt: ago(2), lastFingerprint: "p2:38:2:0:实到短少 2 盒",
         items: [
           { skuId: "p2", title: "散养鲜蛋", sku: "12枚/盒", expected: 40, received: 38, short: 2, damaged: 0, note: "实到短少 2 盒" },
@@ -421,7 +421,7 @@
         id: "po2", orderNo: "HT17888610027177043018A", user: "李思", pointId: "pt1",
         arrivalId: "ar2", campaign: "日常蛋品", code: "193746", status: "PAID",
         items: [
-          { skuId: "p2", title: "散养鲜蛋", sku: "12枚/盒", ordered: 2, ready: 0, picked: 0, blocked: 2, pendingArrival: false, blockReason: "到货异常待运营确认退款订单，受影响数量暂不可领取" },
+          { skuId: "p2", title: "散养鲜蛋", sku: "12枚/盒", ordered: 2, ready: 0, picked: 0, blocked: 2, pendingArrival: false, blockReason: "到货异常处理中，该商品暂不可领取" },
         ],
       },
       {
@@ -627,7 +627,7 @@
     paidAt: ago(8),
     createdAt: ago(8.2),
     logs: [
-      { at: ago(2), actor: "王运营", text: "到货短少已登记，待确认退款订单" },
+      { at: ago(2), actor: "王运营", text: "到货短少已登记，待确认退款范围" },
       { at: ago(8), actor: "系统", text: "支付成功，金额以支付时为准" },
     ],
   });
@@ -1227,7 +1227,7 @@
     if (a && isArrivalPending(a)) return { text: "到货确认", page: "point-arrival" };
     if (a && a.status === "CONFIRMED") {
       const pendingRefund = DB.exceptions.some((e) => e.status === "PENDING_CONFIRM" && DB.pickupOrders.some((p) => p.orderNo === e.orderNo && p.arrivalId === a.id));
-      if (pendingRefund) return { text: "等待确认退款订单", page: null };
+      if (pendingRefund) return { text: "等待平台处理到货异常", page: null };
       const pending = ordersForCampaign(c.title, pointName).some((o) =>
         ["READY_FOR_PICKUP", "PARTIAL_PICKED", "PAID"].includes(o.status));
       if (pending) return { text: "领取核销", page: "point-pickup" };
@@ -1629,29 +1629,29 @@
     const overdueN = DB.orders.filter((o) => o.overdue && ["READY_FOR_PICKUP", "PARTIAL_PICKED"].includes(o.status)).length;
     const dispatchN = DB.deliveries.filter((d) => isPacking(d)).length;
     const refundConfirmN = DB.exceptions.filter((e) => e.status === "PENDING_CONFIRM").length;
-    return `${headline("工作台", "", "总部待办走发货管理、确认退款订单、团期和售后工单。到货确认是点位工作，不在本页代店确认。逾期未领挂在订单上。")}
+    return `${headline("工作台", "", "查看今天需要处理的发货、到货异常、售后和逾期订单。到货由各自提点现场确认。")}
       <div class="work-grid">
         <button class="work-card" data-page="orders"><b>${DB.orders.length}</b><span>订单</span></button>
         <button class="work-card" data-page="campaigns"><b>${DB.campaigns.filter((c) => ["OPEN", "LOCKED", "FULFILLING"].includes(c.status)).length}</b><span>进行中团期</span></button>
-        <button class="work-card" data-page="delivery"><b>${dispatchN}</b><span>待装袋</span></button>
-        <button class="work-card" data-page="refund-confirm"><b>${refundConfirmN}</b><span>确认退款订单</span></button>
+        <button class="work-card" data-page="delivery"><b>${dispatchN}</b><span>待发车</span></button>
+        <button class="work-card" data-page="refund-confirm"><b>${refundConfirmN}</b><span>到货异常</span></button>
         <button class="work-card" data-page="orders"><b>${overdueN}</b><span>逾期未领</span></button>
       </div>
       <div class="dashboard">
         <section class="panel">
-          <div class="panel-head"><h2>优先处理</h2><button class="text-action" data-page="refund-confirm">确认退款订单</button></div>
-          <div class="todo"><i class="todo-mark red"></i><div class="todo-main"><b>确认退款订单 · 散养鲜蛋短少 2 盒</b><span>幸福路自提点 · 点位已登记实到，待运营确认受影响订单</span></div><button class="text-action" data-page="refund-confirm">处理</button></div>
-          <div class="todo"><i class="todo-mark"></i><div class="todo-main"><b>发货管理 · 日常蛋品待装袋发车</b><span>今天 14:00 前按已付件数装袋</span></div><button class="text-action" data-page="delivery">处理</button></div>
+          <div class="panel-head"><h2>优先处理</h2><button class="text-action" data-page="refund-confirm">查看到货异常</button></div>
+          <div class="todo"><i class="todo-mark red"></i><div class="todo-main"><b>到货异常 · 散养鲜蛋短少 2 盒</b><span>幸福路自提点 · 1 笔订单待确认退款范围</span></div><button class="text-action" data-page="refund-confirm">处理</button></div>
+          <div class="todo"><i class="todo-mark"></i><div class="todo-main"><b>发货任务 · 日常蛋品待发车</b><span>今天 14:00 前完成装袋并确认发车</span></div><button class="text-action" data-page="delivery">处理</button></div>
           <div class="todo"><i class="todo-mark"></i><div class="todo-main"><b>售后工单 · HT17888610027177043010F</b><span>秋日苹果果面碰伤 · 待客服受理</span></div><button class="text-action" data-act="open-quality" data-id="q1">处理</button></div>
           <div class="todo"><i class="todo-mark"></i><div class="todo-main"><b>订单逾期 · HT17888610027177042980C</b><span>车站东点 · 领取窗口已截止</span></div><button class="text-action" data-act="open-order" data-id="od-o0">处理</button></div>
         </section>
         <div>
           <section class="panel">
-            <div class="panel-head"><h2>今日履约</h2><button class="text-action" data-page="delivery">发货管理</button></div>
+            <div class="panel-head"><h2>今日履约</h2><button class="text-action" data-page="delivery">发货与运输</button></div>
             <div class="summary-list">
-              <button class="summary-item" data-page="delivery"><b>${dispatchN}</b><span>待装袋</span></button>
-              <button class="summary-item" data-page="delivery"><b>${DB.deliveries.filter((d) => isDispatched(d)).length}</b><span>已发车</span></button>
-              <button class="summary-item" data-page="refund-confirm"><b>${refundConfirmN}</b><span>待确认退款</span></button>
+              <button class="summary-item" data-page="delivery"><b>${dispatchN}</b><span>待发车</span></button>
+              <button class="summary-item" data-page="delivery"><b>${DB.deliveries.filter((d) => isDispatched(d)).length}</b><span>运输中</span></button>
+              <button class="summary-item" data-page="refund-confirm"><b>${refundConfirmN}</b><span>待处理异常</span></button>
             </div>
           </section>
           <section class="panel" style="margin-top:15px">
@@ -1769,23 +1769,23 @@
       canHandle: o.overdue && ["READY_FOR_PICKUP", "PARTIAL_PICKED"].includes(o.status) && hasRole("OPERATOR", "SUPER_ADMIN"),
       cells: [`<span class="mono">${esc(o.orderNo)}</span>`, esc(o.user), esc(o.campaign), money(o.amount), `${badge(o.status)}${o.overdue ? ` ${badge("OVERDUE")}` : ""}`, fmt(o.paidAt)],
     }));
-    return `${headline("订单列表", "", campaign ? `当前筛选团期：${campaign}。覆盖全部自提点。` : "覆盖全部自提点，不按当前自提点过滤。领取进度是字段；逾期未领挂在订单上。")}
+    return `${headline("订单列表", "", campaign ? `当前查看「${campaign}」的订单。` : "查看全部自提点订单。领取逾期会作为单独标记显示。")}
       ${toolbar("输入完整订单号", [
         ["ALL", "全部状态"],
         ["PENDING_PAYMENT", "待支付"],
-        ["PAID", "已支付"],
+        ["PAID", "待履约"],
         ["READY_FOR_PICKUP", "待领取"],
         ["PARTIAL_PICKED", "部分领取"],
         ["OVERDUE", "逾期未领"],
         ["COMPLETED", "已完成"],
-        ["CANCELLING", "取消中"],
+        ["CANCELLING", "取消审核中"],
         ["CANCELLED", "已取消"],
-        ["REFUNDING", "退款中"],
+        ["REFUNDING", "退款处理中"],
         ["REFUNDED", "退款成功"],
-        ["REFUND_HOLD", "退款失败/挂起"],
+        ["REFUND_HOLD", "退款异常"],
       ])}
       ${appliedBar()}
-      ${empty || `${table(["订单号", "消费者", "团期", "金额", "状态", "支付时间 ↓"], rows, hasRole("FINANCE") ? "view" : "task")}${pager(sliced.total)}`}`;
+      ${empty || `${table(["订单号", "用户", "团期", "实付金额", "订单状态", "支付时间 ↓"], rows, hasRole("FINANCE") ? "view" : "task")}${pager(sliced.total)}`}`;
   }
 
   function taskList(opts) {
@@ -1805,26 +1805,26 @@
   function deliveryList() {
     const ops = hasRole("OPERATOR", "SUPER_ADMIN");
     return taskList({
-      title: "发货管理",
-      note: "覆盖全部自提点，不按当前自提点过滤。待装袋、已发车在此处理。发车后由点位做「到货确认」，总部不代店确认到货。",
+      title: "发货与运输",
+      note: "管理已成团订单的装袋、车辆和发车进度。发车后由对应自提点确认到货。",
       rows: DB.deliveries,
       keys: ["campaign", "point", "vehicle"],
       search: "搜索团期、自提点或车辆",
-      empty: "暂无待装袋团期，请先截单成团。",
+      empty: "暂无发货任务。团期成团后会自动进入这里。",
       emptyFilter: "没有符合筛选的发货记录。",
-      statuses: [["ALL", "全部状态"], ["PACKING", "待装袋"], ["DISPATCHED", "已发车"]],
-      columns: ["团期", "当前阶段", "下一步 / 截止", "自提点", "责任人", "更新时间 ↓"],
+      statuses: [["ALL", "全部状态"], ["PACKING", "待发车"], ["DISPATCHED", "运输中"]],
+      columns: ["团期与车辆", "履约状态", "下一步", "送达自提点", "负责人", "更新时间 ↓"],
       metrics: [
-        { n: DB.deliveries.filter((d) => isPacking(d)).length, t: "待装袋" },
-        { n: DB.deliveries.filter((d) => isDispatched(d)).length, t: "已发车" },
+        { n: DB.deliveries.filter((d) => isPacking(d)).length, t: "待发车" },
+        { n: DB.deliveries.filter((d) => isDispatched(d)).length, t: "运输中" },
       ],
       mapRow: (d) => ({
         id: d.id,
         canHandle: isPacking(d) && ops,
         handleAct: "dispatch",
-        handleLabel: "装袋发车",
-        handleHint: "已发车，等待点位到货确认",
-        cells: [objectCell(d.campaign, d.vehicle === "未登记" ? "未登记车辆" : d.vehicle), badge(d.status), `${esc(d.next)}<div class="sub">${esc(d.due)}</div>`, esc(d.point), esc(d.owner), fmt(d.updatedAt)],
+        handleLabel: "确认发车",
+        handleHint: "运输中，等待自提点确认到货",
+        cells: [objectCell(d.campaign, d.vehicle === "未登记" ? "车辆待登记" : d.vehicle), badge(d.status), `${esc(isPacking(d) ? (d.vehicle === "未登记" ? "登记车辆并确认发车" : "确认装袋并发车") : "等待自提点确认到货")}<div class="sub">${esc(d.due)}</div>`, esc(d.point), esc(d.owner), fmt(d.updatedAt)],
       }),
     });
   }
@@ -1843,7 +1843,7 @@
       metrics: [
         { n: DB.arrivals.filter((a) => isArrivalPending(a)).length, t: "待确认" },
         { n: DB.arrivals.filter((a) => a.status === "CONFIRMED").length, t: "已确认" },
-        { n: DB.exceptions.filter((e) => e.status === "PENDING_CONFIRM").length, t: "待确认退款订单", alert: true },
+        { n: DB.exceptions.filter((e) => e.status === "PENDING_CONFIRM").length, t: "待处理异常", alert: true },
       ],
       mapRow: (a) => ({
         id: a.id,
@@ -1855,15 +1855,15 @@
 
   function exceptionsList() {
     return taskList({
-      title: "确认退款订单",
-      note: "到货短少或破损由点位登记后，运营在此确认全部受影响订单，再交财务。覆盖全部自提点，不按当前自提点过滤。",
+      title: "到货异常处理",
+      note: "核对自提点登记的短少或破损，确认受影响订单和预计退款金额。确认后由财务退款。",
       rows: DB.exceptions,
       keys: ["orderNo", "point", "item"],
       search: "搜索订单号、自提点或商品",
-      empty: "暂无待确认的退款订单。",
-      emptyFilter: "没有符合筛选的退款订单。",
-      statuses: [["ALL", "全部状态"], ["PENDING_CONFIRM", "待确认"], ["PENDING_EXECUTE", "待执行"], ["EXECUTING", "执行中"], ["SUCCEEDED", "成功"], ["FAILED_HOLD", "失败挂起"]],
-      columns: ["订单", "异常类型", "商品", "可复算金额", "状态", "更新时间 ↓"],
+      empty: "暂无待处理的到货异常。",
+      emptyFilter: "没有符合筛选条件的到货异常。",
+      statuses: [["ALL", "全部状态"], ["PENDING_CONFIRM", "待运营确认"], ["PENDING_EXECUTE", "待退款"], ["EXECUTING", "退款处理中"], ["SUCCEEDED", "退款成功"], ["FAILED_HOLD", "退款异常"]],
+      columns: ["受影响订单", "异常", "商品", "预计退款", "处理状态", "更新时间 ↓"],
       metrics: [{ n: DB.exceptions.filter((e) => e.status === "PENDING_CONFIRM").length, t: "待运营确认", alert: true }],
       mapRow: (e) => ({
         id: e.id,
@@ -2291,7 +2291,7 @@
       </div>
       ${state.banner || ""}
       ${sheet("团期资料", facts([["截单时间", fmt(c.cutoff)], ["预计到货", c.arrival], ["自提点", c.point], ["本团订单数", String(orderCount) + " 单"], ["已付件数 / 最小成团件数", `${paidQty} / ${minQty}`], ["商品数", String(c.items) + " 个"], ["未成团处理", campaignFailAction(c) === "POSTPONE" ? "顺延一次" : "取消并退款"], ["发车", shipStatusText(d, arrivalForCampaignAtPoint(c.title, c.point))], ["到货确认", arrivalStatusText(arrivalForCampaignAtPoint(c.title, c.point), d)]]))}
-      ${d ? `${sheet("发车资料", facts([["车辆", d.vehicle], ["当前阶段", label(d.status)], ["下一步", d.next], ["责任人", d.owner]]) + `<p class="hint source-note">发车不另建配送档案；运输信息挂在本团期。</p>`)}` : ""}
+      ${d ? `${sheet("运输信息", facts([["车辆", d.vehicle === "未登记" ? "待登记" : d.vehicle], ["履约状态", label(d.status)], ["下一步", isPacking(d) ? "完成装袋并确认发车" : "等待自提点确认到货"], ["负责人", d.owner]]))}` : ""}
       ${campaignOrdersSheet(c.title, null, { openOrders: true, sheetTitle: "本团订单" })}
       ${sheet("操作记录", logsTimeline(c, [["创建团期", fmt(c.createdAt) + " · 王运营"]]))}
       ${danger.length ? `<section class="action-panel"><div><b>危险操作</b><div class="sub">取消将释放待付款订单，已付款订单进入退款义务；删除仅限无订单、无运输记录的待开始团期。</div></div><div style="display:flex;gap:8px">${danger.join("")}</div></section>` : ""}
@@ -2316,7 +2316,7 @@
         ["订单金额", money(o.amount)],
         ["自提点", o.point || "—"], ["支付时间", fmt(o.paidAt)],
         ["领取进度", o.pickup], ["领取截止", o.deadline ? fmt(o.deadline) : "到货确认后第 3 个自然日 23:59:59"],
-      ]) + `<p class="hint source-note">领取截止来自对应点位到货确认日；逾期未领是订单标记，不是独立档案。分次核销进度见领取进度。</p>`)}
+      ]) + `<p class="hint source-note">领取截止按自提点确认到货时间计算；分次领取进度会实时更新。</p>`)}
       ${sheet("商品详情", `<table class="form-table data-table"><thead><tr><th>商品</th><th>数量</th></tr></thead><tbody><tr><td>${esc(o.goods.replace(/ ×.*$/, ""))}</td><td>${esc((o.goods.match(/×\s*(.+)$/) || ["", o.goods])[1])}</td></tr></tbody></table><p class="hint">单价与数量以支付时为准，之后改价不影响本单</p>`)}
       ${sheet("操作记录", logsTimeline(o))}
       ${sheet("售后记录", !related.length && !cancel && !ex.length
@@ -2324,9 +2324,9 @@
         : `<table class="form-table data-table"><thead><tr><th>类型</th><th>内容</th><th>状态</th><th>操作</th></tr></thead><tbody>
         ${related.map((q) => `<tr><td>售后工单</td><td>${esc(q.item)}</td><td>${badge(q.status)}</td><td><button class="text-action" data-page="quality">查看售后工单</button></td></tr>`).join("")}
         ${cancel ? `<tr><td>取消申请</td><td>${esc(cancel.reason)}</td><td>${badge(cancel.status)}</td><td><button class="text-action" data-page="cancellations">查看取消申请</button></td></tr>` : ""}
-        ${ex.map((e) => `<tr><td>确认退款订单</td><td>${esc(label(e.type))} · ${esc(e.item)}</td><td>${badge(e.status)}</td><td><button class="text-action" data-page="refund-confirm">查看确认退款订单</button></td></tr>`).join("")}
+        ${ex.map((e) => `<tr><td>到货异常</td><td>${esc(label(e.type))} · ${esc(e.item)}</td><td>${badge(e.status)}</td><td><button class="text-action" data-page="refund-confirm">查看处理进度</button></td></tr>`).join("")}
         </tbody></table>`)}
-      ${arrival && ex.length ? `<p class="hint source-note">到货异常来自批次 ${esc(arrival.batch)} 的到货确认结果，不是另行开单。</p>` : ""}
+      ${arrival && ex.length ? `<p class="hint source-note">异常来自批次 ${esc(arrival.batch)} 的到货确认，退款进度会同步到本订单。</p>` : ""}
       ${ops ? `<section class="action-panel safe"><div><b>一次延期</b><div class="sub">每个领取窗口仅允许一次延期，需填写原因后确认。</div></div><button class="primary" data-act="extend">一次延期</button></section>
         <section class="action-panel"><div><b>不可恢复处置</b><div class="sub">登记退款后由财务执行；报损不再退款。</div></div><div style="display:flex;gap:8px"><button class="secondary" data-act="overdue-refund">登记退款</button><button class="danger" data-act="overdue-loss">登记报损</button></div></section>` : ""}
       ${refundWait ? `<section class="action-panel safe"><div><b>已登记退款义务</b><div class="sub">金额 ${money(o.amount)}，等待财务执行，运营不再改写支付结果。</div></div>${hasRole("FINANCE", "SUPER_ADMIN") ? `<button class="secondary" data-page="finance-todo">查看退款待办</button>` : `<span class="sub">财务待办仅财务可见</span>`}</section>` : ""}
@@ -2339,12 +2339,12 @@
     if (!d) return emptyBlock("找不到该发货任务。");
     const ops = hasRole("OPERATOR", "SUPER_ADMIN");
     let action = "";
-    if (ops && isPacking(d)) action = `<section class="action-panel safe"><div><b>装袋发车</b><div class="sub">按已付件数装袋。可先登记车辆。发车后由点位做「到货确认」，总部不代店确认。</div></div><div style="display:flex;gap:8px"><button class="secondary" data-act="vehicle">${d.vehicle === "未登记" ? "登记车辆" : "编辑车辆"}</button><button class="primary" data-act="dispatch">装袋发车</button></div></section>`;
-    if (isDispatched(d)) action = `<section class="action-panel safe"><div><b>已发车</b><div class="sub">等待点位对照系统应到与现场实物确认到货。总部不在本页代店确认。</div></div>${canAccess("point-arrival") ? `<button class="secondary" data-page="point-arrival">到货确认</button>` : ""}</section>`;
-    return `<div class="detail">${backBtn("delivery", "发货管理")}
+    if (ops && isPacking(d)) action = `<section class="action-panel safe"><div><b>确认发车</b><div class="sub">完成装袋并核对车辆后发车。发车后由自提点确认到货。</div></div><div style="display:flex;gap:8px"><button class="secondary" data-act="vehicle">${d.vehicle === "未登记" ? "登记车辆" : "编辑车辆"}</button><button class="primary" data-act="dispatch">确认发车</button></div></section>`;
+    if (isDispatched(d)) action = `<section class="action-panel safe"><div><b>运输中</b><div class="sub">商品已发车，等待自提点确认到货。</div></div>${canAccess("point-arrival") ? `<button class="secondary" data-page="point-arrival">去确认到货</button>` : ""}</section>`;
+    return `<div class="detail">${backBtn("delivery", "发货与运输")}
       <div class="detail-head"><div><h1>${esc(d.campaign)}</h1></div>${badge(d.status)}</div>
       ${state.banner || ""}
-      ${sheet("发货资料", facts([["自提点", d.point], ["车辆", d.vehicle], ["下一步", d.next], ["责任人", d.owner]]))}
+      ${sheet("发货信息", facts([["送达自提点", d.point], ["车辆", d.vehicle === "未登记" ? "待登记" : d.vehicle], ["下一步", isPacking(d) ? "完成装袋并确认发车" : "等待自提点确认到货"], ["负责人", d.owner]]))}
       ${sheet("操作记录", timeline([[label(d.status), fmt(d.updatedAt)], ["进入发货队列", fmt(d.createdAt)]]))}
       ${action}
     </div>`;
@@ -2359,7 +2359,7 @@
       action = `<section class="action-panel safe"><div><b>确认到货</b></div><div style="display:flex;gap:8px">${ops ? `<button class="primary" data-act="confirm-arrival">确认到货</button>` : ""} ${isSuper() ? `<button class="danger" data-act="emergency-arrival">紧急代办到货</button>` : ""}</div></section>`;
     }
     if (ops && a.status === "CONFIRMED" && DB.exceptions.some((e) => e.status === "PENDING_CONFIRM" && e.point === a.point && DB.pickupOrders.some((p) => p.arrivalId === a.id && p.orderNo === e.orderNo))) {
-      action = `<section class="action-panel safe"><div><b>确认退款订单</b><div class="sub">到货已确认并登记短少或破损。运营确认受影响订单后进入财务退款。</div></div><button class="primary" data-page="refund-confirm">确认退款订单</button></section>`;
+      action = `<section class="action-panel safe"><div><b>处理到货异常</b><div class="sub">核对受影响订单和预计退款金额，确认后交由财务退款。</div></div><button class="primary" data-page="refund-confirm">去处理</button></section>`;
     }
     return `<div class="detail">${backBtn("arrivals", "到货确认")}
       <div class="detail-head"><div><h1>${esc(a.campaign)}</h1><div class="sub">批次 ${esc(a.batch)} · ${esc(a.point)}</div></div>${badge(a.status)}</div>
@@ -2374,12 +2374,12 @@
   function exceptionDetail() {
     const e = byId("exceptions", state.id);
     if (!e) return emptyBlock("找不到该到货异常。");
-    return `<div class="detail">${backBtn("refund-confirm", "确认退款订单")}
+    return `<div class="detail">${backBtn("refund-confirm", "到货异常处理")}
       <div class="detail-head"><div><h1>${esc(e.orderNo)}</h1></div>${badge(e.status)}</div>
       ${state.banner || ""}
-      ${sheet("退款订单", facts([["自提点", e.point], ["行结果", label(e.type)], ["商品", e.item], ["可复算金额", money(e.amount)]]))}
+      ${sheet("异常信息", facts([["自提点", e.point], ["异常类型", label(e.type)], ["商品", e.item], ["预计退款", money(e.amount)]]))}
       ${sheet("运营说明", `<p>${esc(e.note || "尚未填写")}</p>`)}
-      ${e.status === "PENDING_CONFIRM" && hasRole("OPERATOR", "SUPER_ADMIN") ? `<section class="action-panel safe"><div><b>确认后进入财务</b><div class="sub">确认后受影响件数不能领取，退款待办交给财务。</div></div><button class="primary" data-act="confirm-alloc">确认退款订单</button></section>` : `<section class="action-panel safe"><div><b>${e.status === "FAILED_HOLD" ? "失败挂起" : "等待财务执行"}</b></div><button class="secondary" data-page="finance-todo">查看退款待办</button></section>`}
+      ${e.status === "PENDING_CONFIRM" && hasRole("OPERATOR", "SUPER_ADMIN") ? `<section class="action-panel safe"><div><b>确认退款范围</b><div class="sub">确认后异常商品保持不可领取，并生成财务退款待办。</div></div><button class="primary" data-act="confirm-alloc">确认并提交财务</button></section>` : `<section class="action-panel safe"><div><b>${e.status === "FAILED_HOLD" ? "退款异常，待人工核实" : "已提交财务退款"}</b></div><button class="secondary" data-page="finance-todo">查看退款进度</button></section>`}
     </div>`;
   }
 
@@ -2483,7 +2483,7 @@
     return `<div class="detail">${backBtn("finance-refunds", "退款记录")}
       <div class="detail-head"><div><h1>${esc(r.no)}</h1></div>${badge(r.status)}</div>
       ${sheet("退款资料", facts([["订单", r.orderNo], ["金额", money(r.amount)], ["状态", label(r.status)]]))}
-      ${r.status === "FAILED_HOLD" || r.status === "MANUAL_HOLD" ? `<div class="inline-result warn">退款失败/挂起，等待人工核验微信支付结果，禁止再自动提交。</div>` : ""}
+      ${r.status === "FAILED_HOLD" || r.status === "MANUAL_HOLD" ? `<div class="inline-result warn">退款结果异常，需人工核对微信支付结果，请勿重复提交。</div>` : ""}
     </div>`;
   }
 
@@ -2870,6 +2870,13 @@
   function pickupOrdersForPoint(pointId) {
     return DB.pickupOrders.filter((o) => o.pointId === pointId);
   }
+  function exceptionsForArrival(arrival, statuses) {
+    const orderNos = new Set(DB.pickupOrders.filter((o) => o.arrivalId === arrival.id).map((o) => o.orderNo));
+    return DB.exceptions.filter((e) => orderNos.has(e.orderNo) && (!statuses || statuses.includes(e.status)));
+  }
+  function unresolvedExceptionsForArrival(arrival) {
+    return exceptionsForArrival(arrival, ["PENDING_CONFIRM", "PENDING_EXECUTE", "EXECUTING", "FAILED_HOLD"]);
+  }
   function pickupReceiptsForPoint(pointId) {
     return (DB.pickupReceipts || []).filter((r) => r.pointId === pointId);
   }
@@ -3068,11 +3075,11 @@
   }
   function emptyArrivalReason(pointId) {
     const all = arrivalsForPoint(pointId);
-    const waitingOps = all.some((a) => a.status === "CONFIRMED" && DB.exceptions.some((e) => e.status === "PENDING_CONFIRM" && e.point === a.point));
+    const waitingOps = all.some((a) => a.status === "CONFIRMED" && unresolvedExceptionsForArrival(a).length);
     const confirmed = all.some((a) => a.status === "CONFIRMED");
     const pointName = (assignedPoints().find((p) => p.id === pointId) || {}).name;
     const undeparted = DB.deliveries.some((d) => d.point === pointName && isPacking(d));
-    if (waitingOps) return "本点已发车批次均已提交到货。存在待运营确认退款订单，受影响数量暂不可领取。";
+    if (waitingOps) return "本点到货已确认，异常商品正在由平台处理。其他正常商品可继续领取。";
     if (confirmed) return "本点已发车批次均已确认完毕。";
     if (undeparted) return "当前点位批次尚未发车，到货确认在发车后开放。";
     return "暂无已发车、待确认的授权点位配送。";
@@ -3083,7 +3090,7 @@
     if (pickable) return "";
     const blocked = orders.some((o) => o.items.some((i) => i.blocked > 0));
     const awaiting = orders.some((o) => o.items.some((i) => i.pendingArrival));
-    if (blocked) return "有订单因到货异常等待运营确认退款订单，受影响数量暂不可核销。";
+    if (blocked) return "有订单包含到货异常商品，异常数量暂不可核销。其他正常商品不受影响。";
     if (awaiting) return "订单尚未完成到货确认，确认后才可核销。";
     if (orders.length) return "本点已确认到货的订单均已领取完毕。";
     const all = arrivalsForPoint(pointId);
@@ -3101,7 +3108,7 @@
         if (sku.short + sku.damaged > 0) {
           line.ready = 0;
           line.blocked = line.ordered;
-          line.blockReason = "到货异常待运营确认退款订单，受影响数量暂不可领取";
+          line.blockReason = "到货异常处理中，该商品暂不可领取";
         } else {
           line.ready = line.ordered;
           line.blocked = 0;
@@ -3120,8 +3127,8 @@
   function arrivalResultText(arrival) {
     const hasDiff = arrival.items.some((i) => i.short > 0 || i.damaged > 0);
     return hasDiff
-      ? "到货事实已登记。运营还要确认退款订单，受影响数量在确认前不可领取。"
-      : "到货事实已登记。正常数量已可领取。";
+      ? "到货已确认，异常商品已提交平台处理；其他正常商品可继续领取。"
+      : "到货已确认，商品现在可以领取。";
   }
   function warnBanner(text) {
     state.banner = `<div class="inline-result warn"><b>已登记</b>：${esc(text)}</div>`;
@@ -3169,7 +3176,7 @@
       ? items.filter((i) => i.short + i.damaged > 0).map((i) => `${i.title}${i.short ? "短少 " + i.short : ""}${i.damaged ? "破损 " + i.damaged : ""}`).join("，")
       : "无";
     arrival.status = "CONFIRMED";
-    arrival.next = hasDiff ? "确认退款订单" : "无需处理";
+    arrival.next = hasDiff ? "平台处理到货异常" : "已完成";
     arrival.updatedAt = NOW;
     addLog(arrival, hasDiff ? `到货确认完成，存在异常：${arrival.diff}` : "到货确认完成，实到与系统应到一致");
     delete state.arrivalDrafts[arrival.id];
@@ -3221,11 +3228,11 @@
       <thead><tr>
         <th class="col-goods">商品</th>
         <th class="col-sku">规格</th>
-        <th class="col-num" title="本点该批次已付款且未全额退款的件数合计">系统应到</th>
-        <th class="col-num">实到<div class="sub">含破损</div></th>
-        <th class="col-num">短少<div class="sub">自动</div></th>
-        <th class="col-num">破损<div class="sub">其中</div></th>
-        <th class="col-note">行结果</th>
+        <th class="col-num" title="本点该批次已付款且未全额退款的件数合计">应到</th>
+        <th class="col-num">现场实到<div class="sub">含破损</div></th>
+        <th class="col-num">短少<div class="sub">自动计算</div></th>
+        <th class="col-num">其中破损</th>
+        <th class="col-note">到货结果</th>
         <th class="col-note">说明</th>
         ${readonly ? "" : `<th class="col-act">操作</th>`}
       </tr></thead>
@@ -3251,7 +3258,7 @@
           </tr>`;
         }).join("")}</tbody>
       </table></div></div>
-      ${order.items.some((i) => i.blocked > 0) ? `<div class="inline-result warn">短少或破损数量需运营确认后才能领取，当前不可核销受影响件数。</div>` : ""}
+      ${order.items.some((i) => i.blocked > 0) ? `<div class="inline-result warn">到货异常商品正在由平台处理，暂不可核销；其他正常商品可继续领取。</div>` : ""}
       ${order.items.some((i) => i.pendingArrival) ? `<div class="inline-result warn">该订单对应批次尚未完成到货确认，确认后正常数量才可领取。</div>` : ""}
       ${state.pickupError ? `<div class="inline-result bad">${esc(state.pickupError)}</div>` : ""}
       ${field("6 位取货码", `<input id="pickup-code" placeholder="6 位取货码" maxlength="6" inputmode="numeric" value="${esc(state.pickupCode)}">`, true)}
@@ -3275,10 +3282,12 @@
   }
   function pointArrivalInner(point) {
     const emptyDemo = state.listMode === "empty";
-    const pending = emptyDemo ? [] : arrivalsForPoint(point.id).filter((a) => isArrivalPending(a));
-    const waiting = emptyDemo ? [] : arrivalsForPoint(point.id).filter((a) => a.status === "CONFIRMED" && DB.exceptions.some((e) => e.status === "PENDING_CONFIRM" && e.point === a.point));
+    const pointArrivals = emptyDemo ? [] : arrivalsForPoint(point.id);
+    const pending = pointArrivals.filter((a) => isArrivalPending(a));
+    const waiting = pointArrivals.filter((a) => a.status === "CONFIRMED" && unresolvedExceptionsForArrival(a).length);
     const replay = !emptyDemo && state.replayArrivalId ? byId("arrivals", state.replayArrivalId) : null;
     const replayHere = !!(replay && replay.pointId === point.id && !isArrivalPending(replay));
+    const completed = pointArrivals.filter((a) => a.status === "CONFIRMED" && !unresolvedExceptionsForArrival(a).length && (!replayHere || a.id !== replay.id));
     if (emptyDemo) {
       return `<div class="empty wb-empty"><p>暂无待确认到货</p><p class="sub">当前点位批次尚未发车，到货确认在发车后开放。</p></div>`;
     }
@@ -3289,13 +3298,34 @@
         ${state.arrivalError ? `<div class="inline-result bad">${esc(state.arrivalError)}</div>` : ""}
         <div class="form-footer" style="margin-top:8px;padding-top:12px"><button class="primary" data-act="submit-arrival" data-id="${a.id}">${esc(arrivalSubmitLabel())}</button></div>
       </div>`).join("");
-    html += waiting.map((a) => `<div class="inline-result warn"><b>${esc(a.campaign)} · 批次 ${esc(a.batch)}</b>：${esc(a.diff)}。运营还要确认退款订单，受影响数量暂不可领取。</div>`).join("");
+    if (waiting.length) {
+      html += `<section class="arrival-followup">
+        <div class="panel-head"><div><h3>平台处理中</h3><div class="sub">只限制异常商品，其他正常商品可继续核销。</div></div><span class="count-chip">${waiting.length} 个批次</span></div>
+        ${waiting.map((a) => {
+          const exceptions = unresolvedExceptionsForArrival(a);
+          const affectedOrders = new Set(exceptions.map((e) => e.orderNo)).size;
+          const issue = a.diff && a.diff !== "无" ? a.diff : "到货数量异常";
+          return `<div class="arrival-followup-row">
+            <div><b>${esc(a.campaign)}</b><span>批次 ${esc(a.batch)} · ${esc(issue)}</span></div>
+            <div class="arrival-followup-meta"><span>${affectedOrders} 笔订单受影响</span>${badge(exceptions[0]?.status || "PENDING_CONFIRM")}</div>
+          </div>`;
+        }).join("")}
+      </section>`;
+    }
     if (replayHere) {
       html += `<div class="item-card"><div class="object">${esc(replay.campaign)}到货已确认</div>
         ${arrivalSkuTable(replay, true)}
       </div>`;
     }
-    if (!pending.length && !waiting.length && !replayHere) {
+    if (completed.length) {
+      html += `<section class="arrival-history">
+        <div class="panel-head"><div><h3>近期到货记录</h3><div class="sub">已完成的批次无需再次操作。</div></div></div>
+        <div class="table-shell wb-table"><table><thead><tr><th>团期与批次</th><th>到货结果</th><th>处理状态</th><th>更新时间</th></tr></thead><tbody>
+          ${completed.map((a) => `<tr><td>${objectCell(a.campaign, `批次 ${a.batch}`)}</td><td>${esc(a.diff === "无" ? "数量一致" : a.diff)}</td><td>${badge("COMPLETED")}</td><td>${fmt(a.updatedAt)}</td></tr>`).join("")}
+        </tbody></table></div>
+      </section>`;
+    }
+    if (!pending.length && !waiting.length && !replayHere && !completed.length) {
       html += `<div class="empty wb-empty"><p>暂无待确认到货</p><p class="sub">${esc(emptyArrivalReason(point.id))}</p></div>`;
     }
     return html;
@@ -3386,14 +3416,14 @@
   }
   function pointArrival() {
     const point = currentPoint();
-    return `${headline("到货确认", "", "仅当前自提点。对照系统应到与现场实物。短少或破损用「登记异常」，确认到货后本批次不再提交。总部不在此代店确认。")}
+    return `${headline("到货确认", "", "核对当前自提点的应到数量与现场实物；如有短少或破损，请先登记异常再确认到货。")}
       ${state.banner || ""}
       ${pointSelector()}
       <div class="wb-stack">${pointArrivalInner(point)}</div>`;
   }
   function pointPickup() {
     const point = currentPoint();
-    return `${headline("领取核销", "", "仅当前自提点。只核销本点已确认到货、仍在领取窗口内的订单，不会列出其他点的单。")}
+    return `${headline("领取核销", "", "输入订单号并核对取货码。这里只能处理当前自提点已到货、仍在领取期内的订单。")}
       ${state.banner || ""}
       ${pointSelector()}
       <section class="panel" style="margin-top:16px">${pointPickupInner(point)}</section>`;
@@ -4126,7 +4156,7 @@
       const a = byId("arrivals", state.id);
       const affected = DB.pickupOrders.filter((p) => p.arrivalId === a.id && p.items.some((i) => i.blocked > 0));
       showFormDialog({
-        title: "确认退款订单",
+        title: "确认退款范围",
         confirm: "确认进入退款",
         body: () => modalFacts([
           ["批次", esc(a.batch + " · " + a.campaign)],
@@ -4140,7 +4170,7 @@
           if (reason.length < 2) return { error: "请填写处理说明（至少 2 个字符）" };
           a.status = "CONFIRMED";
           a.next = "无需处理";
-          addLog(a, "确认退款订单：" + reason);
+          addLog(a, "已确认退款范围：" + reason);
           affected.forEach((p) => {
             const o = DB.orders.find((x) => x.orderNo === p.orderNo);
             if (o) {

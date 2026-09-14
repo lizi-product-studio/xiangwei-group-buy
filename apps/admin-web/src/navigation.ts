@@ -46,7 +46,7 @@ const mainNavigation: readonly AdminNavigationGroup[] = [
     key: "fulfillment",
     label: "履约管理",
     items: [
-      { key: "logistics", label: "配送与到货", roles: ["OPERATOR"] },
+      { key: "logistics", label: "发货与运输", roles: ["OPERATOR"] },
       { key: "pickup-points", label: "区域与自提点", roles: ["OPERATOR"] },
     ],
   },
@@ -112,16 +112,25 @@ export function getAdminNavigation(
     .map((group) => ({
       key: group.key,
       label: group.label,
-      items: group.items.filter(
-        (item) =>
-          isSuperAdmin || item.roles.some((role) => roles.includes(role)),
-      ),
+      items: group.items
+        .filter(
+          (item) =>
+            isSuperAdmin || item.roles.some((role) => roles.includes(role)),
+        )
+        .map((item) =>
+          item.key === "governance" &&
+          roles.includes("CUSTOMER_SERVICE") &&
+          !roles.includes("OPERATOR") &&
+          !isSuperAdmin
+            ? { ...item, label: "通知处理" }
+            : item,
+        ),
     }))
     .filter((group) => group.items.length > 0);
 }
 
 export function getDefaultAdminPage(roles: readonly string[]): AdminPage | null {
-  if (roles.includes("SUPER_ADMIN")) return "settings";
+  if (roles.includes("SUPER_ADMIN")) return "dashboard";
   if (roles.includes("OPERATOR")) return "dashboard";
   if (roles.includes("CUSTOMER_SERVICE")) return "service";
   if (roles.includes("FINANCE")) return "finance";

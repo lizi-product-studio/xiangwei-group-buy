@@ -62,7 +62,7 @@ async function activateMapAdmin(
     localStorage.setItem("community-admin-username", loginUsername);
   }, { ...activatedBody.data, username });
   await page.reload();
-  await expect(page.getByRole("heading", { name: "人员与权限" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "运营工作台" })).toBeVisible();
 }
 
 test("地图同地址重新检测可恢复，候选确认清除旧错误且保持保存门禁", async ({ page, request }) => {

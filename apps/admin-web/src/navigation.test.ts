@@ -40,7 +40,7 @@ describe("admin navigation", () => {
       "商品管理",
       "团期管理",
       "订单管理",
-      "配送与到货",
+      "发货与运输",
       "区域与自提点",
       "消费者管理",
       "售后与异常",
@@ -54,6 +54,11 @@ describe("admin navigation", () => {
   it("limits the consumer directory to super administrators and customer service", () => {
     for (const role of ["SUPER_ADMIN", "CUSTOMER_SERVICE"]) expect(isAllowedAdminPage([role], "consumers")).toBe(true);
     for (const role of ["OPERATOR", "FINANCE", "PICKUP_MANAGER", "USER"]) expect(isAllowedAdminPage([role], "consumers")).toBe(false);
+  });
+
+  it("names the governance page for the work customer service can actually perform", () => {
+    expect(getAdminNavigationPath(["CUSTOMER_SERVICE"], "governance")?.pageLabel).toBe("通知处理");
+    expect(getAdminNavigationPath(["OPERATOR"], "governance")?.pageLabel).toBe("运营治理");
   });
 
   it("keeps a pickup manager in the isolated point workbench", () => {
@@ -73,7 +78,7 @@ describe("admin navigation", () => {
   });
 
   it.each([
-    ["SUPER_ADMIN", ["SUPER_ADMIN"], "settings"],
+    ["SUPER_ADMIN", ["SUPER_ADMIN"], "dashboard"],
     ["OPERATOR", ["OPERATOR"], "dashboard"],
     ["CUSTOMER_SERVICE", ["CUSTOMER_SERVICE"], "service"],
     ["FINANCE", ["FINANCE"], "finance"],

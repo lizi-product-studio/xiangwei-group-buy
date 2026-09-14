@@ -116,7 +116,7 @@ test('同一主图商品与网页开售团贯穿运输到货及分批核销（�
   await campaignRow.getByRole('button', { name: /截\s*单/ }).click();
   await page.getByRole('button', { name: '确认截单', exact: true }).click();
   await expect(campaignRow.getByRole('button', { name: '生成装袋标签' })).toBeVisible();
-  await page.getByRole('menuitem', { name: '配送与到货' }).click();
+  await page.getByRole('menuitem', { name: '发货与运输' }).click();
   const planRow = page.getByRole('row').filter({ hasText: campaignTitle });
   await planRow.getByRole('button', { name: '登记运输信息' }).click();
   await page.getByLabel('承运方').fill('本地测试车队');

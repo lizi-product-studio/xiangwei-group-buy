@@ -62,7 +62,7 @@ async function activatePreviewAdmin(
     localStorage.setItem("community-admin-username", loginUsername);
   }, { ...activatedBody.data, username });
   await page.reload();
-  await expect(page.getByRole("heading", { name: "人员与权限" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "运营工作台" })).toBeVisible();
 }
 
 test("配送 API 不可用时显示可恢复错误而不是空表", async ({ page, request }) => {
@@ -83,7 +83,7 @@ test("配送 API 不可用时显示可恢复错误而不是空表", async ({ pag
       body: JSON.stringify({ message: "请求失败（500）" }),
     }),
   );
-  await page.getByRole("menuitem", { name: "配送与到货" }).click();
+  await page.getByRole("menuitem", { name: "发货与运输" }).click();
   await expect(page.getByText("配送数据加载失败", { exact: true })).toBeVisible();
   await expect(
     page.getByText(/后台服务不可用，数据加载失败。请确认已在项目根目录执行 pnpm dev/),
@@ -120,7 +120,7 @@ test("配送 API 正常返回空数据时提供创建团期引导", async ({ pag
       body: JSON.stringify({ data: [] }),
     }),
   );
-  await page.getByRole("menuitem", { name: "配送与到货" }).click();
+  await page.getByRole("menuitem", { name: "发货与运输" }).click();
   await expect(
     page.getByText("暂无可配送团期，请先创建商品和团期", { exact: true }),
   ).toBeVisible();

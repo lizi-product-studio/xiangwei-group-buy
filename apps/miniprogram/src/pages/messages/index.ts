@@ -23,10 +23,12 @@ Page({
     enabling: false,
     cycleRequestedTypes: [] as NotificationType[],
     cycleEpoch: -1,
-    reminderText: '每次最多订阅三种模板，五种提醒需分组订阅；接受一次不代表无限次通知。',
-    enableLabel: '授权订单提醒',
+    subscriptionComplete: false,
+    subscriptionOutcome: 'pending' as 'pending' | 'complete' | 'declined',
+    reminderText: '订阅后可接收本次订单的发车、到货、领取和退款提醒。',
+    enableLabel: '订阅本次提醒',
   },
-  onShow() { loadCoordinator.show(); actionCoordinator.activate(); const epoch = customerAuth.captureSessionEpoch(); this.setData({ enabling: false, ...(this.data.cycleEpoch !== epoch ? { cycleEpoch: epoch, cycleRequestedTypes: [] } : {}) }); void this.load(); },
+  onShow() { loadCoordinator.show(); actionCoordinator.activate(); const epoch = customerAuth.captureSessionEpoch(); this.setData({ enabling: false, ...(this.data.cycleEpoch !== epoch ? { cycleEpoch: epoch, cycleRequestedTypes: [], subscriptionComplete: false, subscriptionOutcome: 'pending' } : {}) }); void this.load(); },
   async load() {
     const loadGuard = loadCoordinator.begin(customerAuth.captureSessionEpoch());
     // Do not leave the previous account's messages visible while a new
@@ -41,25 +43,45 @@ Page({
       const [messages, preferences] = await Promise.all([
         api.listNotifications(),
         templates.length
-          ? api.getNotificationPreferences().catch(() => ({ types: [] }))
-          : Promise.resolve({ types: [] }),
+          ? api.getNotificationPreferences().catch(() => ({
+              types: [] as NotificationType[],
+              templateIds: {} as Record<string, string>,
+            }))
+          : Promise.resolve({
+              types: [] as NotificationType[],
+              templateIds: {} as Record<string, string>,
+            }),
       ]);
       if (!loadCoordinator.isCurrent(loadGuard, customerAuth.captureSessionEpoch()) || !customerAuth.isLoggedIn()) return;
       const remaining = nextSubscriptionRequest(templates, this.data.cycleRequestedTypes);
+      const subscriptionComplete = templates.length > 0 && remaining.length === 0;
+      const validAcceptedTypes = preferences.types.filter((type) =>
+        preferences.templateIds?.[type] === templates.find((item) => item.type === type)?.templateId,
+      );
       this.setData({
         messages: messages.map((item) => ({ ...item, createdText: formatDateTime(item.createdAt) })),
         reminderText: !templates.length
           ? '当前未配置微信提醒，请留意站内消息。'
-          : remaining.length
-            ? preferences.types.length
-              ? '已有部分提醒授权；请继续授权剩余提醒。'
-              : '每次最多订阅三种模板，五种提醒需分组订阅；接受一次不代表无限次通知。'
-            : '本轮订阅已完成；需要更多提醒时可主动再次订阅。',
+          : subscriptionComplete
+            ? validAcceptedTypes.length
+              ? '本次订单提醒设置已完成，进度也会保留在订单消息中。'
+              : '本次未订阅微信提醒，订单进度仍会保留在这里。'
+            : this.data.cycleRequestedTypes.length
+              ? '第一步已完成，请完成最后一步。'
+              : '微信单次最多确认三类提醒，本次最多需要两步。',
         enableLabel: !templates.length
           ? '仅站内提醒'
-          : remaining.length
-            ? preferences.types.length ? '继续授权' : '授权订单提醒'
-            : '再次订阅',
+          : subscriptionComplete
+            ? '本次已完成'
+            : this.data.cycleRequestedTypes.length
+              ? '完成第2步'
+              : '订阅本次提醒',
+        subscriptionComplete: !templates.length || subscriptionComplete,
+        subscriptionOutcome: !templates.length || (subscriptionComplete && validAcceptedTypes.length === 0)
+          ? 'declined'
+          : subscriptionComplete
+            ? 'complete'
+            : 'pending',
       });
     } catch (error) {
       const ownExpiry = error instanceof AuthExpiredError &&
@@ -90,6 +112,7 @@ Page({
       return;
     }
     if (decision === 'BUSY') return;
+    if (this.data.subscriptionComplete) return;
     const action = actionCoordinator.begin(customerAuth.captureSessionEpoch());
     const currentAction = () => actionCoordinator.isCurrent(action, customerAuth.captureSessionEpoch()) && customerAuth.isLoggedIn();
     if (!currentAction()) return;
@@ -99,14 +122,15 @@ Page({
       if (!templates.length) {
         await api.saveNotificationPreferences([]);
         if (!currentAction()) return;
+        this.setData({ subscriptionComplete: true, subscriptionOutcome: 'declined', enableLabel: '仅站内提醒' });
         void wx.showToast({ title: '暂未配置微信提醒，将由客服人工通知', icon: 'none' });
         return;
       }
       const current = await api.getNotificationPreferences();
       if (!currentAction()) return;
-      const requested = nextSubscriptionRequest(templates, this.data.cycleRequestedTypes.length === 7 ? [] : this.data.cycleRequestedTypes);
+      const requested = nextSubscriptionRequest(templates, this.data.cycleRequestedTypes);
       if (!requested.length) {
-        this.setData({ cycleRequestedTypes: [] });
+        this.setData({ subscriptionComplete: true, enableLabel: '本次已完成' });
         return;
       }
       const result = await new Promise<Record<string, string>>((resolve, reject) => wx.requestSubscribeMessage({
@@ -117,19 +141,26 @@ Page({
       if (!currentAction()) return;
       const validCurrent = current.types.filter((type) => current.templateIds?.[type] === templates.find((item) => item.type === type)?.templateId);
       const accepted = mergeAcceptedSubscriptionTypes(validCurrent, requested, result);
-      const cycleRequestedTypes = Array.from(new Set([...(this.data.cycleRequestedTypes.length === 7 ? [] : this.data.cycleRequestedTypes), ...requested.map((item) => item.type)]));
+      const cycleRequestedTypes = Array.from(new Set([...this.data.cycleRequestedTypes, ...requested.map((item) => item.type)]));
       const templateIds = Object.fromEntries(templates.filter((item) => accepted.includes(item.type)).map((item) => [item.type, item.templateId]));
       await api.saveNotificationPreferences(accepted, templateIds);
       if (!currentAction()) return;
       const remaining = nextSubscriptionRequest(templates, cycleRequestedTypes);
+      const subscriptionComplete = remaining.length === 0;
       this.setData({
         cycleRequestedTypes,
         reminderText: remaining.length
-          ? '本组提醒已处理；请继续授权剩余提醒。'
-          : '本轮订阅已完成；需要更多提醒时可主动再次订阅。',
-        enableLabel: remaining.length ? '继续授权' : '再次订阅',
+          ? '第一步已完成，请完成最后一步。'
+          : accepted.length
+            ? '本次订单提醒设置已完成，进度也会保留在订单消息中。'
+            : '本次未订阅微信提醒，订单进度仍会保留在这里。',
+        enableLabel: remaining.length ? '完成第2步' : '本次已完成',
+        subscriptionComplete,
+        subscriptionOutcome: subscriptionComplete
+          ? accepted.length ? 'complete' : 'declined'
+          : 'pending',
       });
-      void wx.showToast({ title: accepted.length ? (remaining.length ? '本组授权已保存' : '订单提醒已授权') : '未授权微信提醒，请留意站内消息', icon: accepted.length ? 'success' : 'none' });
+      void wx.showToast({ title: accepted.length ? (remaining.length ? '第一步已保存' : '本次提醒设置完成') : '未授权微信提醒，请留意站内消息', icon: accepted.length ? 'success' : 'none' });
     } catch (error) {
       if (error instanceof AuthExpiredError) {
         if (!isOwnedAuthExpiry(error, action, customerAuth.captureSessionEpoch()) || !actionCoordinator.isActive(action)) return;

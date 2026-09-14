@@ -69,7 +69,7 @@ test("五个内部角色仅加载其默认页与可见菜单，USER 被后台拒
   expect(pickupResponse.status()).toBeLessThan(300);
   const point = (await pickupResponse.json()).data as { id: string };
   const matrix = [
-    ["SUPER_ADMIN", "人员与权限", "商品管理"],
+    ["SUPER_ADMIN", "运营工作台", "商品管理"],
     ["OPERATOR", "运营工作台", "团期管理"],
     ["CUSTOMER_SERVICE", "售后与异常", "售后与异常"],
     ["FINANCE", "财务管理", "财务管理"],

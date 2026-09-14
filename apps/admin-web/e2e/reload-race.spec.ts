@@ -86,6 +86,8 @@ test("同一身份的迟到员工列表响应不会覆盖创建后的最新刷�
   await page.getByLabel("新密码", { exact: true }).fill("reload race admin password");
   await page.getByLabel("确认新密码").fill("reload race admin password");
   await page.getByRole("button", { name: "保存新密码" }).click();
+  await expect(page.getByRole("heading", { name: "运营工作台" })).toBeVisible();
+  await page.getByRole("menuitem", { name: "人员与权限" }).click();
   await expect(page.getByRole("heading", { name: "人员与权限" })).toBeVisible();
   await expect.poll(() => firstStaffResponseHeld).toBe(true);
 

@@ -15,7 +15,7 @@ describe("displayLabel", () => {
     expect(displayLabel("SUSPENDED")).toBe("已停用");
     expect(displayLabel("INACTIVE")).toBe("已停用");
     expect(displayLabel("OPEN")).toBe("开售中");
-    expect(displayLabel("APPROVED_WAITING_FINANCE")).toBe("待财务退款");
+    expect(displayLabel("APPROVED_WAITING_FINANCE")).toBe("待退款");
   });
 
   it("keeps unknown codes readable instead of hiding them", () => {

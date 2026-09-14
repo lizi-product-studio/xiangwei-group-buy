@@ -54,6 +54,22 @@ export function getDeliveryActionLabels(input: {
   return labels;
 }
 
+export function getDeliveryNextStep(input: {
+  status: string;
+  batchStatus?: string;
+}): string {
+  if (input.status === "SITE_CONFIRMED") return "登记运输信息";
+  if (input.status === "VEHICLE_BOOKED")
+    return input.batchStatus === "IN_TRANSIT"
+      ? "等待自提点确认到货"
+      : "确认装袋并发车";
+  if (["IN_TRANSIT", "VEHICLE_DISPATCHED"].includes(input.status))
+    return "等待自提点确认到货";
+  if (["ARRIVED", "COMPLETED", "CLOSED"].includes(input.status))
+    return "已完成";
+  return "查看详情";
+}
+
 export function dispatchBlockReason(input: {
   campaignStatus?: string;
   planStatus: string;

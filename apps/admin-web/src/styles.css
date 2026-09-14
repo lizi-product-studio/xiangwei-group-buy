@@ -445,6 +445,8 @@ nav { display: grid; gap: 16px; }
 .content .ant-table-tbody .ant-btn-link { height: auto; min-height: 32px; padding: 4px 6px; font-size: 13px; white-space: normal; }
 .content .ant-table-tbody .ant-space { flex-wrap: wrap; gap: 2px 6px !important; }
 .content .ant-tag { padding: 2px 9px; border-radius: 20px; font-size: 11px; line-height: 19px; }
+.content .status-tag { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-weight: 600; }
+.content .status-tag__dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .content .ant-empty { padding: 30px 16px; color: var(--muted); }
 .content .ant-empty-description { color: var(--muted); line-height: 1.8; }
 .content .ant-descriptions-view { background: var(--paper); border-color: var(--line); }

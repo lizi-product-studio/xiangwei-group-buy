@@ -138,7 +138,7 @@ test("超管从网页创建员工，临时密码改密与撤权后的默认页�
   await page.getByLabel("新密码", { exact: true }).fill("p1a admin setup password");
   await page.getByLabel("确认新密码").fill("p1a admin setup password");
   await page.getByRole("button", { name: "保存新密码" }).click();
-  await expect(page.getByRole("heading", { name: "人员与权限" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "运营工作台" })).toBeVisible();
 
   await page.getByRole("button", { name: "打开账号菜单" }).click();
   await page.getByRole("button", { name: "修改我的密码" }).click();

@@ -107,7 +107,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
     admin.temporaryPassword,
     "community e2e admin password",
   );
-  await expect(page.getByRole("heading", { name: "人员与权限" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "运营工作台" })).toBeVisible();
   const area = await call<{ id: string }>(
     request,
     "/api/v1/admin/service-areas",
@@ -173,10 +173,10 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   // is exercised without relying on a synthetic default point. Refresh the
   // current admin workspace before selecting that real area in the UI.
   await page.reload();
-  await expect(page.getByRole("heading", { name: "人员与权限" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "运营工作台" })).toBeVisible();
   await expect(page.getByText("商品管理", { exact: true })).toBeVisible();
   await expect(page.getByText("团期管理", { exact: true })).toBeVisible();
-  await expect(page.getByText("配送与到货", { exact: true })).toBeVisible();
+  await expect(page.getByText("发货与运输", { exact: true })).toBeVisible();
   await page.getByText("商品管理", { exact: true }).click();
   await page.getByRole("button", { name: "新增商品" }).click();
   await page.getByLabel("商品名称").fill(`E2E 时蔬 ${suffix}`);
@@ -625,7 +625,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   await page.getByLabel("账号").fill(`admin.${suffix}`);
   await page.getByLabel("密码").fill("community e2e admin password");
   await page.getByRole("button", { name: /登\s*录/ }).click();
-  await expect(page.getByRole("heading", { name: "人员与权限" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "运营工作台" })).toBeVisible();
   const adminLogin = await request.fetch(`${apiBase}/api/v1/auth/admin/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -636,8 +636,8 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   });
   expect(adminLogin.status(), await adminLogin.text()).toBe(200);
   const adminToken = (await adminLogin.json()).data.accessToken as string;
-  await page.getByText("配送与到货", { exact: true }).click();
-  await expect(page.getByRole("heading", { name: "配送与到货" })).toBeVisible();
+  await page.getByText("发货与运输", { exact: true }).click();
+  await expect(page.getByRole("heading", { name: "发货与运输" })).toBeVisible();
   const deliverySnapshot = await request.fetch(`${apiBase}/api/v1/admin/community/deliveries`, {
     headers: { ...superHeaders, accept: "application/json" },
   });
@@ -645,7 +645,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   const deliveryData = (await deliverySnapshot.json()).data as Array<{ campaignTitle: string }>;
   expect(deliveryData.some((value) => value.campaignTitle === `E2E 紧急到货 ${suffix}`)).toBe(true);
   const arrivalTable = page
-    .getByRole("heading", { name: "点位到货", exact: true })
+    .getByRole("heading", { name: "到货与异常", exact: true })
     .locator("xpath=following-sibling::*[1]");
   const emergencyRow = arrivalTable
     .getByRole("row")
@@ -762,11 +762,11 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
     operatorLabelsDialog.getByText(normalOrder.orderNo, { exact: true }),
   ).toBeVisible();
   await operatorLabelsDialog.locator(".ant-modal-close").click();
-  await page.getByText("配送与到货", { exact: true }).click();
+  await page.getByText("发货与运输", { exact: true }).click();
   await expect(page.getByRole("button", { name: "逐商品确认到货" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "紧急代办到货" })).toHaveCount(0);
   const operatorArrivalTable = page
-    .getByRole("heading", { name: "点位到货", exact: true })
+    .getByRole("heading", { name: "到货与异常", exact: true })
     .locator("xpath=following-sibling::*[1]");
   const differenceRow = operatorArrivalTable
     .getByRole("row")
@@ -803,7 +803,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   // A slow response must not leave the confirm action live for a second
   // write: the first click owns the action until the refresh completes.
   await differenceRow
-    .getByRole("button", { name: "确认差异分配" })
+    .getByRole("button", { name: "确认异常范围" })
     .dblclick({ delay: 100 });
   await expect.poll(() => allocationPosts).toBe(1);
   await expect(page.getByText("已确认", { exact: true })).toBeVisible();

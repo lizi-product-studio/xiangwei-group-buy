@@ -3,6 +3,7 @@ import {
   adminLoadErrorText,
   apiUnavailableMessage,
   getDeliveryActionLabels,
+  getDeliveryNextStep,
   dispatchBlockReason,
   dispatchFailureText,
   getLogisticsViewState,
@@ -64,6 +65,13 @@ describe("logistics loading and action states", () => {
         emergencyProxy: true,
       }),
     ).toEqual(["紧急纠正运输信息"]);
+  });
+
+  it("describes the next business step without repeating the status", () => {
+    expect(getDeliveryNextStep({ status: "SITE_CONFIRMED" })).toBe("登记运输信息");
+    expect(getDeliveryNextStep({ status: "VEHICLE_BOOKED", batchStatus: "DRAFT" })).toBe("确认装袋并发车");
+    expect(getDeliveryNextStep({ status: "IN_TRANSIT", batchStatus: "IN_TRANSIT" })).toBe("等待自提点确认到货");
+    expect(getDeliveryNextStep({ status: "ARRIVED" })).toBe("已完成");
   });
 });
 
