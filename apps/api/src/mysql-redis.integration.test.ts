@@ -126,11 +126,36 @@ describe.skipIf(!databaseUrl || !redisUrl)(
       });
       expect(claim).toBeTruthy();
       await new Promise((resolve) => setTimeout(resolve, 20));
-      await expect(second.beginOrderNotificationSubmission({
-        id,
-        claimToken: `claim-${id}`,
-        attemptId: `attempt-${id}`,
-      })).resolves.toBeNull();
+      try {
+        await expect(second.beginOrderNotificationSubmission({
+          id,
+          claimToken: `claim-${id}`,
+          attemptId: `attempt-${id}`,
+        })).resolves.toBeNull();
+      } finally {
+        // The workflow runs this suite once in `check` and again for coverage
+        // against the same database. Finish our expired outbox row so the
+        // second run cannot claim test data left by the first run.
+        const cleanupToken = `cleanup-${id}`;
+        const cleanupAttempt = `cleanup-attempt-${id}`;
+        const cleanupClaim = (await first.claimPendingOrderNotifications(
+          1,
+          60_000,
+          cleanupToken,
+        )).find((value) => value.id === id);
+        if (cleanupClaim) {
+          await first.beginOrderNotificationSubmission({
+            id,
+            claimToken: cleanupToken,
+            attemptId: cleanupAttempt,
+          });
+          await first.markOrderNotificationSentIfSubmission(
+            id,
+            cleanupAttempt,
+            null,
+          );
+        }
+      }
     });
     it("connects to the real Redis queue and schedules a close job", async () => {
       await expect(scheduler.health()).resolves.toBe("ok");
