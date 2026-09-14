@@ -176,6 +176,7 @@ test("超管从网页创建员工，临时密码改密与撤权后的默认页�
   );
   expect(newPasswordLogin.status(), await newPasswordLogin.text()).toBe(200);
 
+  await page.getByRole("menuitem", { name: "人员与权限" }).click();
   await page.getByRole("button", { name: "新增员工" }).click();
   await page.getByLabel("姓名").fill("P1-A 点位负责人");
   await page.getByLabel("登录账号").fill(`p1a.manager.${suffix}`);

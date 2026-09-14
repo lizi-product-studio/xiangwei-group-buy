@@ -250,7 +250,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
     });
   });
   allowExpectedLocationVerificationFailure = false;
-  await page.getByRole("button", { name: "重试核验" }).click();
+  await page.getByRole("button", { name: "重新核验当前位置" }).click();
   await expect(page.getByText("所选位置已完成本次核验；可拖动图钉重新调整")).toBeVisible();
   await expect(page.getByText(/地图图钉坐标（只读确认）/)).toBeVisible();
   await page.locator(".leaflet-tile").first().evaluate((tile) => {

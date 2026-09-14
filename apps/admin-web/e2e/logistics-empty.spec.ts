@@ -84,12 +84,12 @@ test("配送 API 不可用时显示可恢复错误而不是空表", async ({ pag
     }),
   );
   await page.getByRole("menuitem", { name: "发货与运输" }).click();
-  await expect(page.getByText("配送数据加载失败", { exact: true })).toBeVisible();
+  await expect(page.getByText("发货数据加载失败", { exact: true })).toBeVisible();
   await expect(
     page.getByText(/后台服务不可用，数据加载失败。请确认已在项目根目录执行 pnpm dev/),
   ).toBeVisible();
   await expect(
-    page.getByText("暂无可配送团期，请先创建商品和团期", { exact: true }),
+    page.getByText("暂无可发货团期，请先创建商品和团期", { exact: true }),
   ).toHaveCount(0);
   await expect(page.getByRole("button", { name: "重试" })).toBeVisible();
   expect(failures).toEqual([]);
@@ -122,13 +122,13 @@ test("配送 API 正常返回空数据时提供创建团期引导", async ({ pag
   );
   await page.getByRole("menuitem", { name: "发货与运输" }).click();
   await expect(
-    page.getByText("暂无可配送团期，请先创建商品和团期", { exact: true }),
+    page.getByText("暂无可发货团期，请先创建商品和团期", { exact: true }),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "去创建团期" })).toBeVisible();
   await expect(
     page.getByText(/创建团期并绑定自提点后，运营可在此登记运输信息/),
   ).toBeVisible();
-  await expect(page.getByText(/授权点位负责人负责逐商品确认到货/)).toBeVisible();
+  await expect(page.getByText(/发车后由对应自提点确认到货/)).toBeVisible();
   await page.getByRole("button", { name: "去创建团期" }).click();
   await expect(page.getByRole("heading", { name: "团期管理" })).toBeVisible();
   expect(failures).toEqual([]);

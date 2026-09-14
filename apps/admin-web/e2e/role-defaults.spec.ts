@@ -79,7 +79,7 @@ test("五个内部角色仅加载其默认页与可见菜单，USER 被后台拒
     const session = await createStaff(browser, role, role === "PICKUP_MANAGER" ? [point.id] : []);
     await expect(session.page.getByRole("heading", { name: heading })).toBeVisible();
     await expect(session.page.getByRole("button", { name: "打开账号菜单" })).toContainText(
-      role === "SUPER_ADMIN" ? `默认页 ${role}` : session.username,
+      session.username,
     );
     await expect(session.page.getByRole("menuitem", { name: menu })).toBeVisible();
     if (role !== "SUPER_ADMIN")
