@@ -90,6 +90,16 @@ describe('home remote-service recovery', () => {
       unitPriceCents: 100,
       stock: 10,
       soldQuantity: 0,
+    }, {
+      skuId: 'sku-2',
+      title: '鲜玉米',
+      category: '鲜食',
+      origin: '本地',
+      skuName: '四根一份',
+      imageUrl: '/api/v1/product-images/corn.webp',
+      unitPriceCents: 200,
+      stock: 10,
+      soldQuantity: 0,
     }],
   } as CampaignDto;
 
@@ -108,7 +118,7 @@ describe('home remote-service recovery', () => {
 
     expect(listCampaigns).toHaveBeenCalledTimes(2);
     expect(page.data.error).toBe('');
-    expect(page.data.campaigns).toHaveLength(1);
+    expect(page.data.campaigns).toHaveLength(2);
     expect(page.data.loading).toBe(false);
   });
   it('distinguishes unavailable service from a selected point awaiting its next campaign', async () => {
@@ -128,6 +138,28 @@ describe('home remote-service recovery', () => {
     expect(page.data.allProducts).toEqual([]);
     expect(page.data.deliveryText).toBe('本期好物正在筹备，开团后即可选购');
     expect(page.data.pickupPoint).toMatchObject({ id: 'point-1' });
+  });
+
+  it('refreshes image bindings when switching a filtered category back to all products', async () => {
+    listCampaigns.mockResolvedValueOnce([campaign]);
+    const page = await loadPage();
+    await page.loadCampaigns.call(page);
+    const firstRefreshKey = page.data.imageRefreshKey;
+    const changeCategory = (page as unknown as { changeCategory: (event: unknown) => void }).changeCategory;
+
+    changeCategory.call(page, { currentTarget: { dataset: { category: '鲜食' } } });
+    expect(page.data.campaigns).toHaveLength(1);
+    expect((page.data.campaigns as Array<{ category: string }>)[0]?.category).toBe('鲜食');
+    const filteredRefreshKey = page.data.imageRefreshKey;
+    expect(filteredRefreshKey).toBe((firstRefreshKey as number) + 1);
+
+    changeCategory.call(page, { currentTarget: { dataset: { category: '全部' } } });
+    expect(page.data.campaigns).toHaveLength(2);
+    expect(page.data.imageRefreshKey).toBe((filteredRefreshKey as number) + 1);
+    expect((page.data.campaigns as Array<{ imageUrl: string | null }>).map((item) => item.imageUrl)).toEqual([
+      null,
+      '/api/v1/product-images/corn.webp',
+    ]);
   });
 
 });

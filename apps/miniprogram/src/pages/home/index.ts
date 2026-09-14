@@ -38,6 +38,7 @@ Page({
     activeCategory: '全部', area: null as ServiceAreaSelection | null,pickupPoint:null as PickupPointSelection|null,
     deliveryText: '下单前确认固定自提点，到货时间会持续更新',
     cartCount: 0,
+    imageRefreshKey: 0,
     availableAreaCount: 0,
   },
 
@@ -62,15 +63,15 @@ Page({
         })));
       const categories = [...new Set(campaigns.map((item) => item.category))];
       const categoryItems: CategoryItem[] = [
-        { value: '全部', label: '全部好物', icon: CATEGORY_ICON_PATHS[0]! },
+        { value: '全部', label: '全部', icon: CATEGORY_ICON_PATHS[0]! },
         ...categories.map((value, index) => ({ value, label: value, icon: CATEGORY_ICON_PATHS[(index + 1) % CATEGORY_ICON_PATHS.length]! })),
       ];
       const first = campaigns[0];
       const deliveryText = first?.deliveryPlan?.pickupPointId
-        ? `固定自提点已选 · 预计 ${first.arrivalText} 到货`
+        ? `截单 ${first.cutoffText} · 预计 ${first.arrivalText} 到货`
         : selectedPoint ? '本期好物正在筹备，开团后即可选购' : '请选择方便领取的固定自提点';
       const currentCartCount = readCartCount();
-      this.setData({ availableAreaCount: areaContext.areas.length, campaigns, allProducts: campaigns, categories, categoryItems, activeCategory: '全部', area: areaContext.selected,pickupPoint:selectedPoint, deliveryText, cartCount: shouldShowFloatingCart(currentCartCount) ? currentCartCount : 0 });
+      this.setData({ availableAreaCount: areaContext.areas.length, campaigns, allProducts: campaigns, categories, categoryItems, activeCategory: '全部', imageRefreshKey: this.data.imageRefreshKey + 1, area: areaContext.selected,pickupPoint:selectedPoint, deliveryText, cartCount: shouldShowFloatingCart(currentCartCount) ? currentCartCount : 0 });
     } catch (error) {
       this.setData({ error: customerErrorMessage(error, '商品加载失败，请稍后重试') });
     } finally { this.setData({ loading: false }); }
@@ -86,6 +87,6 @@ Page({
   openCart() { void wx.switchTab({ url: '/pages/cart/index' }); },
   changeCategory(event: WechatMiniprogram.BaseEvent) {
     const activeCategory = event.currentTarget.dataset.category as string;
-    this.setData({ activeCategory, campaigns: activeCategory === '全部' ? this.data.allProducts : this.data.allProducts.filter((item) => item.category === activeCategory) });
+    this.setData({ activeCategory, imageRefreshKey: this.data.imageRefreshKey + 1, campaigns: activeCategory === '全部' ? this.data.allProducts : this.data.allProducts.filter((item) => item.category === activeCategory) });
   },
 });

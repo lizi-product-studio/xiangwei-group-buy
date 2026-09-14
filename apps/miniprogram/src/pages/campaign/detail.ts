@@ -7,7 +7,6 @@ import {
   estimatedArrivalText,
   formatChinaDateTime,
   isCampaignPurchasable,
-  pickupDeadlineText,
   unformedRuleText,
 } from "../../utils/consumer-display";
 import {
@@ -16,7 +15,6 @@ import {
 } from "../../utils/service-area";
 import {
   addCartLine,
-  cartCount,
   clearCart,
   readCart,
   saveCheckoutDraft,
@@ -64,7 +62,6 @@ Page({
     campaign: null as CampaignDto | null,
     product: null as CampaignDto["items"][number] | null,
     cutoffText: "",
-    dispatchText: "",
     quantity: 1,
     loading: true,
     error: "",
@@ -73,14 +70,12 @@ Page({
     deliveryNote: "",
     total: "0.00",
     priceText: "0.00",
-    cartCount: 0,
     soldOut: false,
     campaignSoldQuantity: 0,
     progressPercent: 0,
     countdownText: "",
     estimatedArrivalText: "",
     unformedRuleText: "",
-    pickupDeadlineRule: pickupDeadlineText(),
     pickupPoint: null as PickupPointSelection | null,
     canBuy: false,
   },
@@ -124,7 +119,6 @@ Page({
         deliveryTitle: delivery.title,
         deliveryNote: delivery.note,
         pickupPoint,
-        cartCount: cartCount(),
         soldOut: product.stock - product.soldQuantity <= 0,
         campaignSoldQuantity,
         progressPercent: Math.min(
@@ -134,7 +128,6 @@ Page({
         priceText: formatMoney(product.unitPriceCents),
         total: formatMoney(product.unitPriceCents * this.data.quantity),
         cutoffText: formatChinaDateTime(campaign.cutoffAt, true),
-        dispatchText: formatChinaDateTime(campaign.dispatchAt),
         countdownText: cutoffCountdown(campaign.cutoffAt),
         estimatedArrivalText: arrivalText ?? "预计到货时间未配置，本团暂不可购买",
         unformedRuleText: unformedRuleText(campaign),
@@ -157,7 +150,6 @@ Page({
 
   async onShow() {
     loadCoordinator.show();
-    this.setData({ cartCount: cartCount() });
     if (!this.data.campaign) return;
     try {
       this.setData({
@@ -334,10 +326,6 @@ Page({
       },
       draft.items[0]!,
     );
-    this.setData({ cartCount: cartCount() });
     void wx.showToast({ title: "已加入购物车", icon: "success" });
-  },
-  openCart() {
-    void wx.switchTab({ url: "/pages/cart/index" });
   },
 });

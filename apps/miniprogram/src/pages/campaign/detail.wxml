@@ -9,14 +9,15 @@
     <view class="ui-view time-row"><text class="ui-text">截单时间</text><text class="ui-text">{{cutoffText}}</text></view>
     <view class="ui-view countdown">{{countdownText}}</view>
     <view class="ui-view time-row"><text class="ui-text">预计到货</text><text class="ui-text">{{estimatedArrivalText}}</text></view>
-    <view class="ui-view time-row"><text class="ui-text">计划发车</text><text class="ui-text">{{dispatchText}}</text></view>
     <text class="ui-text group-card__explain">最小成团件数：{{campaign.minTotalQuantity}} 件。{{unformedRuleText}}</text>
   </view>
   <view class="ui-view pickup-card">
-    <view class="ui-view" bindtap="openPickup"><image class="ui-image pickup-card__asset" src="/assets/location-green.png" mode="aspectFit"/><view class="ui-view"><text class="ui-text">{{area ? area.name + ' · ' + deliveryTitle : '请选择本团收货区域'}}</text><text class="ui-text">{{deliveryNote}}</text><text class="ui-text" wx:if="{{pickupPoint.businessHours}}">营业时间：{{pickupPoint.businessHours}}</text><text class="ui-text" wx:if="{{pickupPoint.pickupInstructions}}">领取提示：{{pickupPoint.pickupInstructions}}</text><text class="ui-text" wx:if="{{pickupPoint.contactName || pickupPoint.contactPhone}}">联系人：{{pickupPoint.contactName || '点位负责人'}} {{pickupPoint.contactPhone}}</text></view></view>
-    <view class="ui-view pickup-card__tools"><text class="ui-text" bindtap="openPickup">详情 ›</text><text class="ui-text" catchtap="openLocation">一键导航</text><text class="ui-text" catchtap="callPickupPoint">联系点位</text></view>
+    <text class="ui-text pickup-card__heading">本团固定自提点</text>
+    <view class="ui-view pickup-card__row">
+      <image class="ui-image pickup-card__asset" src="/assets/pickup-point.jpg" mode="aspectFill" bindtap="openPickup"/>
+      <view class="ui-view pickup-card__content" bindtap="openPickup"><text class="ui-text">{{area ? deliveryTitle : '请选择本团收货区域'}}</text><text class="ui-text">{{deliveryNote}}</text><text class="ui-text" wx:if="{{pickupPoint.businessHours}}">{{pickupPoint.businessHours}} · 点位负责人 {{pickupPoint.contactName || '未配置'}}</text></view>
+      <view class="ui-view pickup-card__tools"><text class="ui-text" catchtap="openLocation">导航</text><text class="ui-text" catchtap="callPickupPoint">电话</text></view>
+    </view>
   </view>
-  <view class="ui-view rule-card"><text class="ui-text">领取期限</text><text class="ui-text">{{pickupDeadlineRule}}</text></view>
-  <view class="ui-view promise"><view class="ui-view"><text class="ui-text">✓</text><text class="ui-text">未成团按公示规则处理</text></view><view class="ui-view"><text class="ui-text">✓</text><text class="ui-text">一团固定一个自提点</text></view><view class="ui-view"><text class="ui-text">✓</text><text class="ui-text">到货后凭码领取</text></view></view>
-  <view class="ui-view buy-bar"><view class="ui-view cart-shortcut" bindtap="openCart"><image class="ui-image cart-shortcut__icon" src="/assets/tab-cart-default.png" mode="aspectFit"/><text class="ui-text">购物车</text><text class="ui-text cart-shortcut__count" wx:if="{{cartCount}}">{{cartCount}}</text></view><view class="ui-view buy-actions"><view class="ui-view stepper"><text class="ui-text" data-step="-1" bindtap="changeQuantity">−</text><text class="ui-text">{{quantity}}</text><text class="ui-text" data-step="1" bindtap="changeQuantity">＋</text></view><button class="ui-button {{!area || soldOut || !canBuy ? 'ui-disabled' : ''}} cart-button" disabled="{{!area || soldOut || !canBuy}}" bindtap="addToCart">加入购物车</button><button class="ui-button {{!area || soldOut || !canBuy ? 'ui-disabled' : ''}} primary-button" disabled="{{!area || soldOut || !canBuy}}" bindtap="goCheckout">{{soldOut ? '已售罄' : (!canBuy ? '暂不可购买' : '立即购买')}}</button></view></view>
+  <view class="ui-view buy-bar"><view class="ui-view stepper"><text class="ui-text" data-step="-1" bindtap="changeQuantity">−</text><text class="ui-text">{{quantity}}</text><text class="ui-text" data-step="1" bindtap="changeQuantity">＋</text></view><button class="ui-button {{!area || soldOut || !canBuy ? 'ui-disabled' : ''}} cart-button" disabled="{{!area || soldOut || !canBuy}}" bindtap="addToCart">加入购物车</button><button class="ui-button {{!area || soldOut || !canBuy ? 'ui-disabled' : ''}} primary-button" disabled="{{!area || soldOut || !canBuy}}" bindtap="goCheckout">{{soldOut ? '已售罄' : (!canBuy ? '暂不可购买' : '立即购买')}}</button></view>
 </view>
