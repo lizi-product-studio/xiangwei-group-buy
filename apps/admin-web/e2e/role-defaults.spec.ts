@@ -69,11 +69,11 @@ test("五个内部角色仅加载其默认页与可见菜单，USER 被后台拒
   expect(pickupResponse.status()).toBeLessThan(300);
   const point = (await pickupResponse.json()).data as { id: string };
   const matrix = [
-    ["SUPER_ADMIN", "运营工作台", "商品管理"],
+    ["SUPER_ADMIN", "运营工作台", "商品列表"],
     ["OPERATOR", "运营工作台", "团期管理"],
     ["CUSTOMER_SERVICE", "售后与异常", "售后与异常"],
-    ["FINANCE", "财务管理", "财务管理"],
-    ["PICKUP_MANAGER", "我的点位工作台", "我的点位工作台"],
+    ["FINANCE", "退款待办", "退款待办"],
+    ["PICKUP_MANAGER", "到货确认", "到货确认"],
   ] as const;
   for (const [role, heading, menu] of matrix) {
     const session = await createStaff(browser, role, role === "PICKUP_MANAGER" ? [point.id] : []);
@@ -83,9 +83,9 @@ test("五个内部角色仅加载其默认页与可见菜单，USER 被后台拒
     );
     await expect(session.page.getByRole("menuitem", { name: menu })).toBeVisible();
     if (role !== "SUPER_ADMIN")
-      await expect(session.page.getByText("人员与权限", { exact: true })).toHaveCount(0);
+      await expect(session.page.getByText("员工与权限", { exact: true })).toHaveCount(0);
     if (role === "PICKUP_MANAGER")
-      await expect(session.page.getByText("商品管理", { exact: true })).toHaveCount(0);
+      await expect(session.page.getByText("商品列表", { exact: true })).toHaveCount(0);
     expect(session.failures).toEqual([]);
     await session.context.close();
   }
@@ -104,7 +104,7 @@ test("后台框架提供高对比账号入口、可展开分组和运营可读�
   const menu = session.page.locator(".app-sider > .ant-layout-sider-children > .ant-menu");
   await expect(menu).toHaveCSS("overflow-y", "auto");
   await expect(menu).toHaveCSS("overflow-x", "hidden");
-  const permissionItem = session.page.getByRole("menuitem", { name: "人员与权限" });
+  const permissionItem = session.page.getByRole("menuitem", { name: "员工与权限" });
   const menuBox = await menu.boundingBox();
   const accountBounds = await accountPanel.boundingBox();
   expect(menuBox).not.toBeNull();
@@ -119,15 +119,15 @@ test("后台框架提供高对比账号入口、可展开分组和运营可读�
   expect(accountBox?.y ?? 0).toBeGreaterThan(500);
   const account = accountPanel.getByRole("button", { name: "打开账号菜单" });
   await expect(account).toBeVisible();
-  await expect(account).toHaveCSS("color", "rgb(23, 38, 58)");
+  await expect(account).toHaveCSS("color", "rgb(35, 49, 45)");
   await expect(account.locator("small")).toHaveCSS("color", "rgb(95, 104, 117)");
 
-  const accessGroup = session.page.getByRole("menuitem", { name: "权限与审计" });
+  const accessGroup = session.page.getByRole("menuitem", { name: "系统" });
   await expect(accessGroup).toHaveAttribute("aria-expanded", "true");
-  await expect(session.page.getByRole("menuitem", { name: "人员与权限" })).toBeVisible();
-  await session.page.getByRole("menuitem", { name: "审计记录" }).click();
-  await expect(session.page.getByLabel("当前位置")).toContainText("权限与审计");
-  await expect(session.page.getByLabel("当前位置")).toContainText("审计记录");
+  await expect(session.page.getByRole("menuitem", { name: "员工与权限" })).toBeVisible();
+  await session.page.getByRole("menuitem", { name: "操作日志" }).click();
+  await expect(session.page.getByLabel("当前位置")).toContainText("系统");
+  await expect(session.page.getByLabel("当前位置")).toContainText("操作日志");
   await expect(session.page.getByRole("columnheader", { name: "操作内容" })).toBeVisible();
   await expect(session.page.getByRole("columnheader", { name: "追踪编号" })).toBeVisible();
   await expect(session.page.getByText("创建员工", { exact: true }).first()).toBeVisible();
@@ -160,14 +160,12 @@ test("后台框架提供高对比账号入口、可展开分组和运营可读�
   await session.page.screenshot({ path: testInfo.outputPath("account-menu.png") });
   await account.click();
   await expect(accountIdentity).toBeHidden();
-  const operationsGroup = session.page.getByRole("menuitem", { name: "日常运营" });
+  const operationsGroup = session.page.getByRole("menuitem", { name: "商品", exact: true });
   const operationsSubmenu = operationsGroup.locator("xpath=..");
   await operationsGroup.click();
   await expect(operationsGroup).toHaveAttribute("aria-expanded", "false");
-  await expect(operationsSubmenu.getByRole("menuitem", { name: "工作台" })).toBeHidden();
-  await expect(operationsSubmenu.getByRole("menuitem", { name: "商品管理" })).toBeHidden();
-  await expect(operationsSubmenu.getByRole("menuitem", { name: "团期管理" })).toBeHidden();
-  await expect(operationsSubmenu.getByRole("menuitem", { name: "订单管理" })).toBeHidden();
+  await expect(operationsSubmenu.getByRole("menuitem", { name: "商品列表" })).toBeHidden();
+  await expect(operationsSubmenu.getByRole("menuitem", { name: "分类管理" })).toBeHidden();
   await expect(operationsSubmenu.locator(".ant-menu-sub")).toBeHidden();
   await session.page.screenshot({ path: testInfo.outputPath("sidebar-collapsed-group.png") });
   expect(session.failures).toEqual([]);

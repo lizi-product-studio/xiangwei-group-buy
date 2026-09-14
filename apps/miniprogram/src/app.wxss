@@ -1,9 +1,9 @@
 page {
   --ink: #23312d;
   --paper: #fffefa;
-  --brand: #f05232;
+  --brand: #c2412d;
   --brand-soft: #fff0eb;
-  --success: #597a43;
+  --success: #3f6b35;
   --line: #e9e7df;
   min-height: 100%;
   color: var(--ink);
@@ -26,4 +26,12 @@ button::after { border: 0; }
 
 /* Shared visual foundation; scoped actions preserve each page's business guards. */
 .primary-button,.secondary-button {box-sizing:border-box;min-height:88rpx;border-radius:18rpx;font-size:28rpx;line-height:1.5;display:flex;align-items:center;justify-content:center;}
-.secondary-button {color:#597a43;background:#fffefa;border:1rpx solid #e9e7df;}
+.secondary-button {color:#3f6b35;background:#fffefa;border:1rpx solid #e9e7df;}
+
+/* Semantic status colors are display-only. */
+.order-status-label {display:inline-block;padding:6rpx 14rpx;border-radius:10rpx;font-size:24rpx!important;line-height:1.5;white-space:nowrap;}
+.tone-pending {color:#a73524!important;background:#fff0eb!important;}
+.tone-progress {color:#245c86!important;background:#edf4fa!important;}
+.tone-success {color:#3f6b35!important;background:#edf5e9!important;}
+.tone-warning {color:#85510b!important;background:#fff6df!important;}
+.tone-neutral {color:#626c60!important;background:#f0f1ed!important;}

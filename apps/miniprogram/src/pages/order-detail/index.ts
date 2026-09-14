@@ -8,6 +8,7 @@ import {
   cancellationStatusText,
   formatChinaDateTime,
   orderStatusCopy,
+  orderStatusTone,
   pickupDeadlineText,
   pickupWindowStatusText,
   qualityDeadlineText,
@@ -31,6 +32,7 @@ interface OrderDetailView extends OrderDto {
   totalText: string;
   createdText: string;
   statusText: string;
+  statusTone: string;
   statusHint: string;
   canPay: boolean;
   canCancel: boolean;
@@ -198,6 +200,7 @@ Page({
           totalText: formatMoney(order.totalCents),
           createdText: formatDateTime(order.createdAt),
           statusText: status.text,
+          statusTone: orderStatusTone(order.status),
           statusHint: status.hint,
           canPay: order.status === "PENDING_PAYMENT",
           canCancel: [

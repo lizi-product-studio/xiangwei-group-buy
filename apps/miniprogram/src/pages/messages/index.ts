@@ -123,7 +123,7 @@ Page({
         await api.saveNotificationPreferences([]);
         if (!currentAction()) return;
         this.setData({ subscriptionComplete: true, subscriptionOutcome: 'declined', enableLabel: '仅站内提醒' });
-        void wx.showToast({ title: '暂未配置微信提醒，将由客服人工通知', icon: 'none' });
+        void wx.showToast({ title: '暂未开通订阅提醒，请留意站内订单消息', icon: 'none' });
         return;
       }
       const current = await api.getNotificationPreferences();

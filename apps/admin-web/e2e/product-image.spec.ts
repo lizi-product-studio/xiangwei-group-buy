@@ -18,7 +18,7 @@ test('商品主图真实上传、公开读取、编辑保留与移除', async ({
   await page.getByLabel('新密码', { exact: true }).fill('image upload password');
   await page.getByLabel('确认新密码').fill('image upload password');
   await page.getByRole('button', { name: '保存新密码' }).click();
-  await page.getByText('商品管理', { exact: true }).click();
+  await page.getByText('商品列表', { exact: true }).click();
   await page.getByRole('button', { name: '新增商品' }).click();
   const dialog = page.getByRole('dialog');
   const title = `主图商品${suffix}`;

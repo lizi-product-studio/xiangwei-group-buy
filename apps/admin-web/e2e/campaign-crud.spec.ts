@@ -89,7 +89,7 @@ test('网页草稿过期恢复、编辑开售、无引用删除与消费者只�
   // Default E2E has no persisted phone-bound consumers. Verify the real
   // empty/search query here; populated masked details are covered by API tests.
   const listed = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/admin/consumers');
-  await page.getByRole('menuitem', { name: '消费者管理' }).click();
+  await page.getByRole('menuitem', { name: '用户管理' }).click();
   const listResponse = await listed;
   expect(listResponse.ok()).toBeTruthy();
   expect((await listResponse.json()).data).toMatchObject({ page: 1, pageSize: 20 });

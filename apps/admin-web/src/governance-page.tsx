@@ -159,11 +159,11 @@ export function GovernancePage({
       <header className="section-header">
         <div>
           <Typography.Title level={2}>
-            {canHandleInterests ? "运营治理" : "通知处理"}
+            {canHandleInterests ? "区域开通意向" : "通知处理"}
           </Typography.Title>
           <Typography.Paragraph type="secondary">
             {canHandleInterests
-              ? "处理通知失败与区域开通意向；仅记录可复核的处理结果。"
+              ? "登记区域开通需求与联系结果；记录意向不代表服务已开通。"
               : "处理未成功送达的订单提醒，并记录可复核的联系结果。"}
           </Typography.Paragraph>
         </div>
@@ -187,7 +187,7 @@ export function GovernancePage({
         <Alert
           type="info"
           showIcon
-          message="系统未采集手机号"
+          message="此队列不展示联系方式"
           description="人工完成只记录已通过既有合规渠道处理的结果，不代表本系统提供联系方式。"
           style={{ marginBottom: 16 }}
         />

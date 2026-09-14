@@ -143,3 +143,12 @@ export function qualityDeadlineText(deadlineAt: string): string {
 export function shouldShowFloatingCart(cartItemCount: number): boolean {
   return Number.isFinite(cartItemCount) && cartItemCount > 0;
 }
+
+/** Display only: never determines allowed actions or financial state. */
+export function orderStatusTone(status: string): string {
+  if (["PICKED_UP", "COMPLETED", "READY_FOR_PICKUP"].includes(status)) return "success";
+  if (["CANCELLED", "REFUNDED"].includes(status)) return "neutral";
+  if (status === "REFUNDING") return "warning";
+  if (status === "PENDING_PAYMENT") return "pending";
+  return "progress";
+}

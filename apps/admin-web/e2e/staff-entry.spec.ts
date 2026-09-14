@@ -176,7 +176,7 @@ test("超管从网页创建员工，临时密码改密与撤权后的默认页�
   );
   expect(newPasswordLogin.status(), await newPasswordLogin.text()).toBe(200);
 
-  await page.getByRole("menuitem", { name: "人员与权限" }).click();
+  await page.getByRole("menuitem", { name: "员工与权限" }).click();
   await page.getByRole("button", { name: "新增员工" }).click();
   await page.getByLabel("姓名").fill("P1-A 点位负责人");
   await page.getByLabel("登录账号").fill(`p1a.manager.${suffix}`);
@@ -217,9 +217,9 @@ test("超管从网页创建员工，临时密码改密与撤权后的默认页�
     .getByLabel("确认新密码")
     .fill("p1a manager setup password");
   await managerPage.getByRole("button", { name: "保存新密码" }).click();
-  await expect(managerPage.getByRole("heading", { name: "我的点位工作台" })).toBeVisible();
+  await expect(managerPage.getByRole("heading", { name: "到货确认" })).toBeVisible();
   await expect(managerPage.getByRole("button", { name: "打开账号菜单" })).toContainText(`p1a.manager.${suffix}`);
-  await expect(managerPage.getByText("商品管理", { exact: true })).toHaveCount(0);
+  await expect(managerPage.getByText("商品列表", { exact: true })).toHaveCount(0);
   await expect(managerPage.getByText(`P1-A 授权点 ${suffix}`, { exact: true })).toHaveCount(0);
 
   const staffRow = await findStaffRow(page, "P1-A 点位负责人");
@@ -346,11 +346,11 @@ test("同一标签切换账号会清空旧工作区，客服和财务刷新只�
 
   await page.goto("/");
   await loginWithTemporaryPassword(managerA);
-  await expect(page.getByRole("heading", { name: "我的点位工作台" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "到货确认" })).toBeVisible();
   await logout();
-  await expect(page.getByRole("heading", { name: "我的点位工作台" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "到货确认" })).toHaveCount(0);
   await loginWithTemporaryPassword(managerB);
-  await expect(page.getByRole("heading", { name: "我的点位工作台" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "到货确认" })).toBeVisible();
   await expect(page.getByText(`换号点位 A ${suffix}`, { exact: true })).toHaveCount(0);
 
   await logout();
@@ -387,7 +387,7 @@ test("同一标签切换账号会清空旧工作区，客服和财务刷新只�
     }
   });
   await loginWithTemporaryPassword(finance);
-  await expect(page.getByRole("heading", { name: "财务管理" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "退款待办" })).toBeVisible();
   await expect.poll(() => financeReads.length).toBeGreaterThanOrEqual(2);
   // Create a payment after the finance page's initial read.  The only way it
   // can appear in the visible ledger is the current-page refresh below.

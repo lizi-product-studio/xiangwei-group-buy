@@ -50,7 +50,7 @@ test('同一主图商品与网页开售团贯穿运输到货及分批核销（�
   const screenshot = async (name: string) => { await expect(page.getByRole('dialog')).toHaveCount(0); await expect(page.locator('.ant-message-notice')).toHaveCount(0); const path = testInfo.outputPath(`${name}.png`); await page.screenshot({ path, fullPage: true }); await testInfo.attach(name, { path, contentType: 'image/png' }); };
   await page.goto('/');
   await login(page, `flow.op.${suffix}`, operator.temporaryPassword);
-  await page.getByRole('menuitem', { name: '商品管理' }).click();
+  await page.getByRole('menuitem', { name: '商品列表' }).click();
   await page.getByRole('button', { name: '新增商品' }).click();
   await page.getByLabel('商品名称').fill(productTitle);
   await page.getByLabel('分类', { exact: true }).click();
@@ -131,7 +131,7 @@ test('同一主图商品与网页开售团贯穿运输到货及分批核销（�
   await page.getByRole('button', { name: '打开账号菜单' }).click();
   await page.getByRole('menuitem', { name: '退出登录' }).click();
   await login(page, `flow.pm.${suffix}`, manager.temporaryPassword);
-  await expect(page.getByRole('heading', { name: '我的点位工作台' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '到货确认' })).toBeVisible();
   await expect(page.getByRole('button', { name: '紧急代办到货' })).toHaveCount(0);
   await page.getByRole('row').filter({ hasText: campaignTitle }).getByRole('button', { name: '逐商品确认到货' }).click();
   await expect(page.getByLabel('紧急代办原因')).toHaveCount(0);
@@ -147,6 +147,7 @@ test('同一主图商品与网页开售团贯穿运输到货及分批核销（�
   const codeResponse = await request.get(`${apiBase}/api/v1/pickup-code?orderId=${order.id}`, { headers: consumer });
   expect(codeResponse.ok()).toBeTruthy();
   const code: string = (await codeResponse.json()).data.code;
+  await page.getByRole('menuitem', { name: '领取核销', exact: true }).click();
   await page.getByRole('combobox').click();
   await page.getByText(`${pointName} · 东城区社区服务站 1 号`, { exact: true }).click();
   await page.getByPlaceholder('订单号').fill(order.orderNo);

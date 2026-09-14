@@ -4,31 +4,27 @@
     <view class="ui-view card-head" data-filter="ALL" bindtap="openOrders">
       <view class="ui-view card-head__title">
         <text class="ui-text">我的订单</text>
-        <text wx:if="{{loggedIn && !loading}}" class="ui-text card-head__count">共 {{orderTotal}} 单</text>
+        <text wx:if="{{loggedIn && !loading && !error}}" class="ui-text card-head__count">共 {{orderTotal}} 单</text>
       </view>
       <view class="ui-view card-head__link"><text class="ui-text">全部订单</text><image class="ui-image" src="/assets/right-gray.png" mode="aspectFit" aria-hidden="true" /></view>
     </view>
     <view wx:if="{{loggedIn && error}}" class="ui-view summary-error" bindtap="loadSummary" role="alert">{{error}}，点击重试</view>
     <view wx:else class="ui-view order-statuses">
       <view class="ui-view order-status" data-filter="PENDING" bindtap="openOrders">
-        <view class="ui-view status-icon"><image class="ui-image" src="/assets/wallet-green.png" mode="aspectFit" aria-label="待付款" /></view>
+        <text class="ui-text order-count">{{loggedIn && !loading && !error ? counts.pending : '—'}}</text>
         <text class="ui-text">待付款</text>
-        <text wx:if="{{counts.pending}}" class="ui-text status-count">{{counts.pending > 99 ? '99+' : counts.pending}}</text>
       </view>
       <view class="ui-view order-status" data-filter="ACTIVE" bindtap="openOrders">
-        <view class="ui-view status-icon"><image class="ui-image" src="/assets/active-green.png" mode="aspectFit" aria-label="进行中" /></view>
+        <text class="ui-text order-count">{{loggedIn && !loading && !error ? counts.active : '—'}}</text>
         <text class="ui-text">进行中</text>
-        <text wx:if="{{counts.active}}" class="ui-text status-count">{{counts.active > 99 ? '99+' : counts.active}}</text>
       </view>
       <view class="ui-view order-status" data-filter="READY" bindtap="openOrders">
-        <view class="ui-view status-icon"><image class="ui-image" src="/assets/pickup-green.png" mode="aspectFit" aria-label="待自提" /></view>
+        <text class="ui-text order-count">{{loggedIn && !loading && !error ? counts.ready : '—'}}</text>
         <text class="ui-text">待自提</text>
-        <text wx:if="{{counts.ready}}" class="ui-text status-count">{{counts.ready > 99 ? '99+' : counts.ready}}</text>
       </view>
       <view class="ui-view order-status" data-filter="AFTER" bindtap="openOrders">
-        <view class="ui-view status-icon"><image class="ui-image" src="/assets/refund-green.png" mode="aspectFit" aria-label="退款售后" /></view>
+        <text class="ui-text order-count">{{loggedIn && !loading && !error ? counts.afterSale : '—'}}</text>
         <text class="ui-text">退款售后</text>
-        <text wx:if="{{counts.afterSale}}" class="ui-text status-count">{{counts.afterSale > 99 ? '99+' : counts.afterSale}}</text>
       </view>
     </view>
   </view>

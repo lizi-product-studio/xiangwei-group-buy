@@ -281,6 +281,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
   await completeTemporaryPasswordInBrowser(page, operator.username, operator.temporaryPassword, password);
   await expect(page.getByRole("heading", { name: "运营工作台" })).toBeVisible();
   await page.getByRole("menuitem", { name: "售后与异常" }).click();
+  await page.getByRole("menuitem", { name: "取消申请", exact: true }).click();
   const cancelApproveRow = page.getByRole("row").filter({ hasText: cancelA.orderNo });
   await cancelApproveRow.getByRole("button", { name: /批\s*准/ }).click();
   await page.getByRole("dialog", { name: "填写取消批准理由" }).getByLabel("审核理由").fill("运营确认可以原路退款");
@@ -296,7 +297,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
 
   await logout(page);
   await completeTemporaryPasswordInBrowser(page, finance.username, finance.temporaryPassword, password);
-  await expect(page.getByRole("heading", { name: "财务管理" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "退款待办" })).toBeVisible();
   const financeCancellation = page.getByRole("region", { name: "截单后取消退款" }).getByRole("row").filter({ hasText: cancelA.orderNo });
   await expect(
     financeCancellation.getByRole("button", { name: "执行退款" }),
@@ -415,10 +416,10 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
     await page.getByRole("dialog", { name: "二次确认品质售后处理" }).getByRole("button", { name: "确认提交" }).click();
     await expect(row.getByText("待运营审核", { exact: true })).toBeVisible();
   }
-  await page.getByRole("menuitem", { name: "运营治理" }).click();
-  await expect(page.getByRole("heading", { name: "运营治理" })).toBeVisible();
+  await page.getByRole("menuitem", { name: "通知处理" }).click();
+  await expect(page.getByRole("heading", { name: "通知处理" })).toBeVisible();
   const notificationQueue = page.getByRole("region", { name: "通知人工处理队列" });
-  await expect(page.getByText("系统未采集手机号", { exact: true })).toBeVisible();
+  await expect(page.getByText("此队列不展示联系方式", { exact: true })).toBeVisible();
   const retryNotificationRow = notificationQueue
     .getByRole("row")
     .filter({ hasText: qualityA.orderNo })
@@ -459,6 +460,9 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
   await manualForm.getByRole("button", { name: "继续复核" }).click();
   await page.getByRole("dialog", { name: "二次确认人工完成" }).getByRole("button", { name: "确认人工完成" }).click();
   await expect(manualNotificationRow).toHaveCount(0);
+  await logout(page);
+  await loginInBrowser(page, operator.username, password);
+  await page.getByRole("menuitem", { name: "区域开通意向", exact: true }).click();
   const interestRow = page.getByRole("region", { name: "区域开通意向" }).getByRole("row").filter({ hasText: "朝阳区望京" });
   await expect(interestRow.getByText("139****0000", { exact: true })).toBeVisible();
   await interestRow.getByRole("button", { name: "登记已联系" }).click();
@@ -481,7 +485,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
         ),
       )
       .toBe(true);
-    await expect(page.getByRole("heading", { name: "运营治理" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "区域开通意向" })).toBeVisible();
   }
 
   await logout(page);
@@ -529,12 +533,12 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
   for (const width of [375, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    await expect(page.getByRole("heading", { name: "财务管理" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "退款待办" })).toBeVisible();
   }
 
   await logout(page);
   await loginInBrowser(page, superAdmin.username, password);
-  await page.getByRole("menuitem", { name: "审计记录" }).click();
+  await page.getByRole("menuitem", { name: "操作日志" }).click();
   await expect(page.getByRole("heading", { name: "审计记录" })).toBeVisible();
   const auditRows = page
     .getByRole("row")
@@ -598,13 +602,13 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
   await postponeDialog.getByRole("button", { name: "确认顺延" }).click();
   await expect(postponedRow.getByText("开售中", { exact: true })).toBeVisible();
 
-  await page.getByRole("menuitem", { name: "商品管理" }).click();
+  await page.getByRole("menuitem", { name: "商品列表" }).click();
   const skuRow = page.getByRole("row").filter({ hasText: `P1-C 番茄 ${suffix}` });
   await skuRow.getByRole("button", { name: /停\s*用/ }).click();
   await expect(page.getByText(/仍有进行中团期或未完成订单/)).toBeVisible();
   await expect(skuRow.getByText("启用", { exact: true })).toBeVisible();
 
-  await page.getByRole("menuitem", { name: "区域与自提点" }).click();
+  await page.getByRole("menuitem", { name: "自提点管理" }).click();
   const idlePointRow = page.getByRole("row").filter({ hasText: `P1-C 空闲点 ${suffix}` });
   await idlePointRow.getByRole("button", { name: /停\s*用/ }).click();
   const pointDialog = page.getByRole("dialog", { name: "编辑自提点" });

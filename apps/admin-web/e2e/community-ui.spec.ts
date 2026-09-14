@@ -174,10 +174,10 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   // current admin workspace before selecting that real area in the UI.
   await page.reload();
   await expect(page.getByRole("heading", { name: "运营工作台" })).toBeVisible();
-  await expect(page.getByText("商品管理", { exact: true })).toBeVisible();
+  await expect(page.getByText("商品列表", { exact: true })).toBeVisible();
   await expect(page.getByText("团期管理", { exact: true })).toBeVisible();
   await expect(page.getByText("发货与运输", { exact: true })).toBeVisible();
-  await page.getByText("商品管理", { exact: true }).click();
+  await page.getByText("商品列表", { exact: true }).click();
   await page.getByRole("button", { name: "新增商品" }).click();
   await page.getByLabel("商品名称").fill(`E2E 时蔬 ${suffix}`);
   await page.getByLabel("分类").click();
@@ -199,7 +199,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   ).toBeVisible();
 
   const reviewPointName = `E2E 复核点 ${suffix}`;
-  await page.getByText("区域与自提点", { exact: true }).click();
+  await page.getByRole("menuitem", { name: "自提点管理", exact: true }).click();
   await page.getByRole("button", { name: "新增自提点" }).click();
   const pointAreaSelect = page.getByLabel("服务区域");
   if (await pointAreaSelect.count()) {
@@ -207,6 +207,11 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
     await page.locator(".ant-select-item-option").last().click();
   }
   await page.getByLabel("自提点名称").fill(reviewPointName);
+  // This journey tests reverse-location recovery. Keep the concurrent address
+  // search deterministic instead of depending on an external map API key.
+  await page.route("**/api/v1/admin/geo/search?**", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: [] }) }),
+  );
   await page.getByLabel("详细地址或地点名称").fill("东城区社区大街 88 号一层");
   const reverseRoutePattern = /\/api\/v1\/admin\/geo\/reverse\?/;
   await page.route(reverseRoutePattern, (route) =>
@@ -220,6 +225,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
     }),
   );
   allowExpectedLocationVerificationFailure = true;
+  await expect(page.locator(".leaflet-control-zoom-in")).toBeVisible();
   await page
     .getByRole("application", { name: "自提点地图，点击或拖动图钉选择实际位置" })
     .click({ position: { x: 120, y: 100 } });
@@ -540,10 +546,10 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
     "community e2e manager password",
   );
   await expect(
-    page.getByRole("heading", { name: "我的点位工作台" }),
+    page.getByRole("heading", { name: "到货确认" }),
   ).toBeVisible();
-  await expect(page.getByText("商品管理", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("财务管理", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("商品列表", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("退款待办", { exact: true })).toHaveCount(0);
   await expect(page.getByText("人员与权限", { exact: true })).toHaveCount(0);
   await page.setViewportSize({ width: 768, height: 900 });
   await expect
@@ -576,6 +582,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
     )
       pickupPosts += 1;
   });
+  await page.getByRole("menuitem", { name: "领取核销", exact: true }).click();
   await page.getByRole("combobox").click();
   await page
     .getByText("E2E 社区点 " + suffix + " · 东城区社区服务站 1 号", {
@@ -637,8 +644,8 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   });
   expect(adminLogin.status(), await adminLogin.text()).toBe(200);
   const adminToken = (await adminLogin.json()).data.accessToken as string;
-  await page.getByText("发货与运输", { exact: true }).click();
-  await expect(page.getByRole("heading", { name: "发货与运输" })).toBeVisible();
+  await page.getByRole("menuitem", { name: "到货异常处理", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "到货异常处理" })).toBeVisible();
   const deliverySnapshot = await request.fetch(`${apiBase}/api/v1/admin/community/deliveries`, {
     headers: { ...superHeaders, accept: "application/json" },
   });
@@ -763,7 +770,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
     operatorLabelsDialog.getByText(normalOrder.orderNo, { exact: true }),
   ).toBeVisible();
   await operatorLabelsDialog.locator(".ant-modal-close").click();
-  await page.getByText("发货与运输", { exact: true }).click();
+  await page.getByRole("menuitem", { name: "到货异常处理", exact: true }).click();
   await expect(page.getByRole("button", { name: "逐商品确认到货" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "紧急代办到货" })).toHaveCount(0);
   const operatorArrivalTable = page
@@ -875,7 +882,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
     finance.temporaryPassword,
     "community e2e finance password",
   );
-  await expect(page.getByRole("heading", { name: "财务管理" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "退款待办" })).toBeVisible();
   const exceptionRow = page.getByRole("row").filter({ hasText: emergencyOrder.orderNo });
   await expect(exceptionRow.getByRole("button", { name: "执行退款" })).toBeVisible();
   let exceptionRefundPosts = 0;

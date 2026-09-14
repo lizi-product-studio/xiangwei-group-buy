@@ -28,27 +28,10 @@ describe("admin navigation", () => {
   it("gives a super administrator the complete PRD primary navigation once", () => {
     const groups = getAdminNavigation(["SUPER_ADMIN"]);
     expect(groups.map((group) => group.label)).toEqual([
-      "日常运营",
-      "履约管理",
-      "客户与资金",
-      "权限与审计",
+      "工作台", "商品", "团期", "订单", "履约管理", "区域与自提点", "用户", "售后", "运营治理", "财务", "系统",
     ]);
-    expect(
-      groups.flatMap((group) => group.items.map((item) => item.label)),
-    ).toEqual([
-      "工作台",
-      "商品管理",
-      "团期管理",
-      "订单管理",
-      "发货与运输",
-      "区域与自提点",
-      "消费者管理",
-      "售后与异常",
-      "运营治理",
-      "财务管理",
-      "审计记录",
-      "人员与权限",
-    ]);
+    expect(groups.flatMap(group => group.items.map(item => item.key))).toContain("categories");
+    expect(groups.flatMap(group => group.items.map(item => item.key))).toContain("finance-ledger");
   });
 
   it("limits the consumer directory to super administrators and customer service", () => {
@@ -58,7 +41,7 @@ describe("admin navigation", () => {
 
   it("names the governance page for the work customer service can actually perform", () => {
     expect(getAdminNavigationPath(["CUSTOMER_SERVICE"], "governance")?.pageLabel).toBe("通知处理");
-    expect(getAdminNavigationPath(["OPERATOR"], "governance")?.pageLabel).toBe("运营治理");
+    expect(getAdminNavigationPath(["OPERATOR"], "interests")?.pageLabel).toBe("区域开通意向");
   });
 
   it("keeps a pickup manager in the isolated point workbench", () => {
@@ -69,9 +52,10 @@ describe("admin navigation", () => {
         items: [
           {
             key: "point-workbench",
-            label: "我的点位工作台",
+            label: "到货确认",
             roles: ["PICKUP_MANAGER"],
           },
+          {key:"point-pickup",label:"领取核销",roles:["PICKUP_MANAGER"]},
         ],
       },
     ]);
@@ -95,13 +79,25 @@ describe("admin navigation", () => {
   it("resolves a stable parent and child path for the active page", () => {
     expect(getAdminNavigationPath(["SUPER_ADMIN"], "audit")).toEqual({
       groupKey: "access-audit",
-      groupLabel: "权限与审计",
-      pageLabel: "审计记录",
+      groupLabel: "系统",
+      pageLabel: "操作日志",
     });
     expect(getAdminNavigationPath(["PICKUP_MANAGER"], "point-workbench")).toEqual({
       groupKey: "point-workbench",
       groupLabel: "点位工作台",
-      pageLabel: "我的点位工作台",
+      pageLabel: "到货确认",
     });
+  });
+});
+
+describe("split task permissions", () => {
+  it("does not expose finance execution or notification work to operations", () => {
+    for (const page of ["finance", "finance-records", "finance-ledger", "governance"]) expect(isAllowedAdminPage(["OPERATOR"], page as never)).toBe(false);
+    expect(isAllowedAdminPage(["OPERATOR"], "interests")).toBe(true);
+    expect(isAllowedAdminPage(["FINANCE"], "orders")).toBe(true);
+    expect(isAllowedAdminPage(["FINANCE"], "arrival-exceptions")).toBe(false);
+    expect(isAllowedAdminPage(["CUSTOMER_SERVICE"], "interests")).toBe(false);
+    expect(isAllowedAdminPage(["PICKUP_MANAGER"], "point-pickup")).toBe(true);
+    expect(isAllowedAdminPage(["PICKUP_MANAGER"], "orders")).toBe(false);
   });
 });

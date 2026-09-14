@@ -1,6 +1,6 @@
 import { formatDateTime, formatMoney } from "../../utils/format";
 import { api, AuthExpiredError, customerAuth, customerErrorMessage } from "../../utils/api";
-import { orderStatusCopy } from "../../utils/consumer-display";
+import { orderStatusCopy, orderStatusTone } from "../../utils/consumer-display";
 import { navigateToCustomerLogin } from "../../utils/auth-navigation";
 import { PageLoadCoordinator } from "../../utils/page-load-guard";
 
@@ -8,6 +8,7 @@ interface OrderView extends OrderDto {
   total: string;
   createdText: string;
   statusText: string;
+  statusTone: string;
   canPickup: boolean;
   deliveryName: string;
   deliveryAddress: string;
@@ -30,6 +31,7 @@ function inFilter(order: OrderView, filter: string): boolean {
       "ALLOCATING",
       "IN_TRANSIT",
     ].includes(order.status);
+  if (filter === "DONE") return ["PICKED_UP", "COMPLETED"].includes(order.status);
   if (filter === "READY") return order.status === "READY_FOR_PICKUP";
   if (filter === "AFTER")
     return (
@@ -92,6 +94,7 @@ Page({
           total: formatMoney(order.totalCents),
           createdText: formatDateTime(order.createdAt),
           statusText: orderStatusCopy(order.status).text,
+          statusTone: orderStatusTone(order.status),
           canPickup: order.status === "READY_FOR_PICKUP",
           deliveryName: delivery.name,
           deliveryAddress: delivery.address,

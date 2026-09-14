@@ -8,6 +8,7 @@ import {
   formatChinaDateTime,
   isCampaignPurchasable,
   orderStatusCopy,
+  orderStatusTone,
   pickupDeadlineText,
   pickupWindowStatusText,
   qualityDeadlineText,
@@ -94,4 +95,12 @@ describe("consumer launch display rules", () => {
     expect(shouldShowFloatingCart(-1)).toBe(false);
     expect(shouldShowFloatingCart(2)).toBe(true);
   });
+});
+
+it("keeps completion, refund and active statuses visually distinct", () => {
+  expect(orderStatusTone("COMPLETED")).toBe("success");
+  expect(orderStatusTone("PICKED_UP")).toBe("success");
+  expect(orderStatusTone("REFUNDING")).toBe("warning");
+  expect(orderStatusTone("CANCELLED")).toBe("neutral");
+  expect(orderStatusTone("IN_TRANSIT")).toBe("progress");
 });

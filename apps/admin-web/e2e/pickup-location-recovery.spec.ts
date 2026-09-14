@@ -71,7 +71,7 @@ test("地图同地址重新检测可恢复，候选确认清除旧错误且保�
   expect(area.status(), await area.text()).toBeLessThan(300);
   const areaName = (await area.json()).data.name as string;
   await page.reload();
-  await page.getByRole("menuitem", { name: "区域与自提点" }).click();
+  await page.getByRole("menuitem", { name: "自提点管理" }).click();
   await page.getByRole("button", { name: "新增自提点", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "新增自提点" });
   await dialog.getByLabel("服务区域", { exact: true }).click();

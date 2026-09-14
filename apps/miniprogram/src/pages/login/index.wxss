@@ -29,7 +29,7 @@
 .login-page__back-icon { width: 38rpx; height: 38rpx; transform: rotate(180deg); filter: brightness(0) invert(1); }
 .login-page__hero { display: block; flex: none; width: 100%; }
 .login-page__intro { padding: 0 64rpx; margin-top: -8rpx; position: relative; }
-.login-page__brand { display: block; color: #f05232; font-size: 38rpx; font-weight: 700; line-height: 54rpx; }
+.login-page__brand { display: block; color: #c2412d; font-size: 38rpx; font-weight: 700; line-height: 54rpx; }
 .login-page__title { display: block; margin-top: 18rpx; font-size: 46rpx; font-weight: 700; line-height: 66rpx; letter-spacing: 1rpx; }
 .login-page__subtitle { display: block; margin-top: 14rpx; color: #62676b; font-size: 27rpx; line-height: 40rpx; }
 .login-page__actions { margin-top: auto; padding: 100rpx 48rpx 0; }
@@ -41,7 +41,7 @@
   box-sizing: border-box; display: flex; align-items: center; justify-content: center; width: 100% !important; min-width: 0; max-width: none; margin-left: 0 !important; margin-right: 0 !important; font-family: inherit;
 }
 .login-page__back::after, .login-page__button::after, .login-page__cancel::after, .login-page__experience-button::after { border: 0; }
-.login-page .login-page__button { min-height: 106rpx; margin-top: 24rpx; padding: 20rpx 24rpx !important; color: #fff; background: #f05232; border-radius: 18rpx; font-size: 34rpx; font-weight: 650; line-height: 48rpx; }
+.login-page .login-page__button { min-height: 106rpx; margin-top: 24rpx; padding: 20rpx 24rpx !important; color: #fff; background: #c2412d; border-radius: 18rpx; font-size: 34rpx; font-weight: 650; line-height: 48rpx; }
 .login-page__button-icon { width: 52rpx; height: 52rpx; margin-right: 18rpx; }
 .login-page__button:active { background: #e84b28; }
 .login-page .login-page__button--disabled { color: #fff; background: #ed9b86; }
@@ -58,4 +58,4 @@
   .login-page__privacy-note { margin-top: 14rpx; }
 }
 
-.login-page__phone-copy {display:block;margin:12rpx 0;color:#697269;font-size:24rpx;line-height:1.7;}.login-page .login-page__retry {width:100%!important;margin:16rpx 0 0!important;padding:10rpx 0!important;background:transparent;color:#597a43;font-size:24rpx;line-height:1.6;}.login-page__retry::after {border:0;}
+.login-page__phone-copy {display:block;margin:12rpx 0;color:#697269;font-size:24rpx;line-height:1.7;}.login-page .login-page__retry {width:100%!important;margin:16rpx 0 0!important;padding:10rpx 0!important;background:transparent;color:#3f6b35;font-size:24rpx;line-height:1.6;}.login-page__retry::after {border:0;}

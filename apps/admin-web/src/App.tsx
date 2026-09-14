@@ -77,6 +77,7 @@ import {
 } from "./api.ts";
 import {
   getAdminNavigation,
+  getAdminPageModule,
   getAdminNavigationPath,
   getDefaultAdminPage,
   isAllowedAdminPage,
@@ -726,10 +727,10 @@ function AccountMenu({
 }
 
 function navigationGroupIcon(groupKey: string) {
-  if (groupKey === "operations") return <AppstoreOutlined />;
-  if (groupKey === "fulfillment") return <CarOutlined />;
-  if (groupKey === "customers-finance") return <UsergroupAddOutlined />;
-  return <SafetyCertificateOutlined />;
+  if (["dashboard", "products", "campaigns", "orders"].includes(groupKey)) return <AppstoreOutlined aria-hidden="true" />;
+  if (groupKey === "fulfillment") return <CarOutlined aria-hidden="true" />;
+  if (["consumers", "service", "governance"].includes(groupKey)) return <UsergroupAddOutlined aria-hidden="true" />;
+  return <SafetyCertificateOutlined aria-hidden="true" />;
 }
 
 function Dashboard({
@@ -856,11 +857,17 @@ function ListFilters({label,query,onQuery,status,onStatus,statuses}: {label:stri
 }
 const matchesKeyword = (query:string,...values:unknown[]) => !query.trim() || values.some(value => String(value ?? "").toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
 
+function PanelDialog({ inline, children, ...props }: ComponentProps<typeof Modal> & { inline?: boolean }) {
+  return inline ? <Card title={props.title}>{children}</Card> : <Modal {...props}>{children}</Modal>;
+}
+
 function Products({
+  view,
   values,
   categories,
   reload,
 }: {
+  view: AdminPage;
   values: CatalogSku[];
   categories: ProductCategory[];
   reload: () => Promise<void>;
@@ -945,9 +952,9 @@ function Products({
   return (
     <>
       <PageTitle
-        title="商品管理"
+        title={view === "categories" ? "分类管理" : "商品列表"}
         subtitle="维护社区团购商品目录与默认可售量"
-        action={
+        action={view !== "categories" &&
           <Space>
           <Button onClick={() => { setEditingCategory(null); categoryForm.resetFields(); setCategoryOpen(true); }}>分类管理</Button>
           <Button
@@ -967,6 +974,7 @@ function Products({
           </Space>
         }
       />
+      {view !== "categories" && <>
       <ListFilters label="商品" query={query} onQuery={setQuery} status={filterStatus} onStatus={setFilterStatus} statuses={[{value:"ACTIVE",label:"启用"},{value:"INACTIVE",label:"已停用"}]} />
       <Table
         rowKey="id"
@@ -1023,6 +1031,7 @@ function Products({
           },
         ]}
       />
+      </>}
       <Modal
         open={open}
         title={editing ? "编辑商品" : "新增商品"}
@@ -1120,7 +1129,7 @@ function Products({
           </Button>
         </Form>
       </Modal>
-      <Modal
+      <PanelDialog inline={view === "categories"}
         open={categoryOpen}
         title="分类管理"
         footer={null}
@@ -1242,7 +1251,7 @@ function Products({
             },
           ]}
         />
-      </Modal>
+      </PanelDialog>
     </>
   );
 }
@@ -2391,7 +2400,7 @@ function Orders({
                     message={`取消申请：${displayLabel(selected.cancellation.status)}`}
                     description={`${selected.cancellation.reason}${selected.cancellation.refundId ? ` · 退款单 ${selected.cancellation.refundId}` : ""}`}
                     action={
-                      <Button type="link" onClick={() => onNavigate(casePage)}>
+                      <Button type="link" onClick={() => onNavigate(isAllowedAdminPage(roles, "cancellations") ? "cancellations" : "finance")}>
                         查看取消队列
                       </Button>
                     }
@@ -2403,8 +2412,8 @@ function Orders({
                     type={refund.status === "SUCCEEDED" ? "success" : "warning"}
                     message={`部分退款 ${money(refund.amountCents)} · ${displayLabel(refund.status)}`}
                     description={`关联异常 ${refund.exceptionId}`}
-                    action={
-                      <Button type="link" onClick={() => onNavigate("finance")}>
+                    action={isAllowedAdminPage(roles, "finance-records") &&
+                      <Button type="link" onClick={() => onNavigate("finance-records")}>
                         查看财务记录
                       </Button>
                     }
@@ -2642,6 +2651,7 @@ function ArrivalConfirmationModal({
 }
 
 function Logistics({
+  view,
   plans,
   deliveries,
   batches,
@@ -2652,6 +2662,7 @@ function Logistics({
   reload,
   onNavigate,
 }: {
+  view: AdminPage;
   plans: DeliveryPlan[];
   deliveries: CommunityDelivery[];
   batches: Array<{ id: string; campaignId: string; status: string }>;
@@ -2801,9 +2812,10 @@ function Logistics({
   return (
     <>
       <PageTitle
-        title="发货与运输"
+        title={view === "arrival-exceptions" ? "到货异常处理" : "发货与运输"}
         subtitle="管理已成团订单的运输信息和发车进度；发车后由对应自提点确认到货"
       />
+      {view !== "arrival-exceptions" && <>
       {viewState === "error" ? (
         <Alert
           type="error"
@@ -2919,6 +2931,9 @@ function Logistics({
         ]}
         />
       )}
+      </>}
+      {view === "arrival-exceptions" && <>
+      {error && <Alert type="error" showIcon message="到货数据加载失败" description={error} action={<Button onClick={() => void reload().catch(() => undefined)}>重试</Button>} />}
       <Typography.Title level={4}>到货与异常</Typography.Title>
       {viewState === "error" ? null : deliveries.length === 0 && !loading ? (
         <Card title="到货与异常">
@@ -2999,6 +3014,7 @@ function Logistics({
         ]}
         />
       )}
+      </>}
       <Modal
         open={!!vehicle}
         title={
@@ -3135,10 +3151,12 @@ function Logistics({
 }
 
 function Areas({
+  view,
   areas,
   points,
   reload,
 }: {
+  view: AdminPage;
   areas: ServiceArea[];
   points: PickupPoint[];
   reload: () => Promise<void>;
@@ -3213,7 +3231,7 @@ function Areas({
   return (
     <>
       <PageTitle
-        title="区域与自提点"
+        title={view === "areas" ? "区域管理" : "自提点管理"}
         subtitle="先配置真实区域与启用自提点，再建立商品和团期；未覆盖地区仅收集开通意向"
         action={
           <Space>
@@ -3224,6 +3242,7 @@ function Areas({
           </Space>
         }
       />
+      {view === "areas" && <>
       <Typography.Title level={4}>服务区域</Typography.Title>
       <ListFilters label="区域" query={areaQuery} onQuery={setAreaQuery} status={areaStatus} onStatus={setAreaStatus} statuses={[{value:"ENABLED",label:"接单中"},{value:"DISABLED",label:"已暂停接单"}]} />
       <Table
@@ -3278,6 +3297,8 @@ function Areas({
           },
         ]}
       />
+      </>}
+      {view !== "areas" && <>
       <Typography.Title level={4}>自提点</Typography.Title>
       <ListFilters label="自提点" query={pointQuery} onQuery={setPointQuery} status={pointStatus} onStatus={setPointStatus} statuses={[{value:"ACTIVE",label:"启用"},{value:"INACTIVE",label:"停用"}]} />
       <Table
@@ -3318,6 +3339,7 @@ function Areas({
           },
         ]}
       />
+      </>}
       <Modal
         open={areaOpen}
         title="开通服务区域"
@@ -3673,12 +3695,14 @@ function Areas({
 }
 
 function PointWorkbench({
+  view,
   deliveries,
   roles,
   loading,
   error,
   reload,
 }: {
+  view: AdminPage;
   deliveries: CommunityDelivery[];
   roles: string[];
   loading: boolean;
@@ -3810,9 +3834,10 @@ function PointWorkbench({
   return (
     <>
       <PageTitle
-        title="我的点位工作台"
-        subtitle="仅处理已授权点位的到货与领取，不提供消费者小程序工作入口"
+        title={view === "point-pickup" ? "领取核销" : "到货确认"}
+        subtitle={view === "point-pickup" ? "选择自提点并查询订单，核对本次领取商品与取货码" : "对照实物确认到货数量，短少或破损请如实登记"}
       />
+      {view !== "point-pickup" && <>
       {arrivalNotice && (
         <Alert
           type="success"
@@ -3913,6 +3938,8 @@ function PointWorkbench({
           />
         </Card>
       )}
+      </>}
+      {view === "point-pickup" && <>
       <Card>
         {pickupError && (
           <Alert
@@ -4041,6 +4068,7 @@ function PointWorkbench({
           </Space>
         </Card>
       )}
+      </>}
       <Modal
         open={!!pickupReview}
         title="本次领取复核"
@@ -4209,6 +4237,7 @@ function PickupWindowQueue({
 }
 
 function Service({
+  view,
   quality,
   cancellations,
   exceptions,
@@ -4218,6 +4247,7 @@ function Service({
   loading,
   error,
 }: {
+  view: AdminPage;
   quality: Awaited<ReturnType<typeof api.quality>>;
   cancellations: Awaited<ReturnType<typeof api.cancellations>>;
   exceptions: FulfillmentException[];
@@ -4287,7 +4317,7 @@ function Service({
   return (
     <>
       <PageTitle
-        title="售后与异常"
+        title={view === "cancellations" ? "取消申请" : "售后与异常"}
         subtitle="客服受理、运营决定、财务退款，职责分离"
       />
       {loading && <Alert type="info" showIcon message="正在刷新售后队列" />}
@@ -4300,6 +4330,7 @@ function Service({
           action={<Button size="small" onClick={() => void reload().catch(() => undefined)}>重试</Button>}
         />
       )}
+      {view !== "cancellations" && <>
       <Typography.Title level={4}>品质售后</Typography.Title>
       <OperationsQueueTable
         rowKey="id"
@@ -4352,6 +4383,8 @@ function Service({
           },
         ]}
       />
+      </>}
+      {view === "cancellations" && <>
       <Typography.Title level={4}>取消申请</Typography.Title>
       <OperationsQueueTable
         rowKey="id"
@@ -4385,6 +4418,8 @@ function Service({
           },
         ]}
       />
+      </>}
+      {view !== "cancellations" && <>
       <Typography.Title level={4}>履约差异</Typography.Title>
       <OperationsQueueTable
         rowKey="id"
@@ -4406,6 +4441,7 @@ function Service({
         ]}
       />
       <PickupWindowQueue values={pickupWindows} roles={roles} reload={reload} />
+      </>}
       <Modal
         open={Boolean(qualityAction && !qualityAction.note)}
         title={qualityAction ? `填写${qualityActionLabel(qualityAction.type)}说明` : ""}
@@ -4473,6 +4509,7 @@ function Service({
 }
 
 function Finance({
+  view,
   refunds,
   ledger,
   quality,
@@ -4486,6 +4523,7 @@ function Finance({
   loading,
   error,
 }: {
+  view: AdminPage;
   refunds: Awaited<ReturnType<typeof api.finance>> | null;
   ledger: Awaited<ReturnType<typeof api.ledger>>;
   quality: Awaited<ReturnType<typeof api.quality>>;
@@ -4606,7 +4644,7 @@ function Finance({
   };
   return (
     <>
-      <PageTitle title="财务管理" subtitle="查看全额/部分退款和双向平衡账本" />
+      <PageTitle title={view === "finance-records" ? "退款记录" : view === "finance-ledger" ? "账务流水" : "退款待办"} subtitle="查看退款进度与账务明细，按权限处理待办" />
       {loading && <Alert type="info" showIcon message="正在刷新财务数据" />}
       {error && (
         <Alert
@@ -4617,7 +4655,7 @@ function Finance({
           action={<Button size="small" onClick={() => void reload().catch(() => undefined)}>重试</Button>}
         />
       )}
-      <Table
+      {view === "finance-records" && <Table
         rowKey="id"
         dataSource={[...(refunds?.full ?? []), ...(refunds?.partial ?? [])]}
         columns={[
@@ -4627,6 +4665,8 @@ function Finance({
           { title: "状态", render: (_, v) => <Status value={v.status} /> },
         ]}
       />
+      }
+      {view === "finance" && <>
       <section aria-label="品质售后退款">
         <Typography.Title level={4}>品质售后退款</Typography.Title>
         <OperationsQueueTable
@@ -4734,7 +4774,8 @@ function Finance({
           ]}
         />
       </section>
-      <section aria-label="财务流水">
+      </>}
+      {view === "finance-ledger" && <section aria-label="财务流水">
         <Typography.Title level={4}>财务流水</Typography.Title>
         <Table
           rowKey="id"
@@ -4761,7 +4802,7 @@ function Finance({
           { title: "时间", dataIndex: "createdAt" },
           ]}
         />
-      </section>
+      </section>}
       <Modal
         open={!!refundTarget && !refundDraft}
         title="填写差异退款确认说明"
@@ -5273,9 +5314,10 @@ export function App() {
     () => getAdminNavigation(roles),
     [roles.join(",")],
   );
-  const currentPage: AdminPage = isAllowedAdminPage(roles, page)
+  const currentView: AdminPage = isAllowedAdminPage(roles, page)
     ? page
     : defaultPage ?? "settings";
+  const currentPage = getAdminPageModule(currentView);
   useEffect(() => {
     if (!authenticated) return;
     const frame = window.requestAnimationFrame(() => {
@@ -5288,7 +5330,7 @@ export function App() {
       else if (item.top < bounds.top) menu.scrollTop -= Math.ceil(bounds.top - item.top);
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [authenticated, currentPage]);
+  }, [authenticated, currentView]);
   const clearWorkspace = useCallback((nextPage: AdminPage = "settings") => {
     identityEpoch.current += 1;
     reloadGeneration.current += 1;
@@ -5391,7 +5433,7 @@ export function App() {
         }
         if (currentPage === "governance") setNotifications(value => [...value]);
       }
-      if (currentPage === "governance")
+      if (currentView === "interests")
         work.push(api.serviceAreaInterests().then(commit(setInterests)));
       if (currentPage === "finance")
         work.push(
@@ -5453,7 +5495,7 @@ export function App() {
   ) : currentPage === "dashboard" ? (
       <Dashboard {...{ areas, points, campaigns, orders }} onNavigate={setPage} />
     ) : currentPage === "products" ? (
-      <Products values={skus} categories={categories} reload={reload} />
+      <Products key={currentView} view={currentView} values={skus} categories={categories} reload={reload} />
     ) : currentPage === "campaigns" ? (
       <Campaigns values={campaigns} {...{ areas, points, skus, reload }} />
     ) : currentPage === "orders" ? (
@@ -5465,7 +5507,7 @@ export function App() {
         onNavigate={setPage}
       />
     ) : currentPage === "logistics" ? (
-      <Logistics
+      <Logistics view={currentView}
         {...{
           plans,
           batches,
@@ -5480,15 +5522,15 @@ export function App() {
         }}
       />
     ) : currentPage === "pickup-points" ? (
-      <Areas {...{ areas, points, reload }} />
+      <Areas view={currentView} {...{ areas, points, reload }} />
     ) : currentPage === "point-workbench" ? (
-      <PointWorkbench
+      <PointWorkbench view={currentView}
         {...{ deliveries, roles, loading, error: loadError, reload }}
       />
     ) : currentPage === "consumers" ? (
       <Consumers loadPage={api.consumers} loadDetail={api.consumerDetail} />
     ) : currentPage === "service" ? (
-      <Service
+      <Service view={currentView}
         {...{
           quality,
           cancellations,
@@ -5509,13 +5551,13 @@ export function App() {
           error: loadError,
           reload,
           canHandleNotifications:
-            roles.includes("CUSTOMER_SERVICE") || roles.includes("SUPER_ADMIN"),
+            currentView === "governance" && (roles.includes("CUSTOMER_SERVICE") || roles.includes("SUPER_ADMIN")),
           canHandleInterests:
-            roles.includes("OPERATOR") || roles.includes("SUPER_ADMIN"),
+            currentView === "interests" && (roles.includes("OPERATOR") || roles.includes("SUPER_ADMIN")),
         }}
       />
     ) : currentPage === "finance" ? (
-      <Finance
+      <Finance view={currentView}
         {...{
           refunds,
           ledger,
@@ -5567,7 +5609,7 @@ export function App() {
       {pageContent}
     </>
   );
-  const navigationPath = getAdminNavigationPath(roles, currentPage);
+  const navigationPath = getAdminNavigationPath(roles, currentView);
   return (
     <AntApp>
       <Layout className="app-shell">
@@ -5580,15 +5622,17 @@ export function App() {
           collapsible
         >
           <div className="brand">
-            <strong>乡味集</strong>
-            <span>{entryBranding.workspaceDescription}</span>
+            <i className="brand-symbol" aria-hidden="true">乡</i>
+            <div><strong>乡味集</strong><span>{entryBranding.loginSection}</span></div>
           </div>
           <Menu
             mode="inline"
-            selectedKeys={[currentPage]}
+            selectedKeys={[currentView]}
             defaultOpenKeys={navigation.map((group) => `section:${group.key}`)}
             onClick={({ key }) => setPage(key as AdminPage)}
-            items={navigation.map((group) => ({
+            items={navigation.map((group) => group.items.length === 1 && !["products", "orders", "fulfillment", "sites", "finance", "access-audit", "point-workbench"].includes(group.key) ? ({
+              key: group.items[0]!.key, icon: navigationGroupIcon(group.key), label: group.items[0]!.label,
+            }) : ({
               key: `section:${group.key}`,
               icon: navigationGroupIcon(group.key),
               label: group.label,
@@ -5653,7 +5697,7 @@ export function App() {
               )}
             </Space>
           </Header>
-          <Content className="content" data-page={currentPage}>{content}</Content>
+          <Content className="content" data-page={currentPage} data-view={currentView}>{content}</Content>
         </Layout>
       </Layout>
     </AntApp>

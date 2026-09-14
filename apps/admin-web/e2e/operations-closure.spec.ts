@@ -167,7 +167,7 @@ test("超管通过网页复核运输、发车、紧急纠正、订单详情和�
   await page.getByLabel("运输单号").fill("WEB-CAR-002");
   await page.locator('.ant-modal:visible button[type="submit"]').click();
 
-  await page.getByRole("menuitem", { name: "订单管理" }).click();
+  await page.getByRole("menuitem", { name: "订单列表" }).click();
   const search = page.getByRole("searchbox", { name: "订单号搜索" });
   await search.fill(order.orderNo);
   await page.getByRole("button", { name: "搜索订单号" }).click();

@@ -149,10 +149,10 @@ test("治理和审计读取的同身份迟到响应不会覆盖最新 generation
   );
   await page.goto("/");
   await login(page, account.username, account.password);
-  await page.getByRole("menuitem", { name: "运营治理" }).click();
+  await page.getByRole("menuitem", { name: "通知处理" }).click();
   await expect.poll(() => governanceCalls).toBe(1);
-  await page.getByRole("menuitem", { name: "人员与权限" }).click();
-  await page.getByRole("menuitem", { name: "运营治理" }).click();
+  await page.getByRole("menuitem", { name: "员工与权限" }).click();
+  await page.getByRole("menuitem", { name: "通知处理" }).click();
   await expect(page.getByText("CURRENT-GOVERNANCE", { exact: true })).toBeVisible();
   const unknownRow = page
     .getByRole("row")
@@ -174,10 +174,10 @@ test("治理和审计读取的同身份迟到响应不会覆盖最新 generation
     }
     return route.fulfill({ json: { data: [audit("current-audit", "CURRENT_AUDIT")] } });
   });
-  await page.getByRole("menuitem", { name: "审计记录" }).click();
+  await page.getByRole("menuitem", { name: "操作日志" }).click();
   await expect.poll(() => auditCalls).toBe(1);
-  await page.getByRole("menuitem", { name: "人员与权限" }).click();
-  await page.getByRole("menuitem", { name: "审计记录" }).click();
+  await page.getByRole("menuitem", { name: "员工与权限" }).click();
+  await page.getByRole("menuitem", { name: "操作日志" }).click();
   await expect(page.getByText("CURRENT_AUDIT", { exact: true })).toBeVisible();
   releaseAudit();
   await expect(page.getByText("CURRENT_AUDIT", { exact: true })).toBeVisible();
@@ -218,13 +218,13 @@ test("跨身份后迟到的治理和审计响应不会泄露前一身份数据",
   );
   await page.goto("/");
   await login(page, superAdmin.username, superAdmin.password);
-  await page.getByRole("menuitem", { name: "审计记录" }).click();
+  await page.getByRole("menuitem", { name: "操作日志" }).click();
   await expect(page.getByRole("heading", { name: "审计记录" })).toBeVisible();
-  await page.getByRole("menuitem", { name: "运营治理" }).click();
+  await page.getByRole("menuitem", { name: "通知处理" }).click();
   await expect.poll(() => governanceCalls).toBe(1);
   await logout(page);
   await login(page, operator.username, operator.password);
-  await page.getByRole("menuitem", { name: "运营治理" }).click();
+  await page.getByRole("menuitem", { name: "区域开通意向" }).click();
   await expect(page.getByText("CURRENT-OPERATOR", { exact: true })).toBeVisible();
   releaseGovernance();
   await expect(page.getByText("CURRENT-OPERATOR", { exact: true })).toBeVisible();
