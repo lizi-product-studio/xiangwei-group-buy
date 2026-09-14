@@ -1,13 +1,15 @@
 ---
 title: "社区团购 — Design System"
 status: APPROVED
-version: 1.0.0
-last_updated: "2026-08-31"
+version: 1.1.0
+last_updated: "2026-09-14"
 owner: ui
 source_of_truth: project-document-set
 ---
 
 # Design system
+
+2026-09-14 用户批准优化原型。当前生产基线仍采用下述既有组件；新原型与下一轮实现的精确尺寸、导航和状态约定见 [设计规范 v2 预览稿](design-system-v2-preview.md)。v2 尚待用户预览确认，不把静态原型验收等同于生产或真实微信验收。
 
 ## Principles and tokens
 

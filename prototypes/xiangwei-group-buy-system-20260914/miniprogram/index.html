@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>乡味集小程序 · 交互原型</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="board">
+    <header class="board__head">
+      <p class="board__kicker">乡味集 · 消费者小程序</p>
+      <h1>把附近的好味道带回家</h1>
+      <p class="board__lead">静态交互原型 · 所有人物、点位、订单均为示例，不连接真实账号、支付、客服或通知。</p>
+    </header>
+    <details class="demo-panel">
+      <summary>页面目录与模拟控制</summary>
+      <div class="demo-controls">
+        <label for="demoWidth">设备内容宽度</label>
+        <select id="demoWidth"><option>430</option><option>390</option><option>375</option><option>320</option></select>
+        <label for="demoScenario">下一次请求结果（登录 / 售后等）</label>
+        <select id="demoScenario"><option value="success">模拟成功</option><option value="consent">未勾选协议</option><option value="loading">持续加载</option><option value="phone-refused">拒绝手机号</option><option value="api-error">接口失败</option></select>
+        <label for="demoPage">当前页面状态</label>
+        <select id="demoPage"><option value="ready">正常内容</option><option value="loading">加载中</option><option value="error">加载失败 / 重试</option><option value="empty">无数据</option></select>
+        <label for="demoReminder">提醒授权结果</label>
+        <select id="demoReminder"><option value="accept">同意一次</option><option value="refuse">拒绝授权</option></select>
+        <button type="button" class="btn btn--outline" data-action="finish-request">完成等待中的模拟请求</button>
+        <p id="demoStatus" role="status">游客模式。私有页面需模拟登录；目录选择私有页会载入已登录示例。</p>
+      </div>
+      <div id="screenSwitch"></div>
+    </details>
+  </div>
+
+  <main class="stage">
+    <div class="device" id="device">
+      <div class="device__chrome">
+        <div class="status-bar">
+          <span>9:41</span>
+          <i class="island" aria-hidden="true"></i>
+          <span class="status-bar__sys">5G ▮▮▮▮</span>
+        </div>
+        <div class="mini-nav" id="miniNav">
+          <button class="mini-nav__back" id="navBack" type="button" aria-label="返回上一页" hidden>‹</button>
+          <span id="navTitle">乡味集</span>
+        </div>
+      </div>
+      <div class="screen" id="screen" tabindex="-1"></div>
+      <div class="feedback" id="feedback" role="status" aria-live="polite" hidden></div>
+      <nav class="tabbar" id="tabbar"></nav>
+      <div class="home-indicator" aria-hidden="true"></div>
+    </div>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>
