@@ -208,7 +208,8 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   }
   await page.getByLabel("自提点名称").fill(reviewPointName);
   await page.getByLabel("详细地址或地点名称").fill("东城区社区大街 88 号一层");
-  await page.route("**/api/v1/admin/geo/reverse?**", (route) =>
+  const reverseRoutePattern = /\/api\/v1\/admin\/geo\/reverse\?/;
+  await page.route(reverseRoutePattern, (route) =>
     route.fulfill({
       status: 503,
       contentType: "application/json",
@@ -227,8 +228,8 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
     page.getByRole("dialog", { name: "新增自提点" }).locator('button[type="submit"]'),
   ).toBeDisabled();
   expect(pickupPointWrites).toBe(0);
-  await page.unroute("**/api/v1/admin/geo/reverse?**");
-  await page.route("**/api/v1/admin/geo/reverse?**", (route) => {
+  await page.unroute(reverseRoutePattern);
+  await page.route(reverseRoutePattern, (route) => {
     const url = new URL(route.request().url());
     const latitude = Number(url.searchParams.get("latitude"));
     const longitude = Number(url.searchParams.get("longitude"));

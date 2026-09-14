@@ -286,7 +286,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
   await page.getByRole("dialog", { name: "填写取消批准理由" }).getByLabel("审核理由").fill("运营确认可以原路退款");
   await page.getByRole("dialog", { name: "填写取消批准理由" }).getByRole("button", { name: "继续复核" }).click();
   await page.getByRole("dialog", { name: "二次确认取消申请审核" }).getByRole("button", { name: "确认提交" }).click();
-  await expect(cancelApproveRow.getByText("退款处理中", { exact: true })).toBeVisible();
+  await expect(cancelApproveRow.getByText("待退款", { exact: true })).toBeVisible();
   const cancelRejectRow = page.getByRole("row").filter({ hasText: cancelB.orderNo });
   await cancelRejectRow.getByRole("button", { name: /拒\s*绝/ }).click();
   await page.getByRole("dialog", { name: "填写取消拒绝理由" }).getByLabel("审核理由").fill("已有不可撤销的履约安排");

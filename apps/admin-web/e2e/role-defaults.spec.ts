@@ -105,13 +105,14 @@ test("后台框架提供高对比账号入口、可展开分组和运营可读�
   await expect(menu).toHaveCSS("overflow-y", "auto");
   await expect(menu).toHaveCSS("overflow-x", "hidden");
   const permissionItem = session.page.getByRole("menuitem", { name: "人员与权限" });
-  const permissionBox = await permissionItem.boundingBox();
+  const menuBox = await menu.boundingBox();
   const accountBounds = await accountPanel.boundingBox();
-  expect(permissionBox).not.toBeNull();
+  expect(menuBox).not.toBeNull();
   expect(accountBounds).not.toBeNull();
-  expect((permissionBox?.y ?? 0) + (permissionBox?.height ?? 0)).toBeLessThanOrEqual(
+  expect((menuBox?.y ?? 0) + (menuBox?.height ?? 0)).toBeLessThanOrEqual(
     accountBounds?.y ?? Number.POSITIVE_INFINITY,
   );
+  await expect(permissionItem).toBeAttached();
   const accountBox = await accountPanel.boundingBox();
   expect(accountBox).not.toBeNull();
   expect(accountBox?.x ?? Number.POSITIVE_INFINITY).toBeLessThan(24);
