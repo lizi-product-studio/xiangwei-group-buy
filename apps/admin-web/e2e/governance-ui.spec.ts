@@ -413,7 +413,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
     await form.getByLabel("处理说明").fill("客服已核验订单、商品与提货凭据");
     await form.getByRole("button", { name: "继续复核" }).click();
     await page.getByRole("dialog", { name: "二次确认品质售后处理" }).getByRole("button", { name: "确认提交" }).click();
-    await expect(row.getByText("已受理", { exact: true })).toBeVisible();
+    await expect(row.getByText("待运营审核", { exact: true })).toBeVisible();
   }
   await page.getByRole("menuitem", { name: "运营治理" }).click();
   await expect(page.getByRole("heading", { name: "运营治理" })).toBeVisible();
@@ -493,7 +493,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
   await approveForm.getByLabel("处理说明").fill("运营确认商品品质问题，批准按原路退款");
   await approveForm.getByRole("button", { name: "继续复核" }).click();
   await page.getByRole("dialog", { name: "二次确认品质售后处理" }).getByRole("button", { name: "确认提交" }).click();
-  await expect(qualityApproveRow.getByText("退款中", { exact: true })).toBeVisible();
+  await expect(qualityApproveRow.getByText("退款处理中", { exact: true })).toBeVisible();
   const qualityRejectRow = page.getByRole("row").filter({ hasText: qualityB.orderNo });
   await qualityRejectRow.getByRole("button", { name: /拒\s*绝/ }).click();
   const rejectForm = page.getByRole("dialog", { name: "填写拒绝申请说明" });
