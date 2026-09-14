@@ -1,6 +1,6 @@
 /** Isolated, synthetic real-MySQL/Redis benchmark. Never point at production. */
 import { createHash } from "node:crypto";
-import { spawn, execFileSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { openSync, writeFileSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { moneyCents } from "@hometown/domain";
@@ -9,16 +9,21 @@ import { buildApp } from "../app.js";
 import { loadConfig } from "../config.js";
 import { MysqlStore } from "../modules/core/mysql-store.js";
 import { MemoryStore } from "../modules/core/store.js";
+import { assertCapacityIdentity, assertCapacityTarget } from "./capacity-safety.js";
 
-const database = process.env.INTEGRATION_DATABASE_URL!;
-const redis = process.env.INTEGRATION_REDIS_URL!;
-const db = new URL(database), cache = new URL(redis);
-if (db.hostname !== "127.0.0.1" || db.port !== "13306" || db.pathname !== "/community_capacity_20260908" || cache.hostname !== "127.0.0.1" || cache.port !== "16379" || cache.pathname !== "/5")
-  throw new Error("Capacity harness requires the dedicated local synthetic database and Redis DB 5");
+const { database, redis, profile, server } = assertCapacityTarget(process.env);
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 const token = (index: number) => `synthetic-capacity-session-${String(index).padStart(16, "0")}`;
 const output = process.env.CAPACITY_OUTPUT;
 if (!output) throw new Error("CAPACITY_OUTPUT must name a local evidence file");
+// Both parent and child verify identity before constructing stores or queues.
+if (server) {
+  const probe = await mysql.createConnection(database);
+  try {
+    const [identity] = await probe.query<RowDataPacket[]>("SELECT DATABASE() AS database_name, SUBSTRING_INDEX(CURRENT_USER(),'@',1) AS database_user, task_id,target,profile,synthetic_only FROM capacity_test_identity");
+    assertCapacityIdentity(identity);
+  } finally { await probe.end(); }
+}
 
 if (process.env.CAPACITY_SERVER === "1") {
   const store = MysqlStore.create(database);
@@ -31,6 +36,8 @@ if (process.env.CAPACITY_SERVER === "1") {
   const app = await buildApp({store, config: loadConfig({NODE_ENV: "test", DATA_STORE: "mysql", DATABASE_URL: database, QUEUE_DRIVER: "redis", REDIS_URL: redis,
     AUTH_PROVIDER: "wechat", WECHAT_APP_ID: "synthetic-capacity-app", WECHAT_APP_SECRET: "synthetic-never-used-secret", PAYMENT_PROVIDER: "mock", RATE_LIMIT_MAX: "10000", LOG_LEVEL: "silent"}),
     subscriptionMessageProvider: {send: async () => { throw new Error("External provider forbidden in capacity HTTP benchmark"); }},
+    wechatCodeExchange: {exchange: async () => { throw new Error("External login forbidden in capacity HTTP benchmark"); }},
+    wechatPhoneExchange: {exchange: async () => { throw new Error("External phone exchange forbidden in capacity HTTP benchmark"); }},
   });
   let peakRss = process.memoryUsage().rss;
   const timer = setInterval(() => { peakRss = Math.max(peakRss, process.memoryUsage().rss); }, 100);
@@ -80,7 +87,7 @@ if (process.env.CAPACITY_SERVER === "1") {
     function receive(message: unknown) { if (message && typeof message === "object" && "type" in message && message.type === type) { clearTimeout(timer); child.off("message", receive); resolve(message as Record<string, unknown>); } }
     child.on("message", receive);
   });
-  const sourceFiles = ["app.ts", "modules/core/store.ts", "modules/core/mysql-store.ts", "modules/auth/admin-auth.ts", "modules/auth/wechat-auth.ts", "modules/notifications/notification-service.ts", "routes/public-catalog-routes.ts", "scripts/capacity-readiness.ts"];
+  const sourceFiles = ["app.ts", "modules/core/store.ts", "modules/core/mysql-store.ts", "modules/auth/admin-auth.ts", "modules/auth/wechat-auth.ts", "modules/notifications/notification-service.ts", "routes/public-catalog-routes.ts", "scripts/capacity-readiness.ts", "scripts/capacity-safety.ts"];
   const sourceSha256 = Object.fromEntries(sourceFiles.map(path => [path, createHash("sha256").update(readFileSync(fileURLToPath(new URL("../"+path, import.meta.url)))).digest("hex")]));
   const results: unknown[] = [];
   try {
@@ -92,7 +99,7 @@ if (process.env.CAPACITY_SERVER === "1") {
       for (const rps of [10, 100]) {
         const clearMetric = waitMessage("metrics"); child.send("metrics"); await clearMetric;
         const durationMs = Number(process.env.CAPACITY_DURATION_MS ?? 10_000);
-        let offered = 0, dropped = 0, failed = 0, peakRss = 0;
+        let offered = 0, dropped = 0, failed = 0;
         const active = new Set<Promise<void>>(), latencies: number[] = [];
         const start = performance.now();
         while (performance.now() - start < durationMs) {
@@ -110,17 +117,14 @@ if (process.env.CAPACITY_SERVER === "1") {
             } catch { failed++; } finally { latencies.push(performance.now() - at); }
           })();
           active.add(run); void run.finally(() => active.delete(run));
-          if (offered % 20 === 0 && child.pid) {
-            peakRss = Math.max(peakRss, Number(execFileSync("ps", ["-o", "rss=", "-p", String(child.pid)], {encoding: "utf8"}).trim()) * 1024);
-          }
         }
         await Promise.allSettled(active);
         const metric = waitMessage("metrics"); child.send("metrics"); const stats = await metric;
         const writes = stats.transactions as number[];
         results.push({name, offeredRps: rps, offered, admissionDropped: dropped, completed: latencies.length, failed, durationMs, elapsedMs: performance.now()-start,
           actualCompletedRps: latencies.length / ((performance.now()-start)/1000), p95Ms: percentile(latencies,.95), p99Ms: percentile(latencies,.99), unexpectedFailureRate: failed / Math.max(1,latencies.length),
-          writeTransactions: writes.length, writeTransactionP95Ms: percentile(writes,.95), peakRssBytes: Math.max(peakRss, Number(stats.peakRss)), withinProduction384MiB: Math.max(peakRss, Number(stats.peakRss)) <= 384*1024*1024});
-        writeFileSync(output, JSON.stringify({task_id: "TASK-20260908-READINESS-REPAIR-B", platform: process.platform, sourceSha256, dataset: {users:1000, orders:10000, payloadBytes: Number(rows[0]!.bytes)}, limitation: "macOS actual MySQL/Redis; 256MiB V8 heap, no cgroup CPU/RSS equivalence; admission cap20 drops recorded; no production traffic", results}, null, 2), {mode:0o600});
+          writeTransactions: writes.length, writeTransactionP95Ms: percentile(writes,.95), peakRssBytes: Number(stats.peakRss), withinProduction384MiB: Number(stats.peakRss) <= 384*1024*1024});
+        writeFileSync(output, JSON.stringify({task_id: "TASK-20260908-ISOLATED-SERVER-TEST", profile, platform: process.platform, sourceSha256, dataset: {users:1000, orders:10000, payloadBytes: Number(rows[0]!.bytes)}, limitation: "Real dedicated MySQL/Redis; 256MiB V8 heap; child RSS sampled every 100ms via Node IPC, not whole-container RSS; CPU/cgroup constraints require separate evidence; admission cap20 drops recorded; synthetic data and mock payment only", results}, null, 2), {mode:0o600});
       }
     }
   } finally {

@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>后台列表改版方案 · 乡味集原型</title>
+  <style>
+    :root {
+      --ink: #17263a;
+      --muted: #737b78;
+      --canvas: #f8f7f2;
+      --paper: #fffefb;
+      --brand: #f05232;
+      --brand-dark: #db4328;
+      --brand-soft: #fff0eb;
+      --success: #547b36;
+      --line: #ece9e1;
+      --line-strong: #dfdbd1;
+      --blue: #1677ff;
+      --sidebar: 232px;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; color: var(--ink); background: var(--canvas); font: 14px/1.5 "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; }
+    button, select, input { font: inherit; }
+    button { cursor: pointer; }
+    .shell { display: grid; min-height: 100vh; grid-template-columns: var(--sidebar) 1fr; }
+    .sider { display: flex; flex-direction: column; background: #fff; border-right: 1px solid #e7e9ed; }
+    .brand { display: grid; height: 72px; align-content: center; margin: 0 18px; padding: 0 10px; border-bottom: 1px solid #eef0f3; }
+    .brand strong { font-size: 18px; }
+    .brand span { color: #7b8491; font-size: 12px; }
+    .nav { flex: 1; padding: 14px 10px 24px; overflow: auto; }
+    .nav-group { margin-bottom: 8px; }
+    .nav-group > summary { list-style: none; display: flex; height: 44px; align-items: center; padding: 0 14px; color: #465365; border-radius: 10px; font-weight: 700; cursor: pointer; }
+    .nav-group > summary::-webkit-details-marker { display: none; }
+    .nav-item { display: block; width: 100%; height: 42px; margin: 2px 0; padding: 0 14px 0 46px; color: #687383; background: transparent; border: 0; border-radius: 10px; text-align: left; }
+    .nav-item:hover { color: #17263a; background: #f7f7f4; }
+    .nav-item.is-active { position: relative; color: var(--brand-dark); background: var(--brand-soft); font-weight: 700; }
+    .nav-item.is-active::before { position: absolute; top: 9px; bottom: 9px; left: 0; width: 3px; background: var(--brand); border-radius: 0 4px 4px 0; content: ""; }
+    .account { margin: 0 12px 16px; padding: 12px 10px 0; color: #555e6c; border-top: 1px solid #eef0f3; font-size: 12px; }
+    .account small { display: block; color: #9aa0aa; }
+    .main { min-width: 0; }
+    .topbar { display: flex; height: 56px; align-items: center; justify-content: space-between; padding: 0 28px; background: #fff; border-bottom: 1px solid #eef0f3; }
+    .crumb { color: #8a929c; font-size: 13px; }
+    .crumb b { color: var(--ink); font-weight: 600; }
+    .refresh { height: 32px; padding: 0 12px; color: #526071; background: #fff; border: 1px solid var(--line-strong); border-radius: 8px; }
+    .content { padding: 28px clamp(20px, 3vw, 44px) 72px; }
+    .page { display: none; max-width: 1680px; margin: 0 auto; }
+    .page.is-on { display: block; }
+    .page-title h1 { margin: 0; font-size: 22px; }
+    .page-title p { margin: 6px 0 0; color: var(--muted); }
+    .page-title { display: flex; gap: 16px; align-items: flex-end; justify-content: space-between; margin-bottom: 18px; }
+    .proposal { margin-bottom: 18px; padding: 14px 16px; background: #fff7e8; border: 1px solid #f3ddb0; border-radius: 12px; }
+    .proposal h2 { margin: 0 0 8px; font-size: 14px; }
+    .proposal ul { margin: 0; padding-left: 18px; color: #5b5040; }
+    .proposal li { margin: 4px 0; }
+    .card { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+    .toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+    .select, .input { height: 32px; padding: 0 10px; color: var(--ink); background: #fff; border: 1px solid var(--line-strong); border-radius: 8px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 12px 14px; border-bottom: 1px solid #f0eee8; text-align: left; vertical-align: middle; }
+    th { color: #667180; background: #f7f8fa; font-size: 12px; font-weight: 700; }
+    td { color: #3d4a5d; font-size: 13px; }
+    tr:last-child td { border-bottom: 0; }
+    .tag { display: inline-block; padding: 1px 8px; border-radius: 6px; font-size: 12px; font-weight: 600; }
+    .tag-blue { color: #1d4f91; background: #e8f1fb; }
+    .tag-cyan { color: #0f6b7a; background: #e5f6f8; }
+    .tag-gold { color: #8a5a12; background: #fff4d6; }
+    .tag-green { color: var(--success); background: #edf3e6; }
+    .tag-red { color: #b42318; background: #fde8e6; }
+    .btn { height: 32px; padding: 0 12px; color: #3d4a5d; background: #fff; border: 1px solid var(--line-strong); border-radius: 8px; }
+    .btn-primary { color: #fff; background: var(--brand); border-color: var(--brand); }
+    .btn-primary:hover { background: var(--brand-dark); }
+    .hint { color: var(--muted); font-size: 12px; }
+    .ops { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .tabs { display: flex; gap: 4px; margin-bottom: 14px; padding: 4px; background: #fff; border: 1px solid var(--line); border-radius: 12px; width: fit-content; max-width: 100%; }
+    .tab { height: 36px; padding: 0 14px; color: #5b6572; background: transparent; border: 0; border-radius: 8px; }
+    .tab.is-on { color: var(--brand-dark); background: var(--brand-soft); font-weight: 700; }
+    .tab small { margin-left: 6px; color: #9aa0aa; }
+    .pager { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: flex-end; padding: 12px 14px; color: #526071; border-top: 1px solid var(--line); }
+    .pager .pg { min-width: 32px; height: 32px; padding: 0 10px; color: var(--ink); background: #fff; border: 1px solid #d9d9d9; border-radius: 6px; }
+    .pager .pg.is-on { color: #fff; background: var(--blue); border-color: var(--blue); }
+    .pager .pg:disabled { color: #bfbfbf; cursor: not-allowed; }
+    .pager .jump, .pager .size { display: flex; gap: 6px; align-items: center; }
+    .empty { padding: 36px 16px; color: var(--muted); text-align: center; }
+    .placeholder { padding: 48px 20px; color: var(--muted); background: #fff; border: 1px dashed var(--line-strong); border-radius: 12px; }
+    .new { margin-left: 6px; color: var(--brand); font-size: 11px; font-weight: 700; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sider">
+      <div class="brand">
+        <strong>乡味集</strong>
+        <span>社区团购 · 运营管理</span>
+      </div>
+      <nav class="nav" id="nav"></nav>
+      <div class="account">管理员<small>超级管理员 · 方案原型</small></div>
+    </aside>
+    <div class="main">
+      <header class="topbar">
+        <div class="crumb" id="crumb">履约管理 / <b>配送</b></div>
+        <button class="refresh" type="button">刷新</button>
+      </header>
+      <div class="content" id="content"></div>
+    </div>
+  </div>
+  <script>
+    const NAV = [
+      { key: "operations", label: "日常运营", items: [
+        { key: "dashboard", label: "工作台" },
+        { key: "products", label: "商品管理" },
+        { key: "campaigns", label: "团期管理" },
+        { key: "orders", label: "订单管理" },
+      ]},
+      { key: "fulfillment", label: "履约管理", items: [
+        { key: "logistics", label: "配送" },
+        { key: "arrivals", label: "点位到货" },
+        { key: "pickup-points", label: "区域与自提点" },
+      ]},
+      { key: "customers", label: "客户与资金", items: [
+        { key: "consumers", label: "消费者管理" },
+        { key: "service", label: "售后与异常" },
+        { key: "governance", label: "运营治理" },
+        { key: "finance", label: "财务管理" },
+      ]},
+      { key: "access", label: "权限与审计", items: [
+        { key: "audit", label: "审计记录" },
+        { key: "settings", label: "人员与权限" },
+      ]},
+    ];
+
+    const CRUMB = {
+      dashboard: ["日常运营", "工作台"],
+      products: ["日常运营", "商品管理"],
+      campaigns: ["日常运营", "团期管理"],
+      orders: ["日常运营", "订单管理"],
+      logistics: ["履约管理", "配送"],
+      arrivals: ["履约管理", "点位到货"],
+      "pickup-points": ["履约管理", "区域与自提点"],
+      consumers: ["客户与资金", "消费者管理"],
+      service: ["客户与资金", "售后与异常"],
+      governance: ["客户与资金", "运营治理"],
+      finance: ["客户与资金", "财务管理"],
+      audit: ["权限与审计", "审计记录"],
+      settings: ["权限与审计", "人员与权限"],
+    };
+
+    const titles = ["测试团期", "111", "工具大甩卖", "中秋月饼礼盒", "中秋促销", "周末鲜奶", "产地直发苹果", "玉米尝鲜", "鸡蛋加团", "秋日杂粮"];
+    const sites = ["繁兴街", "兴华路点", "车站西点"];
+    const now = Date.parse("2026-09-08T18:00:00+08:00");
+    const ago = (hours) => new Date(now - hours * 3600 * 1000);
+    const fmt = (d) => {
+      const p = (n) => String(n).padStart(2, "0");
+      return `${d.getMonth() + 1}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+    };
+
+    const plans = Array.from({ length: 47 }, (_, i) => {
+      const createdAt = ago(i * 5 + 1);
+      const status = i % 5 === 1 ? "SITE_CONFIRMED" : i % 7 === 0 ? "IN_TRANSIT" : "VEHICLE_BOOKED";
+      return {
+        id: "p" + i,
+        title: titles[i % titles.length] + (i > 9 ? " · " + (i + 1) : ""),
+        site: sites[i % sites.length],
+        vehicle: status === "SITE_CONFIRMED" ? "未登记" : "13333131331",
+        status,
+        createdAt,
+      };
+    });
+
+    const arrivals = Array.from({ length: 23 }, (_, i) => {
+      const createdAt = ago(i * 7 + 2);
+      const status = i % 4 === 0 ? "PENDING_ALLOCATION" : i % 4 === 1 ? "IN_TRANSIT" : i % 4 === 2 ? "ARRIVED" : "CONFIRMED";
+      return {
+        id: "a" + i,
+        title: titles[(i + 2) % titles.length] + (i > 4 ? " · " + (i + 3) : ""),
+        site: sites[i % sites.length],
+        status,
+        createdAt,
+      };
+    });
+
+    const quality = [];
+    const cancellations = Array.from({ length: 114 }, (_, i) => ({
+      id: "c" + i,
+      orderNo: "HT1788861002717704" + String(3022 + i).padStart(4, "0") + "D",
+      reason: i === 0 ? "用户中断取消" : i % 3 === 0 ? "重复下单" : "无法按时领取",
+      status: i === 0 ? "REFUNDED" : i % 8 === 0 ? "PENDING_REVIEW" : "REFUNDED",
+      createdAt: ago(i * 3 + 0.5),
+    }));
+    const exceptions = Array.from({ length: 8 }, (_, i) => ({
+      id: "e" + i,
+      orderNo: "HT1788EX" + String(1000 + i),
+      site: sites[i % sites.length],
+      type: i % 2 ? "短少" : "破损",
+      qty: (i % 3) + 1,
+      amount: ((i % 3) + 1) * 12,
+      status: i === 0 ? "REFUND_CONFIRMED" : "REGISTERED",
+      createdAt: ago(i * 9 + 4),
+    }));
+    const pickups = Array.from({ length: 5 }, (_, i) => ({
+      id: "w" + i,
+      orderNo: "HT1788PK" + String(2000 + i),
+      site: sites[i % sites.length],
+      deadline: fmt(ago(-26 + i)),
+      status: "EXPIRED_PENDING",
+      createdAt: ago(i * 11 + 6),
+    }));
+    const orders = Array.from({ length: 86 }, (_, i) => ({
+      id: "o" + i,
+      orderNo: "HT1788OR" + String(8800 + i),
+      amount: (88 + (i % 9) * 12).toFixed(2),
+      goods: titles[i % titles.length] + " × " + ((i % 3) + 1),
+      paidAt: ago(i * 2.2 + 0.2),
+      status: i % 6 === 0 ? "PAID" : i % 6 === 1 ? "FULFILLING" : "COMPLETED",
+    }));
+    const areas = [
+      { name: "定兴县城区", path: "河北省 / 保定市 / 定兴县", enabled: true, createdAt: ago(40) },
+      { name: "固城片区", path: "河北省 / 保定市 / 定兴县", enabled: false, createdAt: ago(12) },
+    ].sort((a, b) => b.createdAt - a.createdAt);
+    const points = [
+      { name: "繁兴街", address: "定兴镇定兴镇繁兴街", hours: "每日 09:00–20:00", status: "ACTIVE", createdAt: ago(30) },
+      { name: "兴华路点", address: "兴华路社区门口", hours: "每日 08:30–19:30", status: "ACTIVE", createdAt: ago(8) },
+      { name: "车站西点", address: "车站西出口", hours: "每日 09:00–21:00", status: "INACTIVE", createdAt: ago(3) },
+    ].sort((a, b) => b.createdAt - a.createdAt);
+
+    const statusLabel = {
+      SITE_CONFIRMED: ["点位已确认", "tag-cyan"],
+      VEHICLE_BOOKED: ["已约车", "tag-blue"],
+      IN_TRANSIT: ["运输中", "tag-gold"],
+      PENDING_ALLOCATION: ["待确认差异", "tag-gold"],
+      ARRIVED: ["已到货", "tag-blue"],
+      CONFIRMED: ["到货已确认", "tag-green"],
+      REFUNDED: ["已退款", "tag-blue"],
+      PENDING_REVIEW: ["待审核", "tag-gold"],
+      REFUND_CONFIRMED: ["待财务退款", "tag-gold"],
+      REGISTERED: ["已登记", "tag-blue"],
+      EXPIRED_PENDING: ["逾期待处理", "tag-red"],
+      PAID: ["已支付", "tag-blue"],
+      FULFILLING: ["履约中", "tag-gold"],
+      COMPLETED: ["已完成", "tag-green"],
+      ACTIVE: ["启用", "tag-green"],
+      INACTIVE: ["停用", "tag-red"],
+    };
+
+    function tag(status) {
+      const [text, cls] = statusLabel[status] || [status, "tag-blue"];
+      return `<span class="tag ${cls}">${text}</span>`;
+    }
+
+    function slicePage(rows, page, size) {
+      const total = rows.length;
+      const pages = Math.max(1, Math.ceil(total / size));
+      const current = Math.min(page, pages);
+      return { rows: rows.slice((current - 1) * size, current * size), total, page: current, pageSize: size, pages };
+    }
+
+    function pager(id, state) {
+      const { page, pages, total, pageSize } = state;
+      const nums = [];
+      const start = Math.max(1, page - 2);
+      const end = Math.min(pages, start + 4);
+      for (let n = start; n <= end; n++) nums.push(n);
+      const options = Array.from({ length: pages }, (_, i) => `<option value="${i + 1}" ${i + 1 === page ? "selected" : ""}>${i + 1}</option>`).join("");
+      return `
+        <div class="pager" data-pager="${id}">
+          <button class="pg" data-to="${page - 1}" ${page <= 1 ? "disabled" : ""}>上一页</button>
+          ${nums.map((n) => `<button class="pg ${n === page ? "is-on" : ""}" data-to="${n}">${n}</button>`).join("")}
+          <button class="pg" data-to="${page + 1}" ${page >= pages ? "disabled" : ""}>下一页</button>
+          <label class="jump">到
+            <select class="select" data-jump>${options}</select>
+            页
+          </label>
+          <label class="size">
+            <select class="select" data-size>
+              ${[10, 20, 50].map((n) => `<option value="${n}" ${n === pageSize ? "selected" : ""}>${n} 条/页</option>`).join("")}
+            </select>
+          </label>
+          <span>共 ${total} 条</span>
+        </div>`;
+    }
+
+    const tables = {};
+    function bindPager(id, render) {
+      const root = document.querySelector(`[data-pager="${id}"]`);
+      if (!root) return;
+      root.querySelectorAll("[data-to]").forEach((btn) => {
+        btn.onclick = () => {
+          const to = Number(btn.dataset.to);
+          if (to < 1) return;
+          tables[id].page = to;
+          render();
+        };
+      });
+      root.querySelector("[data-jump]").onchange = (e) => {
+        tables[id].page = Number(e.target.value);
+        render();
+      };
+      root.querySelector("[data-size]").onchange = (e) => {
+        tables[id].pageSize = Number(e.target.value);
+        tables[id].page = 1;
+        render();
+      };
+    }
+
+    function proposal(extra) {
+      return `
+        <div class="proposal">
+          <h2>方案原型（未改正式代码）</h2>
+          <ul>
+            <li>列表一律<strong>新的在上、旧的在下</strong>，并补上「更新时间」方便核对。</li>
+            <li>「配送与到货」拆成两个菜单：<strong>配送</strong>只做约车/发车，<strong>点位到货</strong>只做确认到货和差异草案。</li>
+            <li>分页按你给的 P2：上一页 / 页码 / 下一页 / 到第几页 / 共 N 条，并加上每页 10 / 20 / 50 条。</li>
+            <li>原来一页叠多张表的，改成页内页签，一次只做一类事。点位负责人仍只用「点位工作台」，不进这两页核销。</li>
+          </ul>
+          ${extra || ""}
+        </div>`;
+    }
+
+    function planActions(row) {
+      if (row.status === "SITE_CONFIRMED") {
+        return `<div class="ops"><button class="btn">登记运输信息</button><span class="hint">等待运营登记运输信息</span></div>`;
+      }
+      if (row.status === "VEHICLE_BOOKED") {
+        return `<div class="ops"><button class="btn">编辑运输信息</button><button class="btn btn-primary">创建批次并发车</button><span class="hint">等待运营发车</span></div>`;
+      }
+      return `<div class="ops"><span class="hint">等待点位负责人确认到货</span></div>`;
+    }
+
+    function arrivalActions(row) {
+      if (row.status === "PENDING_ALLOCATION") {
+        return `<div class="ops"><button class="btn btn-primary">确认差异分配</button><span class="hint">待运营确认差异分配</span></div>`;
+      }
+      if (row.status === "IN_TRANSIT") {
+        return `<div class="ops"><span class="hint">等待点位负责人确认到货</span></div>`;
+      }
+      if (row.status === "ARRIVED") {
+        return `<div class="ops"><button class="btn" style="color:#b42318;border-color:#f0b4ad">紧急代办到货</button></div>`;
+      }
+      return `<div class="ops"><span class="hint">到货已确认</span></div>`;
+    }
+
+    function renderNav(active) {
+      document.getElementById("nav").innerHTML = NAV.map((group) => `
+        <details class="nav-group" open>
+          <summary>${group.label}</summary>
+          ${group.items.map((item) => `<button class="nav-item ${item.key === active ? "is-active" : ""}" data-page="${item.key}">${item.label}</button>`).join("")}
+        </details>
+      `).join("");
+      document.querySelectorAll(".nav-item").forEach((btn) => {
+        btn.onclick = () => show(btn.dataset.page);
+      });
+    }
+
+    function show(page) {
+      renderNav(page);
+      const [group, label] = CRUMB[page];
+      document.getElementById("crumb").innerHTML = `${group} / <b>${label}</b>`;
+      const root = document.getElementById("content");
+      const renderers = {
+        logistics: renderLogistics,
+        arrivals: renderArrivals,
+        service: renderService,
+        "pickup-points": renderAreas,
+        finance: renderFinance,
+        governance: renderGovernance,
+        orders: renderOrders,
+      };
+      (renderers[page] || renderPlaceholder)(root, page);
+    }
+
+    function renderLogistics(root) {
+      tables.logistics ||= { page: 1, pageSize: 20 };
+      const draw = () => {
+        const state = slicePage(plans, tables.logistics.page, tables.logistics.pageSize);
+        tables.logistics.page = state.page;
+        root.innerHTML = `
+          <section class="page is-on">
+            <div class="page-title">
+              <div>
+                <h1>配送</h1>
+                <p>运营登记车辆并确认发车。到货确认已挪到「点位到货」。</p>
+              </div>
+            </div>
+            ${proposal("<p>对照你现在的页：运输表下面不再跟一张点位到货表。</p>")}
+            <div class="card">
+              <div class="toolbar">
+                <select class="select"><option>全部状态</option><option>点位已确认</option><option>已约车</option><option>运输中</option></select>
+              </div>
+              <table>
+                <thead><tr><th>团期</th><th>自提点</th><th>车辆</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead>
+                <tbody>
+                  ${state.rows.map((row, index) => `
+                    <tr>
+                      <td>${row.title}${state.page === 1 && index === 0 ? '<span class="new">最新</span>' : ""}</td>
+                      <td>${row.site}</td>
+                      <td>${row.vehicle}</td>
+                      <td>${tag(row.status)}</td>
+                      <td>${fmt(row.createdAt)}</td>
+                      <td>${planActions(row)}</td>
+                    </tr>`).join("")}
+                </tbody>
+              </table>
+              ${pager("logistics", state)}
+            </div>
+          </section>`;
+        bindPager("logistics", draw);
+      };
+      draw();
+    }
+
+    function renderArrivals(root) {
+      tables.arrivals ||= { page: 1, pageSize: 20 };
+      const draw = () => {
+        const state = slicePage(arrivals, tables.arrivals.page, tables.arrivals.pageSize);
+        tables.arrivals.page = state.page;
+        root.innerHTML = `
+          <section class="page is-on">
+            <div class="page-title">
+              <div>
+                <h1>点位到货</h1>
+                <p>查看在途与已到货批次。点位负责人在工作台逐商品确认；运营只确认差异草案，超管可紧急代办。</p>
+              </div>
+            </div>
+            ${proposal("<p>这页不再出现登记车辆、发车按钮，避免和配送抢同一屏。</p>")}
+            <div class="card">
+              <table>
+                <thead><tr><th>团期</th><th>自提点</th><th>状态</th><th>差异草案</th><th>更新时间</th><th>操作</th></tr></thead>
+                <tbody>
+                  ${state.rows.map((row, index) => `
+                    <tr>
+                      <td>${row.title}${state.page === 1 && index === 0 ? '<span class="new">最新</span>' : ""}</td>
+                      <td>${row.site}</td>
+                      <td>${tag(row.status)}</td>
+                      <td>${row.status === "PENDING_ALLOCATION" ? "待运营确认" : "—"}</td>
+                      <td>${fmt(row.createdAt)}</td>
+                      <td>${arrivalActions(row)}</td>
+                    </tr>`).join("")}
+                </tbody>
+              </table>
+              ${pager("arrivals", state)}
+            </div>
+          </section>`;
+        bindPager("arrivals", draw);
+      };
+      draw();
+    }
+
+    function renderService(root) {
+      tables.service ||= { tab: "cancellations", page: 1, pageSize: 20 };
+      const tabs = [
+        { key: "quality", label: "品质售后", rows: quality },
+        { key: "cancellations", label: "取消申请", rows: cancellations },
+        { key: "exceptions", label: "履约差异", rows: exceptions },
+        { key: "pickups", label: "逾期领取", rows: pickups },
+      ];
+      const draw = () => {
+        const tab = tabs.find((item) => item.key === tables.service.tab) || tabs[1];
+        const state = slicePage(tab.rows, tables.service.page, tables.service.pageSize);
+        tables.service.page = state.page;
+        const heads = {
+          quality: "<th>订单</th><th>商品/数量/问题</th><th>申报时间</th><th>状态</th><th>操作</th>",
+          cancellations: "<th>订单</th><th>原因</th><th>状态</th><th>更新时间</th><th>操作</th>",
+          exceptions: "<th>订单</th><th>自提点</th><th>异常类型</th><th>可复核金额</th><th>状态</th><th>更新时间</th>",
+          pickups: "<th>订单</th><th>自提点</th><th>截止时间</th><th>状态</th><th>操作</th>",
+        };
+        const body = {
+          quality: () => `<tr><td colspan="5" class="empty">暂无数据</td></tr>`,
+          cancellations: () => state.rows.map((row, index) => `
+            <tr>
+              <td class="mono">${row.orderNo}${state.page === 1 && index === 0 ? '<span class="new">最新</span>' : ""}</td>
+              <td>${row.reason}</td>
+              <td>${tag(row.status)}</td>
+              <td>${fmt(row.createdAt)}</td>
+              <td>${row.status === "PENDING_REVIEW" ? '<div class="ops"><button class="btn btn-primary">批准</button><button class="btn">拒绝</button></div>' : "—"}</td>
+            </tr>`).join(""),
+          exceptions: () => state.rows.map((row) => `
+            <tr>
+              <td class="mono">${row.orderNo}</td>
+              <td>${row.site}</td>
+              <td>${row.type}</td>
+              <td>¥${row.amount.toFixed(2)}</td>
+              <td>${tag(row.status)}</td>
+              <td>${fmt(row.createdAt)}</td>
+            </tr>`).join(""),
+          pickups: () => state.rows.map((row) => `
+            <tr>
+              <td class="mono">${row.orderNo}</td>
+              <td>${row.site}</td>
+              <td>${row.deadline}</td>
+              <td>${tag(row.status)}</td>
+              <td><div class="ops"><button class="btn">一次延期</button><button class="btn">登记退款</button><button class="btn" style="color:#b42318;border-color:#f0b4ad">登记报损</button></div></td>
+            </tr>`).join(""),
+        };
+        root.innerHTML = `
+          <section class="page is-on">
+            <div class="page-title">
+              <div>
+                <h1>售后与异常</h1>
+                <p>客服受理、运营决定、财务退款，职责分离。一次只看一类队列。</p>
+              </div>
+            </div>
+            ${proposal("<p>现状是品质 / 取消 / 履约差异 / 逾期领取四张表竖着叠。方案改成页签，底部独立分页。</p>")}
+            <div class="tabs">
+              ${tabs.map((item) => `<button class="tab ${item.key === tab.key ? "is-on" : ""}" data-tab="${item.key}">${item.label}<small>${item.rows.length}</small></button>`).join("")}
+            </div>
+            <div class="card">
+              <div class="toolbar">
+                <select class="select"><option>全部可见状态</option></select>
+              </div>
+              <table>
+                <thead><tr>${heads[tab.key]}</tr></thead>
+                <tbody>${body[tab.key]()}</tbody>
+              </table>
+              ${pager("service", state)}
+            </div>
+          </section>`;
+        root.querySelectorAll("[data-tab]").forEach((btn) => {
+          btn.onclick = () => {
+            tables.service.tab = btn.dataset.tab;
+            tables.service.page = 1;
+            draw();
+          };
+        });
+        bindPager("service", draw);
+      };
+      draw();
+    }
+
+    function renderAreas(root) {
+      tables.areas ||= { tab: "points" };
+      const draw = () => {
+        const tab = tables.areas.tab;
+        root.innerHTML = `
+          <section class="page is-on">
+            <div class="page-title">
+              <div>
+                <h1>区域与自提点</h1>
+                <p>先配置真实区域与启用自提点，再建立商品和团期。</p>
+              </div>
+              <button class="btn btn-primary">${tab === "areas" ? "开通更多区域" : "新增自提点"}</button>
+            </div>
+            ${proposal("<p>现状是区域表和自提点表叠在同一页。方案用页签分开，右上角按钮跟随当前页签。</p>")}
+            <div class="tabs">
+              <button class="tab ${tab === "areas" ? "is-on" : ""}" data-tab="areas">服务区域<small>${areas.length}</small></button>
+              <button class="tab ${tab === "points" ? "is-on" : ""}" data-tab="points">自提点<small>${points.length}</small></button>
+            </div>
+            <div class="card">
+              ${tab === "areas" ? `
+                <table>
+                  <thead><tr><th>区域</th><th>行政目录</th><th>更新时间</th><th>接单</th></tr></thead>
+                  <tbody>${areas.map((row) => `<tr><td>${row.name}</td><td>${row.path}</td><td>${fmt(row.createdAt)}</td><td><button class="btn">${row.enabled ? "暂停" : "开启"}</button></td></tr>`).join("")}</tbody>
+                </table>` : `
+                <table>
+                  <thead><tr><th>名称</th><th>地址</th><th>营业时间</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead>
+                  <tbody>${points.map((row) => `<tr><td>${row.name}</td><td>${row.address}</td><td>${row.hours}</td><td>${tag(row.status)}</td><td>${fmt(row.createdAt)}</td><td><button class="btn">编辑</button></td></tr>`).join("")}</tbody>
+                </table>`}
+            </div>
+          </section>`;
+        root.querySelectorAll("[data-tab]").forEach((btn) => {
+          btn.onclick = () => {
+            tables.areas.tab = btn.dataset.tab;
+            draw();
+          };
+        });
+      };
+      draw();
+    }
+
+    function renderFinance(root) {
+      tables.finance ||= { tab: "todo" };
+      const draw = () => {
+        const tab = tables.finance.tab;
+        root.innerHTML = `
+          <section class="page is-on">
+            <div class="page-title">
+              <div>
+                <h1>财务管理</h1>
+                <p>财务只执行已批准退款，并核对双向平衡账本。</p>
+              </div>
+            </div>
+            ${proposal("<p>现状把退款记录、四类待执行退款和流水叠在一页。方案拆成三个页签。</p>")}
+            <div class="tabs">
+              <button class="tab ${tab === "todo" ? "is-on" : ""}" data-tab="todo">待执行退款</button>
+              <button class="tab ${tab === "records" ? "is-on" : ""}" data-tab="records">退款记录</button>
+              <button class="tab ${tab === "ledger" ? "is-on" : ""}" data-tab="ledger">财务流水</button>
+            </div>
+            <div class="card">
+              ${tab === "todo" ? `
+                <table>
+                  <thead><tr><th>来源</th><th>订单</th><th>金额</th><th>状态</th><th>操作</th></tr></thead>
+                  <tbody>
+                    <tr><td>品质售后</td><td class="mono">HT1788QA1001</td><td>¥24.00</td><td>${tag("PENDING_ALLOCATION")}</td><td><button class="btn btn-primary">执行退款</button></td></tr>
+                    <tr><td>到货差异</td><td class="mono">HT1788EX1000</td><td>¥12.00</td><td>${tag("REFUND_CONFIRMED")}</td><td><button class="btn btn-primary">执行退款</button></td></tr>
+                  </tbody>
+                </table>` : tab === "records" ? `
+                <table>
+                  <thead><tr><th>退款单</th><th>订单</th><th>金额</th><th>状态</th><th>时间</th></tr></thead>
+                  <tbody>
+                    <tr><td class="mono">RF-20260908-01</td><td class="mono">HT17888610027177043022D</td><td>¥36.00</td><td>${tag("REFUNDED")}</td><td>9-08 17:40</td></tr>
+                  </tbody>
+                </table>` : `
+                <table>
+                  <thead><tr><th>事件</th><th>关联单据</th><th>借方合计</th><th>贷方合计</th><th>平衡</th><th>时间</th></tr></thead>
+                  <tbody>
+                    <tr><td>部分退款入账</td><td class="mono">RF-20260908-01</td><td>¥36.00</td><td>¥36.00</td><td>${tag("COMPLETED")}</td><td>9-08 17:41</td></tr>
+                  </tbody>
+                </table>`}
+            </div>
+          </section>`;
+        root.querySelectorAll("[data-tab]").forEach((btn) => {
+          btn.onclick = () => {
+            tables.finance.tab = btn.dataset.tab;
+            draw();
+          };
+        });
+      };
+      draw();
+    }
+
+    function renderGovernance(root) {
+      tables.governance ||= { tab: "notice" };
+      const draw = () => {
+        const tab = tables.governance.tab;
+        root.innerHTML = `
+          <section class="page is-on">
+            <div class="page-title">
+              <div>
+                <h1>运营治理</h1>
+                <p>人工通知队列和区域开通意向分开处理。</p>
+              </div>
+            </div>
+            ${proposal("<p>现状是通知队列和开通意向叠在一页。方案同样改成页签。</p>")}
+            <div class="tabs">
+              <button class="tab ${tab === "notice" ? "is-on" : ""}" data-tab="notice">通知人工处理</button>
+              <button class="tab ${tab === "interest" ? "is-on" : ""}" data-tab="interest">区域开通意向</button>
+            </div>
+            <div class="card">
+              ${tab === "notice" ? `<div class="empty">暂无需要人工跟进的通知</div>` : `
+                <table>
+                  <thead><tr><th>区域意向</th><th>联系方式</th><th>状态</th><th>更新时间</th></tr></thead>
+                  <tbody><tr><td>徐水区</td><td>已脱敏</td><td>${tag("PENDING_REVIEW")}</td><td>9-08 10:12</td></tr></tbody>
+                </table>`}
+            </div>
+          </section>`;
+        root.querySelectorAll("[data-tab]").forEach((btn) => {
+          btn.onclick = () => {
+            tables.governance.tab = btn.dataset.tab;
+            draw();
+          };
+        });
+      };
+      draw();
+    }
+
+    function renderOrders(root) {
+      tables.orders ||= { page: 1, pageSize: 20 };
+      const draw = () => {
+        const state = slicePage(orders, tables.orders.page, tables.orders.pageSize);
+        tables.orders.page = state.page;
+        root.innerHTML = `
+          <section class="page is-on">
+            <div class="page-title">
+              <div>
+                <h1>订单管理</h1>
+                <p>按完整订单号搜索。列表改为新单在上，底部可选每页条数。</p>
+              </div>
+              <input class="input" placeholder="输入完整订单号" />
+            </div>
+            <div class="card">
+              <table>
+                <thead><tr><th>订单号</th><th>金额</th><th>商品</th><th>支付时间</th><th>状态</th><th>操作</th></tr></thead>
+                <tbody>
+                  ${state.rows.map((row, index) => `
+                    <tr>
+                      <td class="mono">${row.orderNo}${state.page === 1 && index === 0 ? '<span class="new">最新</span>' : ""}</td>
+                      <td>¥${row.amount}</td>
+                      <td>${row.goods}</td>
+                      <td>${fmt(row.paidAt)}</td>
+                      <td>${tag(row.status)}</td>
+                      <td><button class="btn">查看详情</button></td>
+                    </tr>`).join("")}
+                </tbody>
+              </table>
+              ${pager("orders", state)}
+            </div>
+          </section>`;
+        bindPager("orders", draw);
+      };
+      draw();
+    }
+
+    function renderPlaceholder(root, page) {
+      const label = CRUMB[page][1];
+      root.innerHTML = `
+        <section class="page is-on">
+          <div class="page-title"><div><h1>${label}</h1><p>本页信息架构保持不变，这次不改布局。</p></div></div>
+          <div class="placeholder">占位。正式改动将先落在配送、点位到货、售后与异常，以及统一的新到旧排序和分页。</div>
+        </section>`;
+    }
+
+    show("logistics");
+  </script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+services:
+  migrate:
+    image: readiness-backend:20260908
+  integration:
+    image: readiness-backend:20260908
+    # The first full check passed lint, typecheck and tests but Vite was killed
+    # by the shared 768 MiB runner ceiling. Keep an explicit bounded exception
+    # for this build-heavy service only; the 3.4 GiB host had >2.5 GiB available.
+    mem_limit: 1280m
+    memswap_limit: 1280m
+    environment:
+      NODE_OPTIONS: --max-old-space-size=896
+  capacity:
+    image: readiness-backend:20260908

@@ -10,7 +10,11 @@ export interface SubscriptionInput {
   credential?: PickupCredential | null; refund?: PartialRefund | null;
 }
 export interface SubscriptionMessageProvider {
-  send(input: SubscriptionInput): Promise<void>;
+  /**
+   * Providers should honour `signal` so the worker's bounded delivery window
+   * also stops the underlying transport rather than merely racing its result.
+   */
+  send(input: SubscriptionInput, options?: { signal?: AbortSignal }): Promise<void>;
   prepare?(input: SubscriptionInput): void;
   templateIdFor?(type: OrderNotificationType): string | undefined;
 }
@@ -122,7 +126,7 @@ export class WechatSubscriptionMessageProvider implements SubscriptionMessagePro
     assertSubscriptionData(subscriptionGroup(input.notification.type), template.dataTemplate);
     return { template, data: renderData(template.dataTemplate, templateValues(input, this.config.PICKUP_CODE_SECRET)) };
   }
-  public async send(input: SubscriptionInput): Promise<void> {
+  public async send(input: SubscriptionInput, options?: { signal?: AbortSignal }): Promise<void> {
     const { template, data } = this.payload(input);
     const response = await this.call(template.templateId!, {
       touser: input.user.wechatOpenId,
@@ -131,17 +135,21 @@ export class WechatSubscriptionMessageProvider implements SubscriptionMessagePro
       miniprogram_state: this.config.WECHAT_SUBSCRIBE_MINIPROGRAM_STATE,
       lang: 'zh_CN',
       data: data,
-    });
+    }, false, options?.signal);
     if (response.errcode !== 0)
       throw new Error(
         `微信订阅消息发送失败：${response.errcode} ${response.errmsg ?? ""}`.trim(),
       );
   }
 
-  private async call(templateId: string, payload: Record<string, unknown>, retried = false): Promise<WechatReply> {
-    const token = await this.getAccessToken();
+  private requestSignal(signal?: AbortSignal): AbortSignal {
+    return signal ? AbortSignal.any([signal, AbortSignal.timeout(8_000)]) : AbortSignal.timeout(8_000);
+  }
+
+  private async call(templateId: string, payload: Record<string, unknown>, retried = false, signal?: AbortSignal): Promise<WechatReply> {
+    const token = await this.getAccessToken(signal);
     const response = await fetch(`https://api.weixin.qq.com/cgi-bin/message/subscribe/send?access_token=${encodeURIComponent(token)}`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload), signal: AbortSignal.timeout(8_000),
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload), signal: this.requestSignal(signal),
     });
     const raw = await readReply(response, "微信订阅消息");
     const errcode = replyErrorCode(raw, "微信订阅消息");
@@ -153,17 +161,17 @@ export class WechatSubscriptionMessageProvider implements SubscriptionMessagePro
       : { errcode };
     if (!retried && (errcode === 40001 || errcode === 42001)) {
       this.accessToken = null;
-      return this.call(templateId, payload, true);
+      return this.call(templateId, payload, true, signal);
     }
     void templateId;
     return body;
   }
 
-  private async getAccessToken(): Promise<string> {
+  private async getAccessToken(signal?: AbortSignal): Promise<string> {
     if (this.accessToken && this.accessToken.expiresAt > Date.now() + 60_000) return this.accessToken.value;
     if (!this.config.WECHAT_APP_ID || !this.config.WECHAT_APP_SECRET) throw new Error('微信应用凭据尚未配置');
     const params = new URLSearchParams({ grant_type: 'client_credential', appid: this.config.WECHAT_APP_ID, secret: this.config.WECHAT_APP_SECRET });
-    const response = await fetch(`https://api.weixin.qq.com/cgi-bin/token?${params.toString()}`, { signal: AbortSignal.timeout(8_000) });
+    const response = await fetch(`https://api.weixin.qq.com/cgi-bin/token?${params.toString()}`, { signal: this.requestSignal(signal) });
     const raw = await readReply(response, "微信访问令牌");
     const errcode = replyErrorCode(raw, "微信访问令牌");
     const accessToken = raw.access_token;

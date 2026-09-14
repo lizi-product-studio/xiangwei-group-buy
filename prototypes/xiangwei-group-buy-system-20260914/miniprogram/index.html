@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>乡味集小程序 · 15PM 全界面</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="board">
+    <header class="board__head">
+      <p class="board__kicker">乡味集 · 消费者小程序</p>
+      <h1>iPhone 15 Pro Max · 全部界面</h1>
+      <p class="board__lead">一套暖纸浅色。左边按模块点开每一页：逛团、购物车、结算、订单全部状态、取货码、售后、我的、登录、消息、意向、帮助和协议。</p>
+    </header>
+    <div id="screenSwitch"></div>
+    <dl class="diff" id="diff">
+      <dt>颜色</dt>
+      <dd>不再用墨绿大色块。状态用浅底卡片 + 语义色标签，和首页、商品详情同一套纸色。</dd>
+      <dt>状态页</dt>
+      <dd>订单进度改为纵向时间轴，按状态给步骤。待付款不会显示成「等待成团」。退款失败等异常走 2–3 步，不用横排五点。</dd>
+    </dl>
+  </div>
+
+  <main class="stage">
+    <div class="device" id="device">
+      <div class="device__chrome">
+        <div class="status-bar">
+          <span>9:41</span>
+          <i class="island" aria-hidden="true"></i>
+          <span class="status-bar__sys">5G ▮▮▮▮</span>
+        </div>
+        <div class="mini-nav" id="miniNav">
+          <button class="mini-nav__back" id="navBack" type="button" hidden>‹</button>
+          <span id="navTitle">乡味集</span>
+        </div>
+      </div>
+      <div class="screen" id="screen"></div>
+      <nav class="tabbar" id="tabbar"></nav>
+      <div class="home-indicator" aria-hidden="true"></div>
+    </div>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>

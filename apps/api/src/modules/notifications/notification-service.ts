@@ -81,6 +81,11 @@ function copy(
 
 /** Durable notification outbox. Request paths enqueue only; a worker drains delivery later. */
 export class NotificationService {
+  // Per-service concurrency only. Count real unsettled provider calls, including
+  // requests which ignore cancellation after the delivery deadline.
+  private readonly activeProviderCalls = new Set<Promise<void>>();
+  private drainTail: Promise<void> = Promise.resolve();
+
   public constructor(
     private readonly store: CommerceStore,
     private readonly provider: SubscriptionMessageProvider,
@@ -171,8 +176,17 @@ export class NotificationService {
     });
   }
 
-  /** Claims and sends bounded outbox work; safe to invoke concurrently from multiple API instances. */
+  /** Serialises drains within this service; durable claims fence duplicate sends across instances. */
   public async drainPending(limit = 100): Promise<number> {
+    const preceding = this.drainTail;
+    let release!: () => void;
+    this.drainTail = new Promise<void>(resolve => { release = resolve; });
+    await preceding;
+    try { return await this.drainAvailable(limit); }
+    finally { release(); }
+  }
+
+  private async drainAvailable(limit: number): Promise<number> {
     const requestedLimit = Number.isFinite(limit)
       ? Math.trunc(limit)
       : deliveryBatchLimit;
@@ -180,16 +194,19 @@ export class NotificationService {
     const deadline = Date.now() + deliveryTimeBudgetMs;
     let attempted = 0;
     while (attempted < safeLimit && Date.now() < deadline) {
+      const availableConcurrency = deliveryConcurrency - this.activeProviderCalls.size;
+      if (availableConcurrency <= 0) break;
+      const claimLimit = Math.min(availableConcurrency, safeLimit - attempted);
       const claimToken = randomUUID();
       const claimed = await this.store.claimPendingOrderNotifications(
-        Math.min(deliveryConcurrency, safeLimit - attempted),
+        claimLimit,
         deliveryLeaseMilliseconds,
         claimToken,
       );
       if (!claimed.length) break;
       attempted += claimed.length;
-      // Settle every in-flight attempt before returning, even if one DB write
-      // fails; the caller must never release ownership while work continues.
+      // Finish each delivery's persistence/timeout handling even if a DB write
+      // fails. Timed-out transports may remain active and retain their slots.
       const outcomes = await Promise.allSettled(claimed.map(notification => this.deliver(notification, claimToken, deadline)));
       const failed = outcomes.find((value): value is PromiseRejectedResult => value.status === "rejected");
       if (failed) throw failed.reason;
@@ -267,10 +284,18 @@ export class NotificationService {
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         if (remaining === 0) throw new Error("notification delivery time budget elapsed before provider call");
-        const sending = this.provider.send({ ...input, notification: submission });
+        const controller = new AbortController();
+        const sending = this.provider.send(
+          { ...input, notification: submission },
+          { signal: controller.signal },
+        );
+        this.trackProviderCall(sending);
         if (Number.isFinite(remaining)) {
           await Promise.race([sending, new Promise<never>((_, reject) => {
-            timer = setTimeout(() => reject(new Error("notification delivery time budget exceeded; submission result unknown")), remaining);
+            timer = setTimeout(() => {
+              controller.abort();
+              reject(new Error("notification delivery time budget exceeded; submission result unknown"));
+            }, remaining);
           })]);
         } else await sending;
       } finally {
@@ -295,6 +320,14 @@ export class NotificationService {
         ),
       );
     }
+  }
+
+  private trackProviderCall(sending: Promise<void>): void {
+    this.activeProviderCalls.add(sending);
+    void sending.then(
+      () => this.activeProviderCalls.delete(sending),
+      () => this.activeProviderCalls.delete(sending),
+    );
   }
 
   /**

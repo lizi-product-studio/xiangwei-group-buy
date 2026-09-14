@@ -1,0 +1,9 @@
+FROM readiness-backend:20260908
+COPY infra/readiness-test/configure-browser-build.mjs infra/readiness-test/configure-browser-build.mjs
+RUN node infra/readiness-test/configure-browser-build.mjs \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && node infra/readiness-test/configure-browser-build.mjs --system-ca
+# The designated host has a 3 Mbps public link. Keep Playwright's verified HTTPS
+# download, but allow a slow or briefly stalled official CDN connection to finish.
+RUN PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT=300000 pnpm exec playwright install --with-deps --only-shell chromium

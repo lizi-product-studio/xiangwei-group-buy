@@ -1,0 +1,103 @@
+name: readiness-20260908
+x-runner: &runner
+  image: readiness-runner:20260908
+  init: true
+  mem_limit: 768m
+  memswap_limit: 768m
+  cpus: 1.0
+  pids_limit: 256
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  networks: [isolated]
+  volumes:
+    - /opt/readiness-test-20260908/evidence:/evidence
+  environment: &safe-env
+    CI: 'true'
+    NODE_ENV: test
+    NODE_OPTIONS: --max-old-space-size=512
+    AUTH_PROVIDER: demo
+    PAYMENT_PROVIDER: mock
+    HOST: 127.0.0.1
+    E2E_API_PORT: '3101'
+    E2E_ADMIN_PORT: '5174'
+    E2E_API_BASE_URL: http://127.0.0.1:3101
+    E2E_ADMIN_BASE_URL: http://127.0.0.1:5174
+    READINESS_TASK: TASK-20260908-ISOLATED-SERVER-TEST
+    READINESS_TARGET: 180.76.100.156
+services:
+  readiness-mysql:
+    image: mysql:8.4
+    mem_limit: 640m
+    memswap_limit: 640m
+    cpus: 0.75
+    pids_limit: 128
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Run prepare.mjs}
+    command: [--innodb-buffer-pool-size=128M, --max-connections=50, --performance-schema=OFF, --mysqlx=OFF]
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - /opt/readiness-test-20260908/secrets/init.sql:/docker-entrypoint-initdb.d/01-readiness.sql:ro
+      - /opt/readiness-test-20260908/secrets/grants.sql:/run/readiness-grants.sql:ro
+    networks: [isolated]
+    healthcheck:
+      test: [CMD-SHELL, 'MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysqladmin ping -uroot --silent']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+  readiness-redis:
+    image: redis:7.4-alpine
+    mem_limit: 96m
+    memswap_limit: 96m
+    cpus: 0.25
+    pids_limit: 32
+    command: [redis-server, /usr/local/etc/redis/readiness.conf]
+    volumes:
+      - redis-data:/data
+      - /opt/readiness-test-20260908/secrets/redis.conf:/usr/local/etc/redis/readiness.conf:ro
+    networks: [isolated]
+    healthcheck:
+      test: [CMD-SHELL, 'test "$$(redis-cli ping 2>&1)" = "NOAUTH Authentication required."']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  migrate:
+    <<: *runner
+    profiles: [tools]
+    command: [migrate]
+    environment:
+      <<: *safe-env
+      READINESS_MIGRATOR_PASSWORD: ${MIGRATOR_PASSWORD:?Run prepare.mjs}
+  integration:
+    <<: *runner
+    profiles: [tools]
+    command: [check]
+    environment:
+      <<: *safe-env
+      REQUIRE_INTEGRATION_TESTS: 'true'
+      DATABASE_URL: mysql://readiness_integration:${INTEGRATION_PASSWORD:?Run prepare.mjs}@readiness-mysql:3306/readiness_integration_20260908
+      INTEGRATION_DATABASE_URL: mysql://readiness_integration:${INTEGRATION_PASSWORD:?Run prepare.mjs}@readiness-mysql:3306/readiness_integration_20260908
+      INTEGRATION_REDIS_URL: redis://:${REDIS_PASSWORD:?Run prepare.mjs}@readiness-redis:6379/6
+  capacity:
+    <<: *runner
+    profiles: [tools]
+    command: [capacity]
+    environment:
+      <<: *safe-env
+      CAPACITY_PROFILE: server-isolated-20260908
+      CAPACITY_OUTPUT: /evidence/capacity-server.json
+      CAPACITY_DURATION_MS: '5000'
+      INTEGRATION_DATABASE_URL: mysql://readiness_runner:${CAPACITY_PASSWORD:?Run prepare.mjs}@readiness-mysql:3306/readiness_capacity_20260908
+      INTEGRATION_REDIS_URL: redis://:${REDIS_PASSWORD:?Run prepare.mjs}@readiness-redis:6379/5
+  e2e:
+    <<: *runner
+    profiles: [tools]
+    command: [e2e]
+networks:
+  isolated:
+    name: readiness-20260908
+    internal: true
+volumes:
+  mysql-data:
+    name: readiness-20260908-mysql
+  redis-data:
+    name: readiness-20260908-redis
