@@ -69,6 +69,8 @@ async function loginInBrowser(page: Page, username: string, password: string) {
 }
 
 async function logout(page: Page) {
+  // Finish modal dismissal/focus restoration before opening the account popup.
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await page.getByRole("button", { name: "打开账号菜单" }).click();
   await page.getByRole("menuitem", { name: "退出登录" }).click();
   await expect(page.getByRole("button", { name: /登\s*录/ })).toBeVisible();
@@ -94,10 +96,9 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
       (response.status() === 409 &&
         response.url().endsWith("/api/v1/admin/catalog/skus")) ||
       (response.status() === 503 &&
-        ((allowExpectedQualityRefreshFailure &&
-          new URL(response.url()).pathname === "/api/v1/admin/quality-cases") ||
-          (allowExpectedCancellationRefreshFailure &&
-            new URL(response.url()).pathname === "/api/v1/admin/community/cancellation-requests"))),
+        response.headers()["x-e2e-injected-failure"] === "queue-refresh" &&
+        ["/api/v1/admin/quality-cases", "/api/v1/admin/community/cancellation-requests"]
+          .includes(new URL(response.url()).pathname)),
   );
   const suffix = `${Date.now()}${Math.floor(Math.random() * 10_000)}`;
   const password = "p1c governance browser password";
@@ -312,6 +313,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
       failedCancellationRefreshes += 1;
       return route.fulfill({
         status: 503,
+        headers: { "x-e2e-injected-failure": "queue-refresh" },
         contentType: "application/json",
         body: JSON.stringify({
           code: "TRANSIENT_READ_FAILURE",
@@ -520,6 +522,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
     failedQualityRefreshes += 1;
     return route.fulfill({
       status: 503,
+      headers: { "x-e2e-injected-failure": "queue-refresh" },
       contentType: "application/json",
       body: JSON.stringify({ code: "TRANSIENT_READ_FAILURE", message: "模拟刷新失败" }),
     });
