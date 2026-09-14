@@ -39,7 +39,7 @@
 
 新远端快照已通过已登录的浏览器下载并逐文件对照，4 修改 + 34 新增、无删除；保存在下载目录作为只读参考。详见 [分支与下一轮起点](repository-guide.md#5-分支与下一轮起点2026-09-14-核对)。
 
-独立 QA 已通过，本轮使用提交说明 `chore: organize repository artifacts (TASK-20260914-REPO-ORGANIZE)` 交付上述 7 个文件，保持 `codex/audit-remediation` 分支，不纳入 `.codex/`、`prototypes/`。已执行 `GIT_TERMINAL_PROMPT=0 git push origin HEAD:codex/audit-remediation`，返回退出码 128：`fatal: could not read Username for 'https://github.com': terminal prompts disabled`。GitHub **未同步**；没有强推、合并分支或更改凭据。随后仅补记此结果并修订本轮未推送提交，最终提交号保存在同级归档目录的 `git-delivery.json`，完整补丁为 `TASK-20260914-REPO-ORGANIZE.patch`。`.codex/`、`prototypes/` 仍未跟踪且保留原位；未部署服务器。
+独立 QA 已通过，本轮使用提交说明 `chore: organize repository artifacts (TASK-20260914-REPO-ORGANIZE)` 交付上述 7 个文件，保持 `codex/audit-remediation` 分支，不纳入 `.codex/`、`prototypes/`。本机 Git HTTPS 首次推送因缺少凭据失败，未强推或更改凭据。用户随后安装并连接 Codex GitHub 插件；通过 GitHub 提交接口在远端既有 `c30844d` 后创建 `badc53e`，以非强制方式更新分支成功。该提交树 `fa948da` 与本地整理提交树完全一致。本段同步结果将作为后一笔文档记录提交继续同步；`.codex/`、`prototypes/` 仍未跟踪且保留原位，未部署服务器。
 
 ## 独立 QA
 
