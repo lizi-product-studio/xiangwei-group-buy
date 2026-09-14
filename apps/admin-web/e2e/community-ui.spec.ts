@@ -41,6 +41,8 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   page,
   request,
 }) => {
+  // Includes setup, several role changes, transport, arrival and pickup.
+  test.setTimeout(120_000);
   await page.route("https://webrd0*.is.autonavi.com/**", (route) =>
     route.fulfill({
       status: 200,

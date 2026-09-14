@@ -84,6 +84,8 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
   page,
   request,
 }) => {
+  // This cross-role journey includes several password logins and refund queues.
+  test.setTimeout(120_000);
   let allowExpectedQualityRefreshFailure = false;
   let allowExpectedCancellationRefreshFailure = false;
   const failures = watchBrowser(
@@ -485,7 +487,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
         ),
       )
       .toBe(true);
-    await expect(page.getByRole("heading", { name: "区域开通意向" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "区域开通意向", level: 2 })).toBeVisible();
   }
 
   await logout(page);
