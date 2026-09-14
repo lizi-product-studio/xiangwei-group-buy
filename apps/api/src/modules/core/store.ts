@@ -1929,24 +1929,32 @@ export class MemoryStore implements CommerceStore {
     const lease = new Date(
       Date.parse(now) + Math.max(1, Math.trunc(leaseDurationMs)),
     ).toISOString();
-    const values = [...this.data.notifications.values()]
-      .filter(
-        (v) =>
-          v.status === "PENDING_DELIVERY" &&
-          v.providerSubmissionStartedAt === null &&
-          (!v.nextAttemptAt || v.nextAttemptAt <= now) &&
-          (!v.deliveryLeaseUntil || v.deliveryLeaseUntil <= now),
+    const claimLimit = Math.max(0, Math.min(5, Math.trunc(limit)));
+    const values: OrderNotification[] = [];
+    const compareDue = (left: OrderNotification, right: OrderNotification) =>
+      (left.nextAttemptAt ?? left.createdAt).localeCompare(
+        right.nextAttemptAt ?? right.createdAt,
+      ) ||
+      left.createdAt.localeCompare(right.createdAt) ||
+      left.id.localeCompare(right.id);
+    for (const value of this.data.notifications.values()) {
+      if (
+        value.status !== "PENDING_DELIVERY" ||
+        value.providerSubmissionStartedAt !== null ||
+        (value.nextAttemptAt && value.nextAttemptAt > now) ||
+        (value.deliveryLeaseUntil && value.deliveryLeaseUntil > now)
       )
-      .sort((left, right) => {
-        const leftDueAt = left.nextAttemptAt ?? left.createdAt;
-        const rightDueAt = right.nextAttemptAt ?? right.createdAt;
-        return (
-          leftDueAt.localeCompare(rightDueAt) ||
-          left.createdAt.localeCompare(right.createdAt) ||
-          left.id.localeCompare(right.id)
-        );
-      })
-      .slice(0, Math.min(5, limit));
+        continue;
+      const position = values.findIndex(
+        (candidate) => compareDue(value, candidate) < 0,
+      );
+      if (position < 0) {
+        if (values.length < claimLimit) values.push(value);
+      } else {
+        values.splice(position, 0, value);
+        if (values.length > claimLimit) values.pop();
+      }
+    }
     for (const v of values) {
       v.deliveryLeaseUntil = lease;
       v.deliveryClaimToken = token;
