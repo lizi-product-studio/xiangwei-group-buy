@@ -2860,7 +2860,9 @@ function Logistics({
         <Table
           rowKey="id"
           loading={loading}
-          dataSource={plans}
+          dataSource={[...plans].sort((a, b) =>
+            (Date.parse(b.createdAt ?? "") || 0) - (Date.parse(a.createdAt ?? "") || 0)
+          )}
           columns={[
           {
             title: "团期与车辆",
