@@ -951,6 +951,68 @@ function Products({
       setSaving(false);
     }
   };
+  const editCategory = (value: ProductCategory) => {
+    setEditingCategory(value);
+    categoryForm.setFieldsValue({
+      name: value.name,
+      sortOrder: value.sortOrder,
+      status: value.status,
+    });
+  };
+  const changeCategoryStatus = async (value: ProductCategory) => {
+    if (savingCategory) return;
+    setSavingCategory(true);
+    try {
+      await api.saveCategory({
+        id: value.id,
+        name: value.name,
+        sortOrder: value.sortOrder,
+        status: value.status === "ACTIVE" ? "INACTIVE" : "ACTIVE",
+      });
+      await refreshAfterMutation(
+        reload,
+        message,
+        value.status === "ACTIVE" ? "分类已停用" : "分类已启用",
+      );
+    } catch (error) {
+      message.error(mutationErrorText(error));
+    } finally {
+      setSavingCategory(false);
+    }
+  };
+  const requestCategoryStatusChange = (value: ProductCategory) => {
+    if (value.status !== "ACTIVE") {
+      void changeCategoryStatus(value);
+      return;
+    }
+    Modal.confirm({
+      title: `停用分类“${value.name}”`,
+      content: "停用后，新建或编辑商品时不能再选择该分类；已有商品和历史数据仍会保留。",
+      okText: "确认停用",
+      cancelText: "取消",
+      onOk: () => changeCategoryStatus(value),
+    });
+  };
+  const requestCategoryDelete = (value: ProductCategory) => {
+    Modal.confirm({
+      title: "删除分类",
+      content: `确定删除分类“${value.name}”吗？只有未被商品引用的分类才能删除。`,
+      okText: "确认删除",
+      cancelText: "取消",
+      onOk: async () => {
+        if (savingCategory) return;
+        setSavingCategory(true);
+        try {
+          await api.deleteCategory(value.id);
+          await refreshAfterMutation(reload, message, "分类已删除");
+        } catch (error) {
+          message.error(mutationErrorText(error));
+        } finally {
+          setSavingCategory(false);
+        }
+      },
+    });
+  };
   return (
     <>
       <PageTitle
@@ -1140,6 +1202,7 @@ function Products({
         <Form
           form={categoryForm}
           layout="inline"
+          style={{ marginBottom: 24, rowGap: 12 }}
           onFinish={async (value) => {
             if (savingCategory) return;
             setSavingCategory(true);
@@ -1172,7 +1235,7 @@ function Products({
             <Input />
           </Form.Item>
           <Button type="primary" htmlType="submit" loading={savingCategory}>
-            {editingCategory ? "保存分类" : "新增分类"}
+            {editingCategory ? "保存修改" : "新增分类"}
           </Button>
           {editingCategory && (
             <Button onClick={() => { setEditingCategory(null); categoryForm.resetFields(); }}>
@@ -1192,62 +1255,29 @@ function Products({
             {
               title: "操作",
               render: (_, value) => (
-                <Space>
-                  <Button onClick={() => {
-                    setEditingCategory(value);
-                    categoryForm.setFieldsValue({ name: value.name, sortOrder: value.sortOrder, status: value.status });
-                  }}>重命名</Button>
-                  <Button
-                    danger={value.status === "ACTIVE"}
-                    loading={savingCategory}
-                    onClick={() => {
-                      if (savingCategory) return;
-                      setSavingCategory(true);
-                      void api
-                        .saveCategory({
-                          id: value.id,
-                          name: value.name,
-                          sortOrder: value.sortOrder,
-                          status: value.status === "ACTIVE" ? "INACTIVE" : "ACTIVE",
-                        })
-                        .then(() =>
-                          refreshAfterMutation(
-                            reload,
-                            message,
-                            value.status === "ACTIVE" ? "分类已停用" : "分类已启用",
-                          ),
-                        )
-                        .catch((error) => message.error(mutationErrorText(error)))
-                        .finally(() => setSavingCategory(false));
-                    }}
-                  >
-                    {value.status === "ACTIVE" ? "停用" : "启用"}
-                  </Button>
-                  <Button
-                    danger
-                    onClick={() => {
-                      Modal.confirm({
-                        title: "删除分类",
-                        content: `确定删除分类“${value.name}”吗？已被商品引用的分类无法删除。`,
-                        okText: "确认删除",
-                        cancelText: "取消",
-                        onOk: async () => {
-                          if (savingCategory) return;
-                          setSavingCategory(true);
-                          try {
-                            await api.deleteCategory(value.id);
-                            await refreshAfterMutation(reload, message, "分类已删除");
-                          } catch (error) {
-                            message.error(mutationErrorText(error));
-                          } finally {
-                            setSavingCategory(false);
-                          }
+                <Space size="small">
+                  <Button onClick={() => editCategory(value)}>编辑</Button>
+                  <Dropdown
+                    trigger={["click"]}
+                    menu={{
+                      items: [
+                        {
+                          key: "status",
+                          label: value.status === "ACTIVE" ? "停用" : "启用",
                         },
-                      });
+                        { type: "divider" },
+                        { key: "delete", label: "删除", danger: true },
+                      ],
+                      onClick: ({ key }) => {
+                        if (key === "status") requestCategoryStatusChange(value);
+                        if (key === "delete") requestCategoryDelete(value);
+                      },
                     }}
                   >
-                    删除
-                  </Button>
+                    <Button loading={savingCategory}>
+                      更多 <DownOutlined />
+                    </Button>
+                  </Dropdown>
                 </Space>
               ),
             },
