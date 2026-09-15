@@ -101,6 +101,8 @@ export function registerCommunityRoutes(
         : null;
       filtered.push({
         id: plan.id,
+        createdAt: plan.createdAt,
+        arrivalConfirmedAt: confirmation?.confirmedAt ?? null,
         campaignId: plan.campaignId,
         campaignTitle: campaign.title,
         pickupPointId: plan.pickupPointId,
