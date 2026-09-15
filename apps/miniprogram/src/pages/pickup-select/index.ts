@@ -31,8 +31,27 @@ Page({
       if(!area){this.setData({areas:context.areas,points:[],selectedId:''});return;}
       saveServiceAreaSelection(area);
       const points=await loadPickupPoints(area.id);
-      const campaign=this.data.campaignId?await api.getCampaign(this.data.campaignId):null;
-      const allowed=campaign?.deliveryPlan?.pickupPointId?points.points.filter((item)=>item.id===campaign.deliveryPlan?.pickupPointId):points.points;
+      let allowed = points.points;
+      if (this.data.campaignId) {
+        try {
+          const campaign = await api.getCampaign(this.data.campaignId);
+          const fixedPointId = campaign.deliveryPlan?.pickupPointId;
+          if (!fixedPointId)
+            throw new Error('CAMPAIGN_PICKUP_POINT_MISSING');
+          allowed = points.points.filter((item) => item.id === fixedPointId);
+          if (!allowed.length)
+            throw new Error('CAMPAIGN_PICKUP_POINT_UNAVAILABLE');
+        } catch {
+          this.setData({
+            areas: context.areas,
+            selectedAreaId: area.id,
+            points: [],
+            selectedId: '',
+            error: '本团自提点信息已失效，请返回首页重新选择商品',
+          });
+          return;
+        }
+      }
       const selected=readPickupPointSelection();
       this.setData({ areas: context.areas,selectedAreaId:area.id,points:allowed, selectedId: allowed.some((item)=>item.id===selected?.id)?selected?.id??'':'' });
     } catch (error) {
@@ -55,6 +74,15 @@ Page({
     saveServiceAreaSelection(area);
     try {
       const points = await loadPickupPoints(area.id);
+      if (this.data.campaignId) {
+        this.setData({
+          selectedAreaId: area.id,
+          points: [],
+          selectedId: '',
+          error: '本团已绑定固定自提点，请返回首页重新选择商品',
+        });
+        return;
+      }
       const selected = readPickupPointSelection();
       this.setData({ selectedAreaId: area.id, points: points.points, selectedId: points.points.some((item) => item.id === selected?.id) ? selected?.id ?? '' : '', error: '' });
     } catch (error) {
