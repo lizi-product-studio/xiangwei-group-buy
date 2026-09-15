@@ -78,7 +78,7 @@ Page({
     try {
       const [orders, campaigns] = await Promise.all([
         api.listOrders(),
-        api.listCampaigns(),
+        api.listCampaigns().catch(() => []),
       ]);
       const imageMap = new Map(
         campaigns.flatMap((campaign) =>
