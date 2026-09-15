@@ -92,6 +92,7 @@ import {
 import {
   beginPickupRequest,
   clearPickupRequest,
+  getPendingPickupRequest,
   isTerminalPickupError,
   markPickupRequestConfirmed,
   type PendingPickupRequest,
@@ -3730,8 +3731,12 @@ function PointWorkbench({
   const { message } = AntApp.useApp();
   const [plans, setPlans] = useState<DeliveryPlan[]>([]);
   const [order, setOrder] = useState<PickupLookup | null>(null);
-  const [planId, setPlanId] = useState("");
+  const [pickupPointId, setPickupPointId] = useState("");
   const [orderNo, setOrderNo] = useState("");
+  const [needsOrderNo, setNeedsOrderNo] = useState(false);
+  const [lookingUp, setLookingUp] = useState(false);
+  const [lookupError, setLookupError] = useState<string | null>(null);
+  const lookupGeneration = useRef(0);
   const [code, setCode] = useState("");
   const [pickupQuantities, setPickupQuantities] = useState<
     Record<string, number>
@@ -3764,6 +3769,26 @@ function PointWorkbench({
       active = false;
     };
   }, []);
+  const pickupPoints = useMemo(() => [...new Map(plans
+    .filter(plan => plan.pickupPointId)
+    .map(plan => [plan.pickupPointId!, { id: plan.pickupPointId!, name: plan.siteName, address: plan.address }])).values()], [plans]);
+  const invalidateLookup = () => {
+    lookupGeneration.current += 1;
+    setOrder(null);
+    setPickupQuantities({});
+    setPickupReview(null);
+    setLookupError(null);
+    setLookingUp(false);
+  };
+  useEffect(() => {
+    if (!pickupPoints.some(point => point.id === pickupPointId)) {
+      lookupGeneration.current += 1;
+      setOrder(null);
+      setPickupReview(null);
+      setPickupPointId(pickupPoints.length === 1 ? pickupPoints[0]!.id : "");
+    }
+  }, [pickupPoints, pickupPointId]);
+  useEffect(() => () => { lookupGeneration.current += 1; }, [view]);
   const refreshAfterArrival = async () => {
     try {
       await reload();
@@ -3792,10 +3817,24 @@ function PointWorkbench({
     );
   };
   const lookup = async () => {
+    if (!pickupPointId || !/^\d{6}$/.test(code) || lookingUp || submittingPickup || (needsOrderNo && !orderNo.trim())) return;
+    const generation = ++lookupGeneration.current;
+    setLookingUp(true);
+    setOrder(null);
+    setLookupError(null);
     try {
-      setLookupOrder(await api.lookupPickup(planId, orderNo.trim()));
+      const found = await api.lookupPickupCode(pickupPointId, code, needsOrderNo ? orderNo.trim() : undefined);
+      if (generation !== lookupGeneration.current) return;
+      // A successful refresh closes a previously confirmed request whose refresh failed.
+      const pending = getPendingPickupRequest(localStorage, { orderId: found.id, deliveryPlanId: found.deliveryPlanId });
+      if (pending?.state === "CONFIRMED") clearPickupRequest(localStorage, pending);
+      setLookupOrder(found);
     } catch (error) {
-      void message.error(mutationErrorText(error));
+      if (generation !== lookupGeneration.current) return;
+      if ((error as { code?: string }).code === "PICKUP_CODE_AMBIGUOUS") setNeedsOrderNo(true);
+      setLookupError(mutationErrorText(error));
+    } finally {
+      if (generation === lookupGeneration.current) setLookingUp(false);
     }
   };
   const openPickupReview = () => {
@@ -3834,11 +3873,16 @@ function PointWorkbench({
         items: pickupReview.items,
       });
       markPickupRequestConfirmed(localStorage, pickupReview);
-      const refreshed = await api.lookupPickup(planId, orderNo.trim());
-      clearPickupRequest(localStorage, pickupReview);
-      setLookupOrder(refreshed);
       setPickupReview(null);
       void message.success("本次领取已核销");
+      try {
+        const refreshed = await api.lookupPickup(order.deliveryPlanId, order.orderNo);
+        clearPickupRequest(localStorage, pickupReview);
+        setLookupOrder(refreshed);
+      } catch {
+        setOrder(null);
+        setLookupError("本次领取已核销，但结果刷新失败。请重新查询，勿重复交付商品。");
+      }
     } catch (error) {
       if (isTerminalPickupError(error as { statusCode?: number; code?: string })) {
         clearPickupRequest(localStorage, pickupReview);
@@ -3853,7 +3897,7 @@ function PointWorkbench({
     <>
       <PageTitle
         title={view === "point-pickup" ? "领取核销" : "到货确认"}
-        subtitle={view === "point-pickup" ? "选择自提点并查询订单，核对本次领取商品与取货码" : "对照实物确认到货数量，短少或破损请如实登记"}
+        subtitle={view === "point-pickup" ? "输入用户出示的 6 位取货码，查找本点待领取商品并核对数量" : "对照实物确认到货数量，短少或破损请如实登记"}
       />
       {view !== "point-pickup" && <>
       {arrivalNotice && (
@@ -3968,33 +4012,48 @@ function PointWorkbench({
             style={{ marginBottom: 16 }}
           />
         )}
-        <Space wrap>
+        <Space wrap align="start">
           <Select
-            style={{ width: 260 }}
-            placeholder="选择已到货点位"
-            value={planId || null}
-            onChange={setPlanId}
+            style={{ width: 280 }}
+            aria-label="核销自提点"
+            placeholder="选择自提点"
+            value={pickupPointId || null}
+            onChange={(value) => { invalidateLookup(); setPickupPointId(value); setNeedsOrderNo(false); setOrderNo(""); }}
             loading={pickupLoading}
-            disabled={pickupLoading || !!pickupError || plans.length === 0}
-            options={plans.map((v) => ({
-              value: v.id,
-              label: `${v.siteName} · ${v.address}`,
-            }))}
+            disabled={pickupLoading || !!pickupError || pickupPoints.length === 0 || submittingPickup}
+            options={pickupPoints.map(point => ({ value: point.id, label: `${point.name} · ${point.address}` }))}
           />
           <Input
             style={{ width: 220 }}
-            placeholder="订单号"
-            value={orderNo}
-            onChange={(e) => setOrderNo(e.target.value)}
+            placeholder="6 位取货码"
+            aria-label="用户出示的取货码"
+            inputMode="numeric"
+            maxLength={6}
+            value={code}
+            disabled={submittingPickup}
+            onChange={(e) => { invalidateLookup(); setCode(e.target.value.replace(/\D/g, "").slice(0, 6)); setNeedsOrderNo(false); setOrderNo(""); }}
+            onPressEnter={() => void lookup()}
           />
-          <Button
-            type="primary"
-            disabled={!planId || !orderNo.trim() || pickupLoading}
-            onClick={() => void lookup()}
-          >
-            查询订单
+          {needsOrderNo && <Input
+            style={{ width: 260 }}
+            placeholder="取货码页面中的订单号"
+            aria-label="重码订单号"
+            value={orderNo}
+            disabled={submittingPickup}
+            onChange={event => { invalidateLookup(); setOrderNo(event.target.value); }}
+            onPressEnter={() => void lookup()}
+          />}
+          <Button type="primary" loading={lookingUp}
+            disabled={!pickupPointId || !/^\d{6}$/.test(code) || pickupLoading || !!pickupError || submittingPickup || (needsOrderNo && !orderNo.trim())}
+            onClick={() => void lookup()}>
+            查找待领取商品
           </Button>
         </Space>
+        <Typography.Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0 }}>
+          请用户打开小程序中的取货码页面，输入取货码即可查询，无需先提供订单号。
+        </Typography.Paragraph>
+        {lookupError && <Alert type="warning" showIcon message={lookupError} style={{ marginTop: 12 }} />}
+        {!pickupLoading && !pickupError && pickupPoints.length === 0 && <Alert type="info" showIcon message="当前没有已到货的自提点，请先在“到货确认”完成收货。" style={{ marginTop: 12 }} />}
       </Card>
       {order && (
         <Card title={`订单 ${order.orderNo}`} style={{ marginTop: 16 }}>
@@ -4057,7 +4116,7 @@ function PointWorkbench({
                 )
               }
             >
-              填满剩余
+              全部领取
             </Button>
             <Button
               disabled={submittingPickup}
@@ -4067,18 +4126,12 @@ function PointWorkbench({
                 )
               }
             >
-              清零
+              清空数量
             </Button>
-            <Input
-              placeholder="6 位取货码"
-              maxLength={6}
-              value={code}
-              disabled={submittingPickup}
-              onChange={(e) => setCode(e.target.value)}
-            />
+            <Typography.Text type="secondary">取货码：{code}</Typography.Text>
             <Button
               type="primary"
-              disabled={!/^\d{6}$/.test(code) || submittingPickup}
+              disabled={!/^\d{6}$/.test(code) || submittingPickup || !order.items.some(item => item.remainingPickupQuantity > 0)}
               onClick={openPickupReview}
             >
               确认本次领取
@@ -4098,7 +4151,7 @@ function PointWorkbench({
         onCancel={() => !submittingPickup && setPickupReview(null)}
       >
         <Typography.Paragraph>
-          请复核本次领取数量和取货码；提交后将按该请求号幂等执行。
+          请核对用户出示的取货码和本次交付数量。确认后只扣减本次领取数量，剩余商品可分次领取。
         </Typography.Paragraph>
         <Table
           rowKey="catalogSkuId"
