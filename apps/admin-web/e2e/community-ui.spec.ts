@@ -585,17 +585,12 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
       pickupPosts += 1;
   });
   await page.getByRole("menuitem", { name: "领取核销", exact: true }).click();
-  await page.getByRole("combobox").click();
-  await page
-    .getByText("E2E 社区点 " + suffix + " · 东城区社区服务站 1 号", {
-      exact: true,
-    })
-    .click();
-  await page.getByPlaceholder("订单号").fill(normalOrder.orderNo);
-  await page.getByRole("button", { name: "查询订单" }).click();
+  await expect(page.getByRole("combobox", { name: "核销自提点" })).toBeEnabled();
+  await expect(page.locator(".ant-select")).toContainText("E2E 社区点 " + suffix);
+  await page.getByPlaceholder("6 位取货码").fill(pickupValue.code);
+  await page.getByRole("button", { name: "查找待领取商品" }).click();
   const quantityInput = page.getByLabel(`E2E 时蔬 ${suffix} · 一份 本次领取数量`, { exact: true });
   await expect(quantityInput).toBeVisible();
-  await page.getByPlaceholder("6 位取货码").fill(pickupValue.code);
   await page.getByRole("button", { name: "确认本次领取" }).click();
   await expect(page.getByText("请至少填写一项大于 0 的本次领取数量")).toBeVisible();
   expect(pickupPosts).toBe(0);
