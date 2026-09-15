@@ -99,6 +99,8 @@ export interface Campaign {
   failureAction: "CANCEL_AND_REFUND" | "POSTPONE";
   status: string;
   version: number;
+  postponementCount?: number;
+  paidQuantity?: number;
   items: Array<{
     skuId: string;
     title: string;
@@ -108,6 +110,7 @@ export interface Campaign {
     unitPriceCents: number;
     stock: number;
     soldQuantity: number;
+    paidQuantity?: number;
   }>;
   deliveryPlan: DeliveryPlan | null;
 }
@@ -559,6 +562,19 @@ export function adminErrorText(error: unknown): string {
   if (statusCode === 403 || value?.code === "FORBIDDEN")
     return "当前账号没有执行此操作的权限";
   if (statusCode === 404) return "未找到要操作的数据，请刷新后重试";
+  if (value?.code === "CONCURRENT_MODIFICATION")
+    return "数据刚刚被其他操作更新，请刷新列表后再试";
+  if (
+    [
+      "INVALID_STATE_TRANSITION",
+      "CAMPAIGN_NOT_DRAFT",
+      "CAMPAIGN_CLOSED",
+      "CAMPAIGN_VERSION_CONFLICT",
+      "DELIVERY_SITE_NOT_CONFIRMED",
+    ].includes(String(value?.code)) &&
+    message
+  )
+    return message;
   if (statusCode === 409 || value?.code === "RESOURCE_IN_USE")
     return "当前数据状态已变化或仍被使用，请刷新后重试";
   if (statusCode >= 500) return "后台服务暂时不可用，请稍后重试";
