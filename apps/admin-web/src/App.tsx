@@ -1,3 +1,4 @@
+import { newestFirst, earliestFirst, refundHistory } from "./list-order.ts";
 import { OperationsQueueTable } from "./operations-queue-table.tsx";
 import { Consumers } from "./consumers-page.tsx";
 import { ProductImageField, ProductPicture } from "./ProductImageField.tsx";
@@ -789,7 +790,7 @@ function Dashboard({
           {campaigns.filter((campaign) => !["COMPLETED", "CANCELLED"].includes(campaign.status)).length === 0
             ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无进行中的团期，配置商品与自提点后即可创建" />
             : <div className="dashboard-campaign-list">
-              {campaigns.filter((campaign) => !["COMPLETED", "CANCELLED"].includes(campaign.status)).slice(0, 5).map((campaign) => (
+              {newestFirst(campaigns).filter((campaign) => !["COMPLETED", "CANCELLED"].includes(campaign.status)).slice(0, 5).map((campaign) => (
                 <div className="dashboard-campaign-row" key={campaign.id}>
                   <div><strong>{campaign.title}</strong><span>截单 {dayjs(campaign.cutoffAt).format("MM-DD HH:mm")}</span></div>
                   <Status value={campaign.status} />
@@ -978,7 +979,7 @@ function Products({
       <ListFilters label="商品" query={query} onQuery={setQuery} status={filterStatus} onStatus={setFilterStatus} statuses={[{value:"ACTIVE",label:"启用"},{value:"INACTIVE",label:"已停用"}]} />
       <Table
         rowKey="id"
-        dataSource={values.filter(v => (filterStatus === "ALL" || v.status === filterStatus) && matchesKeyword(query,...[v.product.title,v.name,v.product.category,v.product.origin]))}
+        dataSource={newestFirst(values).filter(v => (filterStatus === "ALL" || v.status === filterStatus) && matchesKeyword(query,...[v.product.title,v.name,v.product.category,v.product.origin]))}
         locale={{ emptyText: "暂无商品，请先创建商品" }}
         columns={[
           {
@@ -1572,7 +1573,7 @@ function Campaigns({
       <ListFilters label="团期" query={query} onQuery={setQuery} status={filterStatus} onStatus={setFilterStatus} statuses={["DRAFT","OPEN","CLOSING","LOCKED","FULFILLING","POSTPONED","COMPLETED","CANCELLED"].map(value=>({value,label:displayLabel(value)}))} />
       <Table
         rowKey="id"
-        dataSource={values.filter(v => (filterStatus === "ALL" || v.status === filterStatus) && matchesKeyword(query,...[v.title,v.deliveryPlan?.siteName]))}
+        dataSource={newestFirst(values).filter(v => (filterStatus === "ALL" || v.status === filterStatus) && matchesKeyword(query,...[v.title,v.deliveryPlan?.siteName]))}
         locale={{ emptyText: "暂无团期，请先配置商品、区域和自提点" }}
         columns={[
           {
@@ -2860,9 +2861,7 @@ function Logistics({
         <Table
           rowKey="id"
           loading={loading}
-          dataSource={[...plans].sort((a, b) =>
-            (Date.parse(b.createdAt ?? "") || 0) - (Date.parse(a.createdAt ?? "") || 0)
-          )}
+          dataSource={newestFirst(plans)}
           columns={[
           {
             title: "团期与车辆",
@@ -2966,7 +2965,7 @@ function Logistics({
         <Table
           rowKey="id"
           loading={loading}
-          dataSource={deliveries}
+          dataSource={newestFirst(deliveries, value => value.arrivalConfirmedAt ?? value.createdAt)}
           columns={[
           { title: "团期", dataIndex: "campaignTitle" },
           { title: "自提点", dataIndex: "siteName" },
@@ -3773,19 +3772,19 @@ function PointWorkbench({
       message.warning("已保存，列表刷新失败，请刷新");
     }
   };
-  const pendingArrivals = deliveries.filter(
+  const pendingArrivals = earliestFirst(deliveries.filter(
     (delivery) => delivery.dispatchBatchId && !delivery.arrivalConfirmed,
-  );
-  const processingArrivals = deliveries.filter(
+  ), value => value.estimatedArrivalAt);
+  const processingArrivals = newestFirst(deliveries.filter(
     (delivery) =>
       delivery.arrivalConfirmed &&
       delivery.allocationDraftStatus === "PENDING_OPERATOR_CONFIRMATION",
-  );
-  const completedArrivals = deliveries.filter(
+  ), value => value.arrivalConfirmedAt ?? value.createdAt);
+  const completedArrivals = newestFirst(deliveries.filter(
     (delivery) =>
       delivery.arrivalConfirmed &&
       delivery.allocationDraftStatus !== "PENDING_OPERATOR_CONFIRMATION",
-  );
+  ), value => value.arrivalConfirmedAt ?? value.createdAt);
   const setLookupOrder = (nextOrder: PickupLookup) => {
     setOrder(nextOrder);
     setPickupQuantities(
@@ -4676,9 +4675,11 @@ function Finance({
       )}
       {view === "finance-records" && <Table
         rowKey="id"
-        dataSource={[...(refunds?.full ?? []), ...(refunds?.partial ?? [])]}
+        dataSource={refundHistory(refunds)}
         columns={[
           { title: "退款单", dataIndex: "providerRefundNo" },
+          { title: "退款类型", dataIndex: "refundType" },
+          { title: "退款时间", render: (_, v) => dateTime(v.createdAt) },
           { title: "订单", dataIndex: "orderId" },
           { title: "金额", render: (_, v) => money(v.amountCents) },
           { title: "状态", render: (_, v) => <Status value={v.status} /> },
@@ -4798,7 +4799,7 @@ function Finance({
         <Typography.Title level={4}>财务流水</Typography.Title>
         <Table
           rowKey="id"
-          dataSource={ledger}
+          dataSource={newestFirst(ledger)}
           columns={[
           { title: "事件", render: (_, value) => displayLabel(value.eventType) },
           { title: "关联单据", dataIndex: "referenceId" },
@@ -4818,7 +4819,7 @@ function Finance({
                 <Alert type="error" showIcon message="借贷不平衡" />
               ),
           },
-          { title: "时间", dataIndex: "createdAt" },
+          { title: "时间", render: (_, value) => dateTime(value.createdAt) },
           ]}
         />
       </section>}
