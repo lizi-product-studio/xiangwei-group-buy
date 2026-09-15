@@ -913,6 +913,10 @@ export const api = {
     request<PickupLookup>(
       `/api/v1/pickup/orders/lookup?deliveryPlanId=${encodeURIComponent(deliveryPlanId)}&orderNo=${encodeURIComponent(orderNo)}`,
     ),
+  lookupPickupCode: (pickupPointId: string, code: string, orderNo?: string) =>
+    request<PickupLookup>(
+      `/api/v1/pickup/orders/lookup?${new URLSearchParams({ pickupPointId, code, ...(orderNo ? { orderNo } : {}) })}`,
+    ),
   verifyPickup: (body: {
     orderId: string;
     deliveryPlanId: string;
