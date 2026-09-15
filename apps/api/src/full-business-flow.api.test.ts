@@ -159,11 +159,15 @@ describe('registered consumer and authenticated staff full business flow', () =>
     expect(await store.listLedgerTransactions()).toEqual(ledgerAfterPay);
     expect(await get(`/api/v1/campaigns/${campaign.id}`)).toEqual(paidCampaign);
     expect((await store.getPaymentByOrder(order.id))?.status).toBe('SUCCEEDED');
-    await unchanged(() => request({ method: 'POST', url: `/api/v1/admin/campaigns/${campaign.id}/close`, headers: operator }, 409));
-    vi.setSystemTime(new Date(+start + 3601000));
+    const unpaidOrder = await post('/api/v1/orders', { ...customer, 'idempotency-key': 'manual-close-unpaid' }, { ...checkout, items: [{ skuId: sku.id, quantity: 1 }] }, 201);
+    expect(unpaidOrder.status).toBe('PENDING_PAYMENT');
+    expect((await post(`/api/v1/admin/campaigns/${campaign.id}/close`, operator, { reason: '运营测试提前截单' })).status).toBe('LOCKED');
+    expect((await get(`/api/v1/orders/${unpaidOrder.id}`, customer)).status).toBe('CANCELLED');
+    expect((await store.getCampaignItem(campaign.id, sku.id))?.reservedQuantity).toBe(2);
+    expect((await store.listAuditLogs(100)).find((entry) => entry.action === 'CAMPAIGN_CLOSE')?.afterData).toMatchObject({ reason: '运营测试提前截单' });
     await unchanged(async () => {
-      const rejected = await request({ method: 'POST', url: '/api/v1/orders', headers: { ...customer, 'idempotency-key': 'after-cutoff' }, payload: checkout }, 409);
-      expect(rejected.json().code).toBe('CAMPAIGN_CLOSED');
+      const rejected = await request({ method: 'POST', url: '/api/v1/orders', headers: { ...customer, 'idempotency-key': 'after-manual-cutoff' }, payload: checkout }, 409);
+      expect(rejected.json().code).toBe('CAMPAIGN_NOT_OPEN');
     });
     expect((await post(`/api/v1/admin/campaigns/${campaign.id}/close`, operator)).status).toBe('LOCKED');
     await unchanged(async () => {
