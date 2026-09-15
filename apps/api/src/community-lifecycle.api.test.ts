@@ -229,20 +229,11 @@ describe("community group-buying API lifecycle", () => {
   }
 
   async function closeCampaign(campaignId: string) {
-    const premature = await inject({
-      method: "POST",
-      url: `/api/v1/admin/campaigns/${campaignId}/close`,
-      headers: admin,
-    });
-    expect(premature.statusCode).toBe(409);
-    const campaign = await store.getCampaign(campaignId);
-    expect(campaign).not.toBeNull();
-    campaign!.cutoffAt = new Date(Date.now() - 1000).toISOString();
-    expect(await store.updateCampaign(campaign!, campaign!.version)).toBe(true);
     const closed = await inject({
       method: "POST",
       url: `/api/v1/admin/campaigns/${campaignId}/close`,
       headers: admin,
+      payload: { reason: "运营手动截单" },
     });
     expect(closed.statusCode, closed.body).toBe(200);
     expect(closed.json().data.status).toBe("LOCKED");
