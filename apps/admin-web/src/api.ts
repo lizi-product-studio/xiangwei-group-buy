@@ -116,6 +116,7 @@ export interface Campaign {
 }
 export interface DeliveryPlan {
   id: string;
+  createdAt?: string;
   campaignId: string;
   serviceAreaId: string;
   pickupPointId: string;
