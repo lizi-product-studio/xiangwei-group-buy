@@ -148,11 +148,10 @@ test('同一主图商品与网页开售团贯穿运输到货及分批核销（�
   expect(codeResponse.ok()).toBeTruthy();
   const code: string = (await codeResponse.json()).data.code;
   await page.getByRole('menuitem', { name: '领取核销', exact: true }).click();
-  await page.getByRole('combobox').click();
-  await page.getByText(`${pointName} · 东城区社区服务站 1 号`, { exact: true }).click();
-  await page.getByPlaceholder('订单号').fill(order.orderNo);
-  await page.getByRole('button', { name: '查询订单' }).click();
+  await expect(page.getByRole('combobox', { name: '核销自提点' })).toBeEnabled();
+  await expect(page.locator('.ant-select')).toContainText(pointName);
   await page.getByPlaceholder('6 位取货码').fill(code);
+  await page.getByRole('button', { name: '查找待领取商品' }).click();
   const pickupQuantity = page.getByRole('spinbutton', { name: `${productTitle} · 一份 本次领取数量`, exact: true });
   const pickupRow = page.getByRole('row').filter({ has: pickupQuantity });
   await expect(pickupRow).toContainText(productTitle);
