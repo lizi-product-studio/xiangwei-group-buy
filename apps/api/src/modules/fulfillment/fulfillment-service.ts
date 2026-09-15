@@ -1,4 +1,4 @@
-import { pickupCode } from './pickup-code.js';
+import { matchesPickupCode, pickupCode } from './pickup-code.js';
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   BusinessError,
@@ -153,9 +153,57 @@ export class FulfillmentService {
         "取货码尚未生成或已使用",
         409,
       );
-    if (Date.parse(credential.expiresAt) <= Date.now())
+    const expiresAt = Date.parse(credential.expiresAt);
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now())
       throw new BusinessError("PICKUP_CODE_EXPIRED", "取货码已过期", 409);
     return { code: this.code(orderId), expiresAt: credential.expiresAt };
+  }
+  /** Resolve a consumer code within one selected pickup point only. */
+  public async lookupByPickupCode(
+    pickupPointId: string,
+    code: string,
+    orderNo?: string,
+  ): Promise<Order> {
+    const matches: Order[] = [];
+    for (const order of await this.store.listOrders(Number.MAX_SAFE_INTEGER)) {
+      if (
+        order.pickupPointId !== pickupPointId ||
+        order.status !== "READY_FOR_PICKUP" ||
+        (orderNo !== undefined && order.orderNo !== orderNo)
+      )
+        continue;
+      const plan = await this.store.getDeliveryPlan(order.deliveryPlanId);
+      if (!plan || plan.pickupPointId !== pickupPointId || plan.status !== "ARRIVED")
+        continue;
+      const credential = await this.store.getPickupCredential(order.id);
+      const window = await this.store.getCommunityPickupWindowForUpdate(order.id);
+      if (
+        !credential ||
+        credential.status !== "ACTIVE" ||
+        !Number.isFinite(Date.parse(credential.expiresAt)) ||
+        Date.parse(credential.expiresAt) <= Date.now() ||
+        !window ||
+        !["ACTIVE", "EXTENDED"].includes(window.status) ||
+        !Number.isFinite(Date.parse(window.deadlineAt)) ||
+        Date.parse(window.deadlineAt) <= Date.now() ||
+        !matchesPickupCode(code, credential.codeHash, this.secret)
+      )
+        continue;
+      matches.push(order);
+    }
+    if (matches.length > 1)
+      throw new BusinessError(
+        "PICKUP_CODE_AMBIGUOUS",
+        "取货码匹配到多笔订单，请提供订单号查询",
+        409,
+      );
+    if (!matches[0])
+      throw new BusinessError(
+        "RESOURCE_NOT_FOUND",
+        "未找到有效取货码，请核对自提点和取货码，或请用户刷新取货码页面",
+        404,
+      );
+    return matches[0];
   }
   public async verify(command: VerifyPickupCommand): Promise<Order> {
     return this.store.transaction(async (store) => {
