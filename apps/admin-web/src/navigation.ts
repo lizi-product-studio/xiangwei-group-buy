@@ -14,6 +14,7 @@ export type AdminPage =
   | "point-workbench"
   | "categories" | "areas" | "cancellations" | "arrival-exceptions"
   | "finance-records" | "finance-ledger" | "interests" | "point-pickup"
+  | "pickup-records"
   | "homepage-banners";
 
 export type AdminNavigationItem = {
@@ -35,6 +36,7 @@ export function getAdminPageModule(page: AdminPage): AdminPage {
     categories: "products", areas: "pickup-points", cancellations: "service",
     "arrival-exceptions": "logistics", "finance-records": "finance",
     "finance-ledger": "finance", interests: "governance", "point-pickup": "point-workbench",
+    "pickup-records": "point-workbench",
   };
   return modules[page] ?? page;
 }
@@ -100,6 +102,7 @@ export function getAdminNavigation(
             roles: ["PICKUP_MANAGER"],
           },
           { key: "point-pickup", label: "领取核销", roles: ["PICKUP_MANAGER"] },
+          { key: "pickup-records", label: "提货记录", roles: ["PICKUP_MANAGER"] },
         ],
       },
     ];

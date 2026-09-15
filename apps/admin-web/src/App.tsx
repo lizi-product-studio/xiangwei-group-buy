@@ -72,6 +72,7 @@ import {
   type HomepageBanner,
   type PackingLabel,
   type PickupLookup,
+  type PickupRecord,
   type PickupPoint,
   type PickupWindow,
   type RegionDirectoryEntry,
@@ -3758,6 +3759,125 @@ function Areas({
   );
 }
 
+function PickupRecordsPage() {
+  const [result, setResult] = useState<{
+    data: PickupRecord[];
+    pagination: { total: number; page: number; pageSize: number };
+  }>({ data: [], pagination: { total: 0, page: 1, pageSize: 20 } });
+  const [orderNoInput, setOrderNoInput] = useState("");
+  const [orderNo, setOrderNo] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(
+    async (page: number, pageSize: number) => {
+      setLoading(true);
+      setError(null);
+      try {
+        setResult(await api.pickupRecords({ page, pageSize, ...(orderNo ? { orderNo } : {}) }));
+      } catch (caught) {
+        setError(adminLoadErrorText(caught));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [orderNo],
+  );
+  useEffect(() => {
+    void load(1, 20);
+  }, [load]);
+  const applySearch = () => {
+    const nextOrderNo = orderNoInput.trim();
+    if (nextOrderNo === orderNo) {
+      void load(1, result.pagination.pageSize);
+      return;
+    }
+    setOrderNo(nextOrderNo);
+  };
+  const resetSearch = () => {
+    setOrderNoInput("");
+    if (!orderNo) {
+      void load(1, result.pagination.pageSize);
+      return;
+    }
+    setOrderNo("");
+  };
+  return (
+    <>
+      <PageTitle
+        title="提货记录"
+        subtitle="查看本点每次领取的商品、数量、操作人和时间，最新记录排在最上方"
+      />
+      <Card>
+        <Space wrap>
+          <Input
+            allowClear
+            style={{ width: 280 }}
+            placeholder="输入订单号查询"
+            value={orderNoInput}
+            onChange={(event) => setOrderNoInput(event.target.value)}
+            onPressEnter={applySearch}
+          />
+          <Button type="primary" onClick={applySearch}>
+            查询
+          </Button>
+          <Button onClick={resetSearch}>
+            重置
+          </Button>
+          <Button
+            icon={<ReloadOutlined />}
+            loading={loading}
+            onClick={() => void load(result.pagination.page, result.pagination.pageSize)}
+          >
+            刷新
+          </Button>
+        </Space>
+      </Card>
+      <Card style={{ marginTop: 16 }}>
+        {error ? (
+          <Alert
+            type="error"
+            showIcon
+            message="提货记录加载失败"
+            description={error}
+            action={
+              <Button onClick={() => void load(result.pagination.page, result.pagination.pageSize)}>
+                重新加载
+              </Button>
+            }
+          />
+        ) : (
+          <Table
+            rowKey="id"
+            loading={loading}
+            dataSource={result.data}
+            locale={{ emptyText: <Empty description="暂无提货记录" /> }}
+            pagination={{
+              current: result.pagination.page,
+              pageSize: result.pagination.pageSize,
+              total: result.pagination.total,
+              showSizeChanger: true,
+              showTotal: (total) => `共 ${total} 条`,
+              onChange: (page, pageSize) => void load(page, pageSize),
+            }}
+            columns={[
+              { title: "领取时间", dataIndex: "pickedUpAt", width: 180, render: (value: string) => dateTime(value) },
+              { title: "订单号", dataIndex: "orderNo", width: 220 },
+              { title: "团期", dataIndex: "campaignTitle" },
+              { title: "自提点", dataIndex: "pickupPointName" },
+              {
+                title: "领取商品",
+                render: (_, record) => record.items.map((item) => `${item.name} × ${item.quantity}`).join("；"),
+              },
+              { title: "操作人", dataIndex: "verifierName", width: 120 },
+            ]}
+            scroll={{ x: 1100 }}
+          />
+        )}
+      </Card>
+    </>
+  );
+}
+
 function PointWorkbench({
   view,
   deliveries,
@@ -5659,9 +5779,13 @@ export function App() {
     ) : currentPage === "pickup-points" ? (
       <Areas view={currentView} {...{ areas, points, reload }} />
     ) : currentPage === "point-workbench" ? (
-      <PointWorkbench view={currentView}
-        {...{ deliveries, roles, loading, error: loadError, reload }}
-      />
+      currentView === "pickup-records" ? (
+        <PickupRecordsPage />
+      ) : (
+        <PointWorkbench view={currentView}
+          {...{ deliveries, roles, loading, error: loadError, reload }}
+        />
+      )
     ) : currentPage === "consumers" ? (
       <Consumers loadPage={api.consumers} loadDetail={api.consumerDetail} />
     ) : currentPage === "service" ? (

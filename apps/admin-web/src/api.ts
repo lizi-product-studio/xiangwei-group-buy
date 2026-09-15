@@ -453,6 +453,16 @@ export interface PickupLookup {
     exceptionQuantity: number;
   }>;
 }
+export interface PickupRecord {
+  id: string;
+  orderNo: string;
+  campaignTitle: string;
+  pickupPointId: string;
+  pickupPointName: string;
+  pickedUpAt: string;
+  verifierName: string;
+  items: Array<{ skuId: string; name: string; quantity: number }>;
+}
 
 interface Envelope<T> {
   data: T;
@@ -978,6 +988,16 @@ export const api = {
     pickupRequestId: string;
     items: Array<{ catalogSkuId: string; quantity: number }>;
   }) => post("/api/v1/pickup/verify", body),
+  pickupRecords: (query: { page: number; pageSize: number; orderNo?: string }) =>
+    request<QueuePage<PickupRecord>>(
+      `/api/v1/pickup/records?${new URLSearchParams({
+        page: String(query.page),
+        pageSize: String(query.pageSize),
+        ...(query.orderNo ? { orderNo: query.orderNo } : {}),
+      })}`,
+      {},
+      true,
+    ),
   staff: () => request<InternalStaff[]>("/api/v1/admin/staff"),
   createStaff: (body: {
     displayName: string;

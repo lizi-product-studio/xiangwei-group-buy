@@ -47,10 +47,18 @@ describe("pickup code order lookup", () => {
 
   afterEach(async () => app.close());
 
-  async function addOrder(id: string, orderNo: string, code: string, expiresAt: string, status = "READY_FOR_PICKUP" as const) {
+  async function addOrder(
+    id: string,
+    orderNo: string,
+    code: string,
+    expiresAt: string,
+    status = "READY_FOR_PICKUP" as const,
+    pickupPointId = "point-a",
+    deliveryPlanId = "plan-a",
+  ) {
     await store.saveOrder({
-      id, orderNo, userId: "consumer", campaignId: "campaign-a", serviceAreaId: "area-a", pickupPointId: "point-a",
-      deliveryPlanId: "plan-a", status, totalCents: moneyCents(1000), items: [{
+      id, orderNo, userId: "consumer", campaignId: "campaign-a", serviceAreaId: "area-a", pickupPointId,
+      deliveryPlanId, status, totalCents: moneyCents(1000), items: [{
         orderLineId: `${id}-line`, skuId: "sku", productId: "product", name: "番茄", quantity: 2,
         unitPriceCents: moneyCents(500), amountCents: moneyCents(1000), fulfilledQuantity: 2,
         pickedUpQuantity: 1, exceptionQuantity: 0, refundedQuantity: 0, refundedAmountCents: moneyCents(0),
@@ -58,7 +66,7 @@ describe("pickup code order lookup", () => {
     });
     await store.savePickupCredential({ orderId: id, codeHash: pickupCodeHash(code, secret), status: "ACTIVE", expiresAt });
     await store.saveCommunityPickupWindow({
-      orderId: id, deliveryPlanId: "plan-a", arrivedAt: now, deadlineAt: expiresAt,
+      orderId: id, deliveryPlanId, arrivedAt: now, deadlineAt: expiresAt,
       status: "ACTIVE", extensionCount: 0, extendedBy: null, extendedAt: null,
       dispositionBy: null, dispositionAt: null, dispositionNote: null,
       refundExceptionId: null, lossExceptionId: null,
@@ -132,5 +140,54 @@ describe("pickup code order lookup", () => {
     const response = await app.inject({ method: "GET", url: "/api/v1/pickup/orders/lookup?pickupPointId=point-b&code=123456", headers: managerHeaders });
     expect(response.statusCode).toBe(403);
     expect(response.body).not.toContain("ORDER-A");
+  });
+
+  it("lists only the signed-in manager's pickup records without exposing credentials", async () => {
+    const expiresAt = new Date(Date.now() + 60_000).toISOString();
+    await addOrder("order-a", "ORDER-A", "123456", expiresAt);
+    await addOrder("order-b", "ORDER-B", "654321", expiresAt, "READY_FOR_PICKUP", "point-b", "plan-b");
+    await addOrder("order-c", "ORDER-C", "987654", expiresAt);
+    await store.saveCommunityPickupReceipt({
+      id: "receipt-a", orderId: "order-a", deliveryPlanId: "plan-a", verifierId: "manager",
+      requestKey: "private-request-key", pickupRequestId: "private-request-id", payloadHash: "private-payload-hash",
+      createdAt: "2026-09-15T08:00:00.000Z", items: [{ id: "item-a", communityPickupReceiptId: "receipt-a", catalogSkuId: "sku", quantity: 1 }],
+    });
+    await store.saveCommunityPickupReceipt({
+      id: "receipt-b", orderId: "order-b", deliveryPlanId: "plan-b", verifierId: "manager",
+      requestKey: "other-private-key", pickupRequestId: "other-private-request", payloadHash: "other-private-hash",
+      createdAt: "2026-09-15T09:00:00.000Z", items: [{ id: "item-b", communityPickupReceiptId: "receipt-b", catalogSkuId: "sku", quantity: 1 }],
+    });
+    await store.saveCommunityPickupReceipt({
+      id: "receipt-c", orderId: "order-c", deliveryPlanId: "plan-a", verifierId: "manager",
+      requestKey: "new-private-key", pickupRequestId: "new-private-request", payloadHash: "new-private-hash",
+      createdAt: "2026-09-15T10:00:00.000Z", items: [{ id: "item-c", communityPickupReceiptId: "receipt-c", catalogSkuId: "sku", quantity: 1 }],
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/v1/pickup/records?page=1&pageSize=20", headers: managerHeaders });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json()).toMatchObject({
+      data: [
+        { id: "receipt-c", orderNo: "ORDER-C", pickupPointId: "point-a", pickupPointName: "东门自提点", verifierName: "自提负责人" },
+        { id: "receipt-a", orderNo: "ORDER-A", pickupPointId: "point-a", pickupPointName: "东门自提点", verifierName: "自提负责人" },
+      ],
+      pagination: { total: 2, page: 1, pageSize: 20 },
+    });
+    expect(response.body).not.toContain("ORDER-B");
+    expect(response.body).not.toContain("private-request");
+    expect(response.body).not.toContain("payload-hash");
+    expect(response.body).not.toContain("123456");
+
+    const filtered = await app.inject({
+      method: "GET", url: "/api/v1/pickup/records?orderNo=ORDER-A", headers: managerHeaders,
+    });
+    expect(filtered.statusCode, filtered.body).toBe(200);
+    expect(filtered.json().data).toEqual([
+      expect.objectContaining({ id: "receipt-a", orderNo: "ORDER-A" }),
+    ]);
+  });
+
+  it("requires pickup-manager authentication for pickup records", async () => {
+    const response = await app.inject({ method: "GET", url: "/api/v1/pickup/records" });
+    expect(response.statusCode).toBe(401);
   });
 });

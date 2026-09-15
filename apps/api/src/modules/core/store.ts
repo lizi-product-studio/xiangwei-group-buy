@@ -93,6 +93,7 @@ export const STORE_READ_METHODS: ReadonlySet<string> = new Set([
   "getDispatchBatch",
   "listDispatchBatches",
   "getPickupCredential",
+  "listCommunityPickupReceipts",
   "listCommunityPickupReceiptsByOrder",
   "getCommunityDeliveryConfirmationByBatch",
   "getFulfillmentException",
@@ -382,6 +383,7 @@ export interface CommerceStore {
     orderId: string,
     pickupRequestId: string,
   ): Promise<CommunityPickupReceipt | null>;
+  listCommunityPickupReceipts(): Promise<CommunityPickupReceipt[]>;
   listCommunityPickupReceiptsByOrder(
     orderId: string,
   ): Promise<CommunityPickupReceipt[]>;
@@ -1655,6 +1657,13 @@ export class MemoryStore implements CommerceStore {
       [...this.data.pickupReceipts.values()]
         .filter((value) => value.orderId === orderId)
         .sort((left, right) => left.createdAt.localeCompare(right.createdAt)),
+    );
+  }
+  public async listCommunityPickupReceipts() {
+    return clone(
+      [...this.data.pickupReceipts.values()].sort((left, right) =>
+        right.createdAt.localeCompare(left.createdAt),
+      ),
     );
   }
   public async saveCommunityPickupReceipt(v: CommunityPickupReceipt) {

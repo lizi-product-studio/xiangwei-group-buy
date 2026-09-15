@@ -57,6 +57,7 @@ describe("admin navigation", () => {
             roles: ["PICKUP_MANAGER"],
           },
           {key:"point-pickup",label:"领取核销",roles:["PICKUP_MANAGER"]},
+          {key:"pickup-records",label:"提货记录",roles:["PICKUP_MANAGER"]},
         ],
       },
     ]);
@@ -99,6 +100,7 @@ describe("split task permissions", () => {
     expect(isAllowedAdminPage(["FINANCE"], "arrival-exceptions")).toBe(false);
     expect(isAllowedAdminPage(["CUSTOMER_SERVICE"], "interests")).toBe(false);
     expect(isAllowedAdminPage(["PICKUP_MANAGER"], "point-pickup")).toBe(true);
+    expect(isAllowedAdminPage(["PICKUP_MANAGER"], "pickup-records")).toBe(true);
     expect(isAllowedAdminPage(["PICKUP_MANAGER"], "orders")).toBe(false);
   });
 });
