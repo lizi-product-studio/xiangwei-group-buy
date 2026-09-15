@@ -69,6 +69,7 @@ import {
   type FulfillmentException,
   type InternalStaff,
   type Order,
+  type HomepageBanner,
   type PackingLabel,
   type PickupLookup,
   type PickupPoint,
@@ -99,6 +100,7 @@ import {
 } from "./pickup-request.ts";
 import { GovernancePage } from "./governance-page.tsx";
 import { AuditPage } from "./audit-page.tsx";
+import { HomepageBannersPage } from "./homepage-banners-page.tsx";
 import {
   isPickupLocationSubmissionBlocked,
   PickupLocationPicker,
@@ -5397,6 +5399,7 @@ export function App() {
     [points, setPoints] = useState<PickupPoint[]>([]),
     [skus, setSkus] = useState<CatalogSku[]>([]),
     [categories, setCategories] = useState<ProductCategory[]>([]),
+    [homepageBanners, setHomepageBanners] = useState<HomepageBanner[]>([]),
     [campaigns, setCampaigns] = useState<Campaign[]>([]),
     [orders, setOrders] = useState<Order[]>([]),
     [plans, setPlans] = useState<DeliveryPlan[]>([]),
@@ -5460,6 +5463,7 @@ export function App() {
     setPoints([]);
     setSkus([]);
     setCategories([]);
+    setHomepageBanners([]);
     setCampaigns([]);
     setOrders([]);
     setPlans([]);
@@ -5516,6 +5520,13 @@ export function App() {
       if (currentPage === "products")
         work.push(
           api.skus().then(commit(setSkus)),
+          api.categories(true).then(commit(setCategories)),
+        );
+      if (currentPage === "homepage-banners")
+        work.push(
+          api.homepageBanners().then(commit(setHomepageBanners)),
+          api.areas().then(commit(setAreas)),
+          api.campaigns().then(commit(setCampaigns)),
           api.categories(true).then(commit(setCategories)),
         );
       if (currentPage === "campaigns")
@@ -5609,7 +5620,7 @@ export function App() {
     );
   const mainPageLoadFailed =
     Boolean(loadError) &&
-    ["dashboard", "products", "campaigns", "orders", "pickup-points", "settings"].includes(
+    ["dashboard", "products", "homepage-banners", "campaigns", "orders", "pickup-points", "settings"].includes(
       currentPage,
     );
   const pageContent = mainPageLoadFailed ? (
@@ -5618,6 +5629,8 @@ export function App() {
       <Dashboard {...{ areas, points, campaigns, orders }} onNavigate={setPage} />
     ) : currentPage === "products" ? (
       <Products key={currentView} view={currentView} values={skus} categories={categories} reload={reload} />
+    ) : currentPage === "homepage-banners" ? (
+      <HomepageBannersPage values={homepageBanners} areas={areas} campaigns={campaigns} categories={categories} reload={reload} />
     ) : currentPage === "campaigns" ? (
       <Campaigns values={campaigns} {...{ areas, points, skus, reload }} />
     ) : currentPage === "orders" ? (

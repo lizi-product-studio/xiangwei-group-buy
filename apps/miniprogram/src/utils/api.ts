@@ -233,10 +233,45 @@ async function request<T>(
   });
 }
 
+function profileImageMime(filePath: string): "image/jpeg" | "image/png" | "image/webp" {
+  const normalized = filePath.split("?", 1)[0]?.toLowerCase() ?? "";
+  if (normalized.endsWith(".png")) return "image/png";
+  if (normalized.endsWith(".webp")) return "image/webp";
+  if (normalized.endsWith(".jpg") || normalized.endsWith(".jpeg")) return "image/jpeg";
+  throw new Error("请选择 JPG、PNG 或 WebP 图片");
+}
+
+function readLocalImage(filePath: string): Promise<ArrayBuffer> {
+  return new Promise((resolve, reject) => {
+    wx.getFileSystemManager().readFile({
+      filePath,
+      success(result) {
+        if (result.data instanceof ArrayBuffer) resolve(result.data);
+        else reject(new Error("图片读取失败，请重新选择"));
+      },
+      fail: () => reject(new Error("图片读取失败，请重新选择")),
+    });
+  });
+}
+
+async function consumerAuthHeaders(): Promise<Record<string, string>> {
+  if (app.globalData.authMode === "wechat")
+    return { authorization: `Bearer ${await ensureAccessToken()}` };
+  if (!isDemoLoginAvailable() || !hasDemoCustomerSession())
+    throw new Error("请先登录后再查看个人资料");
+  return { "x-demo-user-id": "demo-user", "x-demo-role": "USER" };
+}
+
 export const api = {
   listCampaigns: () =>
     request<CampaignDto[]>({
       url: "/api/v1/campaigns",
+      method: "GET",
+      auth: "none",
+    }),
+  listHomepageBanners: (serviceAreaId?: string) =>
+    request<HomepageBannerDto[]>({
+      url: `/api/v1/homepage-banners${serviceAreaId ? `?serviceAreaId=${encodeURIComponent(serviceAreaId)}` : ""}`,
       method: "GET",
       auth: "none",
     }),
@@ -266,6 +301,79 @@ export const api = {
     }),
   listOrders: () =>
     request<OrderDto[]>({ url: "/api/v1/orders", method: "GET" }),
+  getMyProfile: () =>
+    request<ConsumerProfileDto>({ url: "/api/v1/me/profile", method: "GET" }),
+  updateMyProfile: (payload: { displayName: string; avatarUrl: string | null; expectedVersion: number }) =>
+    request<ConsumerProfileDto>({ url: "/api/v1/me/profile", method: "POST", data: payload }),
+  rebindMyPhone: (phoneCode: string, expectedVersion: number) =>
+    request<ConsumerProfileDto>({ url: "/api/v1/me/phone/rebind", method: "POST", data: { phoneCode, expectedVersion } }),
+  uploadProfileImage: async (filePath: string) => {
+      const requestEpoch = sessionEpoch;
+      const token = cachedAccessToken();
+      if (app.globalData.authMode === "wechat" && !token) {
+        throw new AuthExpiredError(sessionEpoch, true);
+      }
+      const contentType = profileImageMime(filePath);
+      const body = await readLocalImage(filePath);
+      const header: Record<string, string> = { "content-type": contentType };
+      if (app.globalData.authMode === "wechat" && token) header.authorization = `Bearer ${token}`;
+      if (app.globalData.authMode === "demo") {
+        if (!isDemoLoginAvailable() || !hasDemoCustomerSession()) {
+          throw new Error("请先登录后再编辑资料");
+        }
+        header["x-demo-user-id"] = "demo-user";
+        header["x-demo-role"] = "USER";
+      }
+      return new Promise<{ imageUrl: string }>((resolve, reject) => {
+        wx.request<Envelope<{ imageUrl: string }>>({
+          url: `${app.globalData.apiBaseUrl}/api/v1/me/profile-image`,
+          method: "POST",
+          data: body,
+          header,
+          success(response) {
+            if (response.statusCode >= 200 && response.statusCode < 300 && typeof response.data?.data?.imageUrl === "string") {
+              resolve(response.data.data);
+              return;
+            }
+            if (response.statusCode === 401) {
+              const sessionWasCleared = sessionEpoch === requestEpoch;
+              if (sessionWasCleared) customerAuth.clearSession();
+              reject(new AuthExpiredError(requestEpoch, sessionWasCleared));
+              return;
+            }
+            const serverMessage = (response.data as unknown as ErrorEnvelope)?.message;
+            reject(new Error(customerErrorMessage(new Error(serverMessage ?? `HTTP ${response.statusCode}`), "头像上传失败，请稍后重试")));
+          },
+          fail: (error) => reject(new Error(customerErrorMessage(error, "头像上传失败，请稍后重试"))),
+        });
+      });
+    },
+  downloadMyProfileImage: async (imageUrl: string) => {
+    if (!imageUrl.startsWith("/api/v1/profile-images/"))
+      throw new Error("头像地址无效");
+    const requestEpoch = sessionEpoch;
+    const header = await consumerAuthHeaders();
+    return new Promise<string>((resolve, reject) => {
+      wx.downloadFile({
+        url: `${app.globalData.apiBaseUrl}${imageUrl}`,
+        header,
+        success(response) {
+          if (response.statusCode >= 200 && response.statusCode < 300 && response.tempFilePath) {
+            resolve(response.tempFilePath);
+            return;
+          }
+          if (response.statusCode === 401) {
+            const sessionWasCleared = sessionEpoch === requestEpoch;
+            if (sessionWasCleared) customerAuth.clearSession();
+            reject(new AuthExpiredError(requestEpoch, sessionWasCleared));
+            return;
+          }
+          reject(new Error("头像加载失败，请稍后重试"));
+        },
+        fail: () => reject(new Error("头像加载失败，请稍后重试")),
+      });
+    });
+  },
   getOrder: (id: string) =>
     request<OrderDto>({ url: `/api/v1/orders/${id}`, method: "GET" }),
   cancelOrder: (id: string) =>

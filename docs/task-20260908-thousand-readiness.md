@@ -4,7 +4,7 @@
 
 - task_id：TASK-20260908-THOUSAND-READINESS
 - confirmed：用户授予产品经理职责，要求评估系统、后台、小程序是否达到上线标准并支持上千人使用。
-- route：GOVERNED_DELIVERY 只读审计；本轮不自动实施架构迁移、生产压测、扩容或真实交易。
+- route：重大任务 只读审计；本轮不自动实施架构迁移、生产压测、扩容或真实交易。
 - default-assumption：主目标为至少1000累计用户、开团集中访问；另独立评估1000日活及1000同时在线，不把人数直接等同QPS。
 - ownership：root产品门槛/证据汇总/本文档；flow_engineering容量及运维只读调查；flow_qa业务、跨端与权限独立审计；crud_assessment工作负载与门槛建议。
 - acceptance：输出明确上线结论、事实与缺失证据、P0/P1阻断、修复优先级和可执行验收方法；不以mock功能测试或健康接口代替真实容量与渠道验收。

@@ -21,8 +21,8 @@ conclusion: PASS
 
 ## 已核对输入与范围
 
-- `AGENTS.md`、`tasks/TASK-PICKUP-LOCATION-IMPLEMENTATION.yaml`、`docs/project-status.json`、`docs/00-project-context.md`、`docs/01-domain-rules.md`、`docs/02-glossary.md`。
-- 任务包列出的全部上游输入：PRD、UX、系统设计、API/数据契约、测试计划、ADR、需求修复交接和 Quality Governor 复审。
+- `AGENTS.md`、`docs/project-status.json`、`docs/00-project-context.md`、`docs/01-domain-rules.md`、`docs/02-glossary.md`。
+- 全部相关上游输入：PRD、UX、系统设计、API/数据契约、测试计划、ADR、需求修复交接和 Quality Governor 复审。
 - 实现方交接：`evidence/pickup-location-implementation-2026-08-31.md`。
 - 只读检查当前工作树的实现差异、API/契约/后台测试与 E2E；未修改业务源码、测试、配置、需求或治理状态。
 
@@ -101,7 +101,7 @@ conclusion: PASS
 - artifacts changed: 仅本证据文件。
 - assumptions: 50 米重复阈值继续按 DR-020 标记为 `DEFAULT_ASSUMPTION`；ServiceArea 单一行政节点语义继续为 `BLOCKING_UNKNOWN` 的业务边界风险。
 - deviations: 无源码修复；未配置真实集成或地图凭据。
-- next responsible role: Orchestrator，继续处理外部发布证据与 go-live 阻断；无需本地定位返工。
+- next responsible role: Main Agent，继续处理外部发布证据与 go-live 阻断；无需本地定位返工。
 
 ---
 
@@ -171,4 +171,4 @@ conclusion: PASS
 - evidence: 本文件“最终定点复核（attempt 3）”；定向 E2E 1/1、`git diff --check`。
 - artifacts changed: 仅本 QA evidence 文件。
 - accepted risks: 无本地风险接受；真实 MySQL/Redis 与真实提供方继续为 `BLOCKING_EXTERNAL`，不计入 PASS。
-- next responsible role: Orchestrator，更新发布证据/外部阻断状态。
+- next responsible role: Main Agent，更新发布证据/外部阻断状态。

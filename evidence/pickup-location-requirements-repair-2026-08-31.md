@@ -7,7 +7,7 @@ conclusion: PASS
 date: "2026-08-31"
 selected_model: gpt-5.6-terra
 reasoning_effort: high
-runtime_attestation: "Task Package selection; actual_model_attested is false, so this is not independently verified runtime evidence."
+runtime_attestation: "任务说明 selection; actual_model_attested is false, so this is not independently verified runtime evidence."
 ---
 
 # 自提点定位需求修复交接
@@ -18,9 +18,9 @@ runtime_attestation: "Task Package selection; actual_model_attested is false, so
 
 ## 输入与范围
 
-已重新读取：`AGENTS.md`、`tasks/TASK-PICKUP-LOCATION-REQ-REPAIR.yaml`、`docs/project-status.json`、`docs/00-project-context.md`、`docs/01-domain-rules.md`、`docs/02-glossary.md`，任务包全部 12 份 `input_documents`，以及 Quality Governor 证据 `evidence/pickup-location-quality-governor-2026-08-31.md` 和 `evidence/pickup-location-quality-governor-rereview-2026-08-31.md`。
+已重新读取：`AGENTS.md`、`docs/project-status.json`、`docs/00-project-context.md`、`docs/01-domain-rules.md`、`docs/02-glossary.md`、全部 12 份相关输入文档，以及 Quality Governor 证据 `evidence/pickup-location-quality-governor-2026-08-31.md` 和 `evidence/pickup-location-quality-governor-rereview-2026-08-31.md`。
 
-本任务只改动任务包允许的需求、UX、架构、API 契约、测试计划、ADR 和本证据；未改动源码、测试实现、配置、依赖、迁移、外部系统或生产数据。
+本任务只改动当时范围允许的需求、UX、架构、API 契约、测试计划、ADR 和本证据；未改动源码、测试实现、配置、依赖、迁移、外部系统或生产数据。
 
 ## QG 发现到修订的逐项映射
 

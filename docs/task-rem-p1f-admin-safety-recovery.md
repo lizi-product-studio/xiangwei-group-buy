@@ -1,7 +1,7 @@
 # TASK-REM-P1F：后台人员安全、测试数据修复与小程序错误恢复
 
 状态：IMPLEMENTATION（等待独立代码审核）
-路由：existing-iteration + software + GOVERNED_DELIVERY
+路由：existing-iteration + software + 重大任务
 唯一集成负责人：Engineering Lead（当前任务）
 独立审查：代码审核任务 `01a031d5-1997-79d3-8f22-74251d344691`
 
@@ -10,13 +10,12 @@
 - 业务与上线基线：`README.md`、`docs/PRD.md`、`docs/architecture.md`、`docs/go-live-checklist.md`。
 - 现有认证契约：`docs/task-rem-p1a-acceptance.md`、`docs/task-rem-p1d-mini-auth.md`、`docs/checklists/admin-password-migration.md`。
 - 只保留单一社区团购；不引入旧模式、消费者密码体系、供应商/仓储/多商户逻辑。
-- 不修改或提交 `.dingxinglizi/orchestration/role-plan.json`、`.dingxinglizi/orchestration/runtime-manifest.json`。
 - 不输出、写入、提交或部署任何密码、Token、AppSecret、数据库连接串或其他密钥。
 - 本轮不处理支付、订单、配送业务规则；小程序只新增公共错误恢复，不改变认证、intent、session epoch、page/action fence 或写操作不自动重放契约。
 
 ## 当前事实
 
-- 代码基线为 `f851781`；工作树另有用户未提交改动，仅限上述两个 orchestration 文件。
+- 代码基线为 `f851781`；工作树另有用户未提交的本地流程文件改动。
 - 原先被称为“测试服务器”的 `180.76.100.156` 已由用户确认是生产服务器；本任务不得继续连接、部署或写入该地址。此前已保留精确备份，任何线上字符修复必须由用户重新授权并由运维按字符集方案执行。
 - 后台目前把“系统设置”作为导航/标题的一部分，顶栏有裸“修改密码/退出”动作；需在不改变权限的前提下统一为“人员与权限”和账号菜单。
 - 小程序公共请求层与多个页面仍会显示底层 `request:fail`/HTTP 技术文案，部分页面把失败渲染为空或没有重试。

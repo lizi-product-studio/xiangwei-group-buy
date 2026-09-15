@@ -1,6 +1,6 @@
 # 首页与登录页分享
 
-- run_id / task_id：TASK-20260908-MINI-SHARE；attempt 1；QUICK_PATCH。
+- run_id / task_id：TASK-20260908-MINI-SHARE；attempt 1；局部修改。
 - confirmed：用户要求首页、登录页面增加分享并更新。只改两页分享入口与回调，保留登录、协议、区域及商品逻辑。
 - 两页 onLoad 调用 showShareMenu，开启 shareAppMessage / shareTimeline；缺少该接口时不阻断原页面。
 - 好友分享固定标题“乡味集｜好味道，一起分享”，路径分别为 /pages/home/index、/pages/login/index；朋友圈使用同一标题与空 query，不携带当前 source、token、手机号或跳转意图。不增加图片资产或页面按钮。

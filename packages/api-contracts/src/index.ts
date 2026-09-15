@@ -95,6 +95,55 @@ export const productCategorySchema = z.object({
   sortOrder: z.int().min(0).max(1_000_000).default(0),
   status: z.enum(["ACTIVE", "INACTIVE"]).default("ACTIVE"),
 });
+
+/** Homepage merchandising content.  Image references are validated against
+ * the product image service at the API boundary; the contract only carries
+ * the stable public URL. */
+export const homepageBannerSchema = z
+  .object({
+    id: identifierSchema.optional(),
+    title: z.string().trim().min(2).max(80),
+    subtitle: z.string().trim().max(120).default(""),
+    imageUrl: z.string().trim().min(1).max(2048),
+    targetType: z.enum(["NONE", "CAMPAIGN", "CATEGORY"]).default("NONE"),
+    targetValue: identifierSchema.nullable().default(null),
+    scope: z.enum(["ALL", "SERVICE_AREA"]).default("ALL"),
+    serviceAreaId: identifierSchema.nullable().default(null),
+    startsAt: z.iso.datetime({ offset: true }).nullable().default(null),
+    endsAt: z.iso.datetime({ offset: true }).nullable().default(null),
+    sortOrder: z.int().min(0).max(1_000_000).default(0),
+    status: z.enum(["ACTIVE", "INACTIVE"]).default("ACTIVE"),
+    version: z.int().min(1).optional(),
+  })
+  .superRefine((value, context) => {
+    if (value.endsAt && value.startsAt && Date.parse(value.endsAt) < Date.parse(value.startsAt))
+      context.addIssue({ code: "custom", path: ["endsAt"], message: "结束时间不能早于开始时间" });
+    if (value.scope === "SERVICE_AREA" && !value.serviceAreaId)
+      context.addIssue({ code: "custom", path: ["serviceAreaId"], message: "指定区域投放时必须选择服务区域" });
+    if (value.scope === "ALL" && value.serviceAreaId)
+      context.addIssue({ code: "custom", path: ["serviceAreaId"], message: "全量投放不能填写服务区域" });
+    if (value.targetType === "NONE" && value.targetValue)
+      context.addIssue({ code: "custom", path: ["targetValue"], message: "无跳转轮播不能填写跳转目标" });
+    if (value.targetType !== "NONE" && !value.targetValue)
+      context.addIssue({ code: "custom", path: ["targetValue"], message: "设置跳转目标时必须填写目标" });
+  });
+
+export const consumerProfileSchema = z.object({
+  displayName: z.string().trim().min(1).max(30).refine(
+    (value) => ![...value].some((character) => {
+      const code = character.charCodeAt(0);
+      return code <= 31 || code === 127;
+    }),
+    "姓名不能包含控制字符",
+  ),
+  avatarUrl: z.string().trim().max(2048).nullable(),
+  expectedVersion: z.int().min(0).default(0),
+});
+
+export const phoneRebindSchema = z.object({
+  phoneCode: z.string().trim().min(1).max(256),
+  expectedVersion: z.int().min(0).default(0),
+});
 export const communityCampaignSchema = z
   .object({
     title: z.string().trim().min(2).max(80),

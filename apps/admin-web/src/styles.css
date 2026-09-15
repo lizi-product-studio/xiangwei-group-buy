@@ -501,6 +501,18 @@ nav { display: grid; gap: 16px; }
 .content .status-tag {white-space:nowrap;min-height:24px;border:0;padding:2px 8px;font-size:12px;line-height:20px;border-radius:6px;}
 .content .ant-table-cell {font-variant-numeric:tabular-nums;}
 .content .ant-table-cell .ant-space {align-items:center;}
+.homepage-banners__header { margin-bottom: 16px; }
+.homepage-banners__intro { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; padding: 13px 16px; color: #687383; background: #f7f8f7; border: 1px solid var(--line); border-radius: 10px; font-size: 12px; line-height: 1.6; }
+.homepage-banners__table .ant-table-tbody > tr > td { padding-top: 12px; padding-bottom: 12px; }
+.homepage-banners__content-cell { display: flex; min-width: 250px; align-items: center; gap: 12px; }
+.homepage-banners__content-cell > div { display: grid; min-width: 0; gap: 4px; }
+.homepage-banners__content-cell strong { overflow: hidden; color: var(--ink); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.homepage-banners__content-cell span { overflow: hidden; color: #7b8491; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.homepage-banners__form-actions { display: flex; justify-content: flex-end; gap: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
+@media (max-width: 767px) {
+  .homepage-banners__intro { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .homepage-banners__content-cell { min-width: 210px; }
+}
 .content .ant-btn {border-radius:8px;}
 .ant-btn:focus-visible,.ant-menu-item:focus-visible {outline:2px solid var(--brand);outline-offset:2px;}
 .content > section {margin-bottom:24px;}

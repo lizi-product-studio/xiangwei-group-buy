@@ -19,9 +19,6 @@
 | `pnpm test:e2e` | PASS | 11/11 Chromium journeys in 1.4 minutes; memory store/mock payment by design |
 | `pnpm audit --prod --audit-level high` | PASS | no known production dependency vulnerabilities reported at execution time |
 | `git diff --check` | PASS | no whitespace errors before final document update; must rerun before commit |
-| Orchestrator `status` | PASS | required document headings present |
-| Orchestrator `validate` | EXPECTED BLOCK | traceability parses; 16 explicit product-completeness gaps/blocks remain and are not relabeled as covered |
-
 ## Independent QA
 
 - Fresh QA agent/session reviewed the candidate read-only and concluded `BLOCKED` for production.

@@ -13,7 +13,7 @@ source_of_truth: project-document-set
 
 - Gate ID: QUALITY-RELEASE-EVIDENCE
 - Mode: BALANCED
-- Reviewer/session: implementation evidence assembled by orchestrator; independent QA and Quality Governor decisions must be recorded separately
+- Reviewer/session: implementation evidence assembled by main_agent; independent QA and Quality Governor decisions must be recorded separately
 - Input fingerprint: current worktree and `docs/00-10`
 - Evidence references: `evidence/local-gates-2026-08-31.md`, test sources, CI workflow and go-live checklist
 - Conclusion: BLOCKED_FOR_PRODUCTION; LOCAL_GATE_PASS_PENDING_FINAL_RERUN
@@ -38,7 +38,7 @@ source_of_truth: project-document-set
 | QC-02 | Seven integration cases are skipped without supplied MySQL/Redis URLs | P0 | technical/ops | Run with `REQUIRE_INTEGRATION_TESTS=true` against required versions | OPEN |
 | QC-03 | Single JSON aggregate has no capacity/SLO evidence | P1 | architecture/ops | 2× pilot peak benchmark, threshold and stop rule | OPEN |
 | QC-04 | External客服 channel, deletion/retention and complaint escalation are unapproved | P0 | product/legal/finance | Approved policy plus dry run | OPEN |
-| QC-05 | Independent Quality Governor review could not be replaced by implementer judgment | P0 process | orchestrator | Independent review of exact final fingerprint | OPEN |
+| QC-05 | Independent Quality Governor review could not be replaced by implementer judgment | P0 process | main_agent | Independent review of exact final fingerprint | OPEN |
 
 ## Decision
 

@@ -92,6 +92,23 @@ export interface ProductCategory {
   createdAt: string;
   updatedAt: string;
 }
+export interface HomepageBanner {
+  id: string;
+  title: string;
+  subtitle: string;
+  imageUrl: string;
+  targetType: "NONE" | "CAMPAIGN" | "CATEGORY";
+  targetValue: string | null;
+  scope: "ALL" | "SERVICE_AREA";
+  serviceAreaId: string | null;
+  startsAt: string | null;
+  endsAt: string | null;
+  sortOrder: number;
+  status: "ACTIVE" | "INACTIVE";
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
 
 export interface ServiceArea {
   id: string;
@@ -180,6 +197,10 @@ export interface User {
   wechatOpenId: string | null;
   phoneNumber?: string;
   phoneVerifiedAt?: string;
+  displayName?: string | null;
+  avatarUrl?: string | null;
+  profileUpdatedAt?: string | null;
+  profileVersion?: number;
   status: "ACTIVE" | "BLOCKED";
   createdAt: string;
 }

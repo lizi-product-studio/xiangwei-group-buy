@@ -1,6 +1,7 @@
 {
   "pages": [
     "pages/home/index",
+    "pages/category/index",
     "pages/campaign/detail",
     "pages/checkout/index",
     "pages/cart/index",
@@ -13,6 +14,7 @@
     "pages/legal/index",
     "pages/after-sale/index",
     "pages/profile/index",
+    "pages/profile-edit/index",
     "pages/login/index"
   ],
   "window": {
@@ -29,8 +31,8 @@
     "borderStyle": "white",
     "list": [
       { "pagePath": "pages/home/index", "text": "团购", "iconPath": "assets/tab-home-default.png", "selectedIconPath": "assets/tab-home-active.png" },
+      { "pagePath": "pages/category/index", "text": "分类", "iconPath": "assets/tab-category-default.png", "selectedIconPath": "assets/tab-category-active.png" },
       { "pagePath": "pages/cart/index", "text": "购物车", "iconPath": "assets/tab-cart-default.png", "selectedIconPath": "assets/tab-cart-active.png" },
-      { "pagePath": "pages/orders/index", "text": "订单", "iconPath": "assets/tab-orders-default.png", "selectedIconPath": "assets/tab-orders-active.png" },
       { "pagePath": "pages/profile/index", "text": "我的", "iconPath": "assets/tab-profile-default.png", "selectedIconPath": "assets/tab-profile-active.png" }
     ]
   },

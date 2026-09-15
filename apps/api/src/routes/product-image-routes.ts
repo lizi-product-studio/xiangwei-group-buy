@@ -1,8 +1,11 @@
+import { BusinessError } from '@hometown/domain';
 import type { FastifyInstance } from 'fastify';
 import { requireActor } from '../modules/auth/auth.js';
+import type { CommerceStore } from '../modules/core/store.js';
 import { PRODUCT_IMAGE_MAX_BYTES, type ProductImages } from '../modules/media/product-images.js';
 
-export function registerProductImageRoutes(app: FastifyInstance, images: ProductImages): void {
+export function registerProductImageRoutes(app: FastifyInstance, dependencies: { productImages: ProductImages; profileImages: ProductImages; store: CommerceStore }): void {
+  const { productImages, profileImages, store } = dependencies;
   // Encapsulation keeps binary parsing and its larger body limit off other APIs.
   app.register(async (scope) => {
     scope.addContentTypeParser(['image/jpeg', 'image/png', 'image/webp'], { parseAs: 'buffer', bodyLimit: PRODUCT_IMAGE_MAX_BYTES }, (_request, body, done) => done(null, body));
@@ -11,11 +14,33 @@ export function registerProductImageRoutes(app: FastifyInstance, images: Product
       config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
       onRequest: async (request) => { requireActor(request, ['OPERATOR', 'SUPER_ADMIN']); },
     }, async (request, reply) => {
-      const imageUrl = await images.upload(request.body as Buffer, request.headers['content-type']?.split(';')[0]?.trim() ?? '');
+      const imageUrl = await productImages.upload(request.body as Buffer, request.headers['content-type']?.split(';')[0]?.trim() ?? '');
       return reply.status(201).send({ data: { imageUrl } });
     });
+    scope.post('/api/v1/me/profile-image', {
+      bodyLimit: PRODUCT_IMAGE_MAX_BYTES,
+      config: { rateLimit: { max: 6, timeWindow: '1 minute' } },
+      onRequest: async (request) => { requireActor(request, ['USER']); },
+    }, async (request, reply) => {
+      const imageUrl = await profileImages.upload(request.body as Buffer, request.headers['content-type']?.split(';')[0]?.trim() ?? '');
+      return reply.status(201).send({ data: { imageUrl } });
+    });
+    scope.get<{ Params: { filename: string } }>('/api/v1/profile-images/:filename', async (request, reply) => {
+      const actor = requireActor(request, ['USER']);
+      const user = await store.getUser(actor.userId);
+      const expected = `/api/v1/profile-images/${request.params.filename}`;
+      if (!user || user.status !== 'ACTIVE' || user.avatarUrl !== expected)
+        throw new BusinessError('RESOURCE_NOT_FOUND', '头像不存在', 404);
+      const image = await profileImages.read(request.params.filename);
+      return reply
+        .type('image/webp')
+        .header('Cross-Origin-Resource-Policy', 'same-origin')
+        .header('X-Content-Type-Options', 'nosniff')
+        .header('Cache-Control', 'private, no-store')
+        .send(image);
+    });
     scope.get<{ Params: { filename: string } }>('/api/v1/product-images/:filename', async (request, reply) => {
-      const image = await images.read(request.params.filename);
+      const image = await productImages.read(request.params.filename);
       return reply
         .type('image/webp')
         // The WeChat renderer fetches remote images from its own webview

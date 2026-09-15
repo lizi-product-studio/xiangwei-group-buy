@@ -2,7 +2,7 @@
 
 - task_id：TASK-20260908-READINESS-REPAIR
 - confirmed：用户明确要求修复此前评估所发现问题，替代上一轮只读评估边界；沿会话既有GitHub同步和生产更新授权，不自动扩为真实交易、生产压测、付费扩容或不可逆迁移。
-- route：GOVERNED_DELIVERY；root负责产品冻结与本文档，flow_engineering独占源码/测试/Git/部署，flow_qa独立只读验收。
+- route：重大任务；root负责产品冻结与本文档，flow_engineering独占源码/测试/Git/部署，flow_qa独立只读验收。
 - 批次A：服务端角色/状态筛选后分页，取消/品质/领取/人工通知待办全部可达；后台分页接通；差异退款按实际订单行精确关联，缺资金事实不得回退0且拒绝执行；501+历史回归。
 - 批次B：无schema的隔离只读快照，消除读方法全量锁写与公开列表重复读；不得共享this.data导致并发污染。通知受控并发与预算保持claim/lease/unknown/at-most-once语义。真实MySQL隔离集成与容量测试，内存模拟不得代替真实证据。
 - 验收：每批冻结差异后独立QA，产品lint/typecheck/tests/build与E2E；保留既有原型lint和未跑项目的事实。Git精确同步、生产备份、版本一致性及发布后验。先独立交付A，不因大架构方案拖延已知业务缺陷。

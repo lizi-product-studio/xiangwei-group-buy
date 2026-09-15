@@ -18,8 +18,6 @@ miniprogram_npm/
 apps/miniprogram/src/config/deployment.local.ts
 apps/miniprogram/project.private.config.json
 *.tsbuildinfo
-# 本地编排演进记录可能包含运行元数据，不纳入版本控制。
-.dingxinglizi/evolution/
 # 本地审查截图、诊断报告与临时角色配置仅作证据留存，不混入产品源码提交。
 .ops-closure-audit-*/
 .product-review-*/

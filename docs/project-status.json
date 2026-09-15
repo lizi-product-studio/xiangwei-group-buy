@@ -77,7 +77,7 @@
       "evidence": [],
       "input_fingerprint": null,
       "mode": "INLINE",
-      "reviewer": "orchestrator",
+      "reviewer": "main_agent",
       "session": null,
       "status": "PENDING",
       "version": null
@@ -86,7 +86,7 @@
       "evidence": [],
       "input_fingerprint": null,
       "mode": "INLINE",
-      "reviewer": "orchestrator",
+      "reviewer": "main_agent",
       "session": null,
       "status": "PENDING",
       "version": null
@@ -96,5 +96,5 @@
   "risk_acceptance_authority": "BLOCKING_UNKNOWN",
   "schema_version": 3,
   "updated_at": "2026-09-02T04:25:42Z",
-  "updated_by": "orchestrator"
+  "updated_by": "main_agent"
 }

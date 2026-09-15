@@ -13,7 +13,7 @@ source_of_truth: project-document-set
 
 - Gate ID: QUALITY-PROBLEM
 - Mode: BALANCED
-- Reviewer/session: orchestrator provisional review; independent Quality Governor pending
+- Reviewer/session: main_agent provisional review; independent Quality Governor pending
 - Input fingerprint: current `docs/00-04` plus repository behavior at review time
 - Evidence references: `docs/00-project-context.md`, `docs/04-prd.md`, `README.md`, code and tests
 - Conclusion: PROVISIONAL_PASS_WITH_BLOCKING_EVIDENCE_GAPS

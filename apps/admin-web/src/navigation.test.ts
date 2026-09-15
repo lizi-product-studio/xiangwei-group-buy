@@ -28,10 +28,11 @@ describe("admin navigation", () => {
   it("gives a super administrator the complete PRD primary navigation once", () => {
     const groups = getAdminNavigation(["SUPER_ADMIN"]);
     expect(groups.map((group) => group.label)).toEqual([
-      "工作台", "商品", "团期", "订单", "履约管理", "区域与自提点", "用户", "售后", "运营治理", "财务", "系统",
+      "工作台", "商品", "页面运营", "团期", "订单", "履约管理", "区域与自提点", "用户", "售后", "运营治理", "财务", "系统",
     ]);
     expect(groups.flatMap(group => group.items.map(item => item.key))).toContain("categories");
     expect(groups.flatMap(group => group.items.map(item => item.key))).toContain("finance-ledger");
+    expect(groups.flatMap(group => group.items.map(item => item.key))).toContain("homepage-banners");
   });
 
   it("limits the consumer directory to super administrators and customer service", () => {

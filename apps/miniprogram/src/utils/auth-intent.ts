@@ -39,8 +39,8 @@ function createIntentId(now: number): string {
 
 const TAB_PATHS = new Set([
   "/pages/home/index",
+  "/pages/category/index",
   "/pages/cart/index",
-  "/pages/orders/index",
   "/pages/profile/index",
 ]);
 const AUTH_SOURCES = new Set<AuthIntentSource>([
@@ -52,6 +52,7 @@ const AUTH_WRITE_ACTIONS = new Set<AuthWriteAction>([
 ]);
 const REGISTERED_PAGE_PATHS = new Set([
   "/pages/home/index",
+  "/pages/category/index",
   "/pages/campaign/detail",
   "/pages/checkout/index",
   "/pages/cart/index",
@@ -64,6 +65,7 @@ const REGISTERED_PAGE_PATHS = new Set([
   "/pages/legal/index",
   "/pages/after-sale/index",
   "/pages/profile/index",
+  "/pages/profile-edit/index",
   "/pages/login/index",
 ]);
 const SOURCE_ROUTES: Record<AuthIntentSource, { path: string; required?: string }> = {

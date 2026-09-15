@@ -7,7 +7,7 @@ import { BusinessError } from '@hometown/domain';
 
 export const PRODUCT_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 const filenamePattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.webp$/;
-const prefix = '/api/v1/product-images/';
+const defaultPrefix = '/api/v1/product-images/';
 const formats: Record<string, string> = { 'image/jpeg': 'jpeg', 'image/png': 'png', 'image/webp': 'webp' };
 const invalid = () => new BusinessError('VALIDATION_ERROR', '请上传有效的 JPEG、PNG 或 WebP 单张图片（最多 5 MB、1600 万像素）', 400);
 const missing = () => new BusinessError('RESOURCE_NOT_FOUND', '商品图片不存在', 404);
@@ -16,7 +16,7 @@ sharp.concurrency(1);
 
 export class ProductImages {
   private processing = false;
-  public constructor(private readonly directory: string) {}
+  public constructor(private readonly directory: string, private readonly prefix = defaultPrefix) {}
   public async initialize(): Promise<void> {
     await mkdir(this.directory, { recursive: true, mode: 0o750 });
     const disk = await statfs(this.directory);
@@ -48,7 +48,7 @@ export class ProductImages {
         await unlink(temporary).catch(() => undefined);
         throw error;
       }
-      return `${prefix}${name}`;
+      return `${this.prefix}${name}`;
     } finally { this.processing = false; }
   }
   public async read(name: string): Promise<Buffer> {
@@ -63,6 +63,6 @@ export class ProductImages {
     } catch { throw missing(); }
   }
   public async validateReference(imageUrl: string | null): Promise<void> {
-    if (imageUrl?.startsWith(prefix)) await this.read(imageUrl.slice(prefix.length));
+    if (imageUrl?.startsWith(this.prefix)) await this.read(imageUrl.slice(this.prefix.length));
   }
 }

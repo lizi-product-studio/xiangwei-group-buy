@@ -3,7 +3,7 @@ title: "ADR — 仅真实自提点可形成履约承诺"
 status: APPROVED
 version: 1.0.0
 last_updated: "2026-08-31"
-owner: orchestrator
+owner: main_agent
 source_of_truth: current-user-decision
 ---
 

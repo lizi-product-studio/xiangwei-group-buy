@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { BusinessError } from '@hometown/domain';
 import type { CommerceStore } from '../core/store.js';
+import type { User } from '../core/types.js';
 import type { WechatPhoneExchange } from './wechat-phone.js';
 import type { Actor } from './auth.js';
 
@@ -91,5 +92,53 @@ export class AuthService {
     if (!authorization?.startsWith('Bearer ')) return;
     const token = authorization.slice(7).trim();
     if (token) await this.store.deleteAuthSession(tokenHash(token));
+  }
+
+  /** Re-authorize the phone bound to an already authenticated consumer.  The
+   * one-time WeChat phone code is exchanged before the aggregate write, then
+   * the current profile version is checked inside the transaction. */
+  public async rebindPhone(userId: string, phoneCode: string, expectedVersion: number, requestId: string): Promise<User> {
+    const current = await this.store.getUser(userId);
+    if (!current || current.status !== 'ACTIVE' || !current.wechatOpenId)
+      throw new BusinessError('AUTH_REQUIRED', '请先完成微信登录', 401);
+    if ((current.profileVersion ?? 0) !== expectedVersion)
+      throw new BusinessError('CONCURRENT_MODIFICATION', '个人资料已更新，请刷新后重试', 409);
+    const verified = await this.phoneExchange.exchange(phoneCode, current.wechatOpenId);
+    if (!hasVerifiedPhone(verified)) throw new BusinessError('AUTH_REQUIRED', '手机号授权无效或已过期，请重新授权', 401);
+    return this.store.transaction(async (store) => {
+      const value = await store.getUser(userId);
+      const version = value?.profileVersion ?? 0;
+      if (!value || value.status !== 'ACTIVE' || !value.wechatOpenId)
+        throw new BusinessError('AUTH_REQUIRED', '请先完成微信登录', 401);
+      if (version !== expectedVersion)
+        throw new BusinessError('CONCURRENT_MODIFICATION', '个人资料已更新，请刷新后重试', 409);
+      const duplicate = (await store.listConsumerUsers()).find(
+        (user) => user.id !== userId && user.phoneNumber === verified.phoneNumber,
+      );
+      if (duplicate)
+        throw new BusinessError('RESOURCE_IN_USE', '该手机号已绑定其他账号', 409);
+      const after = {
+        ...value,
+        ...verified,
+        profileUpdatedAt: new Date().toISOString(),
+        profileVersion: version + 1,
+      };
+      await store.saveUser(after);
+      const mask = (phone: string | undefined) => phone && /^1[3-9]\d{9}$/.test(phone)
+        ? `${phone.slice(0, 3)}****${phone.slice(-4)}`
+        : null;
+      await store.saveAuditLog({
+        id: randomUUID(),
+        actorId: userId,
+        action: 'CONSUMER_PHONE_REBOUND',
+        resourceType: 'USER',
+        resourceId: userId,
+        requestId,
+        beforeData: { phoneNumber: mask(value.phoneNumber) },
+        afterData: { phoneNumber: mask(after.phoneNumber) },
+        createdAt: after.profileUpdatedAt,
+      });
+      return after;
+    });
   }
 }

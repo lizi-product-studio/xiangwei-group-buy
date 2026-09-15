@@ -1,6 +1,6 @@
 # 登录页审核文案修正
 
-- run_id / task_id：TASK-20260908-LOGIN-REVIEW；attempt 1；QUICK_PATCH。
+- run_id / task_id：TASK-20260908-LOGIN-REVIEW；attempt 1；局部修改。
 - confirmed：用户提供审核拒绝原因并要求尽快修复。范围为登录前置页面去除易混淆官方身份的图标与文案，不改真实登录和手机号授权协议。
 - 登录页移除两个 wechat-white 图标引用；初始与手机号授权按钮改为“手机号快捷登录”，去除微信身份宣传和登录错误回退中的微信字样。
 - 售后、订单、消息、订单详情、取货码的未登录入口同步使用“手机号快捷登录”。保留重新登录、处理中反馈、协议同意、wx.login 与 getPhoneNumber 流程。

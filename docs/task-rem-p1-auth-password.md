@@ -2,7 +2,7 @@
 
 ## 状态
 
-- 路由：`existing-iteration` / `software` / `GOVERNED_DELIVERY`
+- 路由：`existing-iteration` / `software` / `重大任务`
 - 负责人：Engineering Lead（单一源码写入者）
 - 审查：现有独立代码审核/QA 线程只读复核
 - 真实服务器凭据：仅由产品线程在受控环境处理；本文件、代码、测试、日志和提交信息不得包含真实密码、Token 或密钥

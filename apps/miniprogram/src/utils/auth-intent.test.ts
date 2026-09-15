@@ -111,7 +111,8 @@ describe("consumer auth intent", () => {
       "/pages/profile/index",
     );
     expect(parseAuthIntent('{"source":"orders"}')).toBeNull();
-    expect(isTabReturnUrl("/pages/orders/index")).toBe(true);
+    expect(isTabReturnUrl("/pages/orders/index")).toBe(false);
+    expect(isTabReturnUrl("/pages/category/index")).toBe(true);
     expect(isTabReturnUrl("/pages/order-detail/index?id=1")).toBe(false);
   });
 

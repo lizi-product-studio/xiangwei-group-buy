@@ -3,7 +3,7 @@ title: "Decision DEC-000 — Short title"
 status: DRAFT
 version: 0.1.0
 last_updated: "2026-08-31"
-owner: orchestrator
+owner: main_agent
 source_of_truth: project-document-set
 ---
 

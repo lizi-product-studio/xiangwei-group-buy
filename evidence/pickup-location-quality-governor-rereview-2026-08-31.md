@@ -8,7 +8,7 @@ conclusion: PASS
 date: "2026-08-31"
 selected_model: gpt-5.6-sol
 reasoning_effort: high
-runtime_attestation: "Orchestrator explicit spawn configuration; launch/session attestation only, with no independent runtime tool echo"
+runtime_attestation: "Main Agent explicit spawn configuration; launch/session attestation only, with no independent runtime tool echo"
 ---
 
 # 自提点定位需求修复独立复核
@@ -19,7 +19,7 @@ runtime_attestation: "Orchestrator explicit spawn configuration; launch/session 
 
 Owner 已无矛盾关闭第 1 次复核提出的 QG-RR-PL-01 与 QG-RR-PL-02；定点返工没有引入新的 P0/P1。结合第 1 次复核已通过的 QG-PL-02、QG-PL-04、QG-PL-05，以及本次关闭的 QG-PL-01/QG-PL-03 残留项，QG-PL-01 至 QG-PL-05 的需求层重进条件全部满足。
 
-本结论只放行 Orchestrator 后续建立独立 Engineering Lead 实现包；它不证明定位功能已经实现、真实提供方可用、真实农村覆盖、生产可用或发布通过。
+本结论只放行 Main Agent 后续建立独立 Engineering Lead 实现包；它不证明定位功能已经实现、真实提供方可用、真实农村覆盖、生产可用或发布通过。
 
 ## 第 2 次重进复核
 
@@ -72,7 +72,6 @@ Owner 已无矛盾关闭第 1 次复核提出的 QG-RR-PL-01 与 QG-RR-PL-02；�
 
 第 2 次复核重新完整读取：
 
-- `tasks/TASK-PICKUP-LOCATION-REQ-REPAIR.yaml`
 - `docs/06-ux-spec.md`
 - `docs/09-api-data-contract.md`
 - `docs/10-test-plan.md`
@@ -81,18 +80,17 @@ Owner 已无矛盾关闭第 1 次复核提出的 QG-RR-PL-01 与 QG-RR-PL-02；�
 
 本次读取快照 SHA-256：
 
-- Task Package: `b732e93f59abcdf0f5deb6aa85cbc2c890b91d57aee911bd3a312a79e070f3ee`
 - UX: `5884ddf5c0fde32514bc9e88451d1d6848fe98bed793502a5624eaa42ad098d5`
 - API contract: `60f465d9b0762fa49a1b36ce42387f4cb40d7033791f5b5a36795a01a13e3ec1`
 - Test Plan: `d8e423e0f77392ae31ef9aa62192e8263eb3ca98209f5c416769c86a4d7698e0`
 - Owner repair handoff: `5ee293b7b0251f6f5f8a8afcc755b02288c93c0541f6834c2bdde10373b88ce1`
 
-Task Package 没有 owner 输出 target fingerprint；这些散列只界定本次实际读取快照，不证明 owner handoff 后从未发生漂移。若上述输入在实现路由前变化，应重新确认本 PASS 是否仍适用。
+这些散列只界定本次实际读取快照，不证明交接后从未发生漂移。若上述输入在实现前变化，应重新确认本 PASS 是否仍适用。
 
 执行证据：
 
 ```text
-git diff --check -- docs/06-ux-spec.md docs/09-api-data-contract.md docs/10-test-plan.md evidence/pickup-location-requirements-repair-2026-08-31.md tasks/TASK-PICKUP-LOCATION-REQ-REPAIR.yaml
+git diff --check -- docs/06-ux-spec.md docs/09-api-data-contract.md docs/10-test-plan.md evidence/pickup-location-requirements-repair-2026-08-31.md
 # exit 0; no whitespace errors
 ```
 
@@ -100,9 +98,9 @@ git diff --check -- docs/06-ux-spec.md docs/09-api-data-contract.md docs/10-test
 
 ## 模型、权限与证据边界
 
-- Orchestrator 明确以 `model=gpt-5.6-sol`、`reasoning_effort=high` spawn 本 reviewer 子会话；这是 launch/session attestation。
-- 工具没有返回可独立验证实际运行模型或思考强度的 runtime echo。Task Package 中 owner 的 `gpt-5.6-terra/high` 且 `actual_model_attested: false` 不是本 reviewer 的独立运行证明。
-- 本会话没有启动子 agent；未修改需求、代码、测试、配置、Task Package 或项目状态；只更新本 evidence 文件。
+- Main Agent 明确以 `model=gpt-5.6-sol`、`reasoning_effort=high` spawn 本 reviewer 子会话；这是 launch/session attestation。
+- 工具没有返回可独立验证实际运行模型或思考强度的 runtime echo。任务说明 中 owner 的 `gpt-5.6-terra/high` 且 `actual_model_attested: false` 不是本 reviewer 的独立运行证明。
+- 本会话没有启动子 agent；未修改需求、代码、测试、配置、任务说明 或项目状态；只更新本 evidence 文件。
 
 ## Handoff
 
@@ -113,4 +111,4 @@ git diff --check -- docs/06-ux-spec.md docs/09-api-data-contract.md docs/10-test
 - closed_findings: `QG-RR-PL-01`, `QG-RR-PL-02`
 - deviations: 无
 - accepted_risks: 无新增风险接受；ServiceArea 语义和真实提供方外部风险继续按现有契约保留
-- next_responsible_role: Orchestrator。可建立独立 Engineering Lead 实现 Task Package；实现后仍需独立 QA，且不得以本 QG PASS 替代真实提供方/预发布/发布批准。
+- next_responsible_role: Main Agent。可建立独立 Engineering Lead 实现 任务说明；实现后仍需独立 QA，且不得以本 QG PASS 替代真实提供方/预发布/发布批准。

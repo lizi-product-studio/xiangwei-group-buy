@@ -2,7 +2,7 @@
 
 - task_id: TASK-20260908-CRUD-CLOSURE
 - confirmed：用户要求修正开售过期泛化错误，并检查系统补齐适用的增删改查。沿当前会话已确认的代码同步与服务器更新授权交付；不代用户删除真实业务数据。
-- route：核心草稿状态、并发与权限涉及 GOVERNED_DELIVERY；单独的文案修复仍按局部影响验证，最终集成跑一次适用门禁。
+- route：核心草稿状态、并发与权限涉及 重大任务；单独的文案修复仍按局部影响验证，最终集成跑一次适用门禁。
 - ownership：root 范围和本文档；flow_engineering 唯一源码、测试、Git、部署写入者；flow_qa 独立只读审计验收；crud_assessment 只读风险评估已完成。
 
 ## 冻结范围

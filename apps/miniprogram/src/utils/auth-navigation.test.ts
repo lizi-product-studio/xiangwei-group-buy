@@ -47,7 +47,7 @@ describe("customer auth navigation", () => {
     finishCustomerLogin();
     expect(readAuthIntent()).toBeNull();
     expect(storage.has("hometown-auth-cancel-return")).toBe(false);
-    expect(wx.switchTab).toHaveBeenCalledWith({ url: "/pages/orders/index" });
+    expect(wx.redirectTo).toHaveBeenCalledWith({ url: "/pages/orders/index" });
   });
 
   it("reuses an active intent for the same explicit protected entry", () => {

@@ -15,12 +15,11 @@ date: "2026-08-31"
 
 ## 输入与现状证据
 
-已按任务包读取以下输入：
+已读取以下输入：
 
 - 项目契约与事实基线：`AGENTS.md`、`docs/project-status.json`、`docs/00-project-context.md`、`docs/01-domain-rules.md`、`docs/02-glossary.md`。
 - 上游规格：`docs/06-ux-spec.md`、`docs/08-system-design.md`、`docs/09-api-data-contract.md`、`docs/10-test-plan.md`。
 - 定位实现证据：`apps/admin-web/src/App.tsx` 的区域/点位表单、`pickup-location-picker.tsx`、`pickup-address.ts`、`region-cascade.ts`、`api.ts`；`apps/api/src/app.ts` 的目录、地理和点位路由；`apps/api/src/modules/service-areas/geo-search.ts`；`packages/api-contracts/src/index.ts`。
-- 任务授权与范围：`tasks/TASK-PICKUP-LOCATION-REQ.yaml`。
 
 现状结论：
 
@@ -58,9 +57,6 @@ date: "2026-08-31"
 验证已执行：
 
 ```text
-python3 /Users/lizi/.agents/skills/software-project-orchestrator/scripts/orchestrator.py status /Users/lizi/Desktop/拼团项目
-PASS: 0 errors, 0 warning(s)
-
 git diff --check -- docs/01-domain-rules.md docs/04-prd.md docs/06-ux-spec.md docs/08-system-design.md docs/09-api-data-contract.md docs/10-test-plan.md docs/decisions/2026-08-31-pickup-location-source-of-truth.md
 # exit 0; no whitespace errors
 ```
@@ -70,5 +66,5 @@ git diff --check -- docs/01-domain-rules.md docs/04-prd.md docs/06-ux-spec.md do
 - 未修改应用代码、测试、依赖、锁文件、迁移、环境文件、外部系统或生产数据；没有真实地图 Key/网络响应作为完成前提。
 - 本轮不包含消费者实时定位、导航、路径规划、电子围栏、POI ID 持久化、联系人/排班/照片或地址治理后台。
 - 后续 Engineering Lead 必须以 REQ-015/016、DR-017–020、ADR 和 AC-PICKUP-LOC-01–07 另建实现任务包；该包应拥有应用代码与测试文件，且在实现后安排独立 QA。
-- 实现包必须保持服务区域单一事实链、服务端重新核验和历史点位不静默改区/丢坐标；若 50 米阈值或重复覆盖影响运营，应回报 Orchestrator 决定，而非把默认假设升级为业务事实。
+- 实现包必须保持服务区域单一事实链、服务端重新核验和历史点位不静默改区/丢坐标；若 50 米阈值或重复覆盖影响运营，应回报 Main Agent 决定，而非把默认假设升级为业务事实。
 - Quality Governor 是下一责任角色，负责审查本需求基线后再放行实现路由。真实高德覆盖/Key 仍由用户授权的预发布活动处理。

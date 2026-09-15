@@ -90,7 +90,7 @@ source_of_truth: project-document-set
 ## Independent QA conclusion
 
 - QA Agent/session: `independent_qa_evidence_audit`, fresh read-only candidate review on 2026-08-31.
-- Engineering owner/session: main orchestrator implementation session.
+- Engineering owner/session: main agent implementation session.
 - Conclusion: `BLOCKED` for production; local candidate gates pass but do not prove real provider/data-layer operation.
 - Evidence summary: QA confirmed the E2E uses memory/mock and required real MySQL/Redis, migration replay, WeChat/merchant, capacity, recovery and compliance evidence. The canonical AC/traceability documents were completed after its initial snapshot; production blockers remain unchanged.
 - Date/baseline versions: 2026-08-31, current worktree; exact commit to be recorded after commit.

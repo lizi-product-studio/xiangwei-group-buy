@@ -19,7 +19,7 @@
 
 ## 角色与所有权
 
-- 主 Orchestrator：本文件唯一写入者；负责目标、决定、验收汇总。
+- 主 Agent：本文件唯一写入者；负责目标、决定、验收汇总。
 - Project Assessor：只读评估切换与删除条件。
 - Engineering Lead（migration_engineering）：唯一源码、测试、部署脚本及服务器写入负责人；备份与准备可执行，切换前冻结清单交独立审核。
 - 独立 QA：只读审核备份恢复证据、待发布差异和部署结果，不实施修复。
@@ -37,7 +37,7 @@
 
 ## 评估结论
 
-Project Assessor：GOVERNED_DELIVERY，高风险正式服务替换。最小角色为主线程、研发负责人、独立 QA。
+Project Assessor：重大任务，高风险正式服务替换。最小角色为主线程、研发负责人、独立 QA。
 切换前必须核验资源归属、一致性异机备份、数据库隔离恢复、空间余量和单一 HTTPS 入口。
 微信配置完整不等于真实交易验收通过；真实交易开放单独验证。
 
@@ -108,7 +108,7 @@ QA attempt 8 原始最终结论：A+B 阶段 PASS；范围为家政退役与账�
 
 ## 分阶段执行清单（研发冻结，经 QA attempt 4 补充）
 
-QA attempt 4：A 可执行，须纳入以下补项；不是 B 批准或完整迁移 PASS。主 Orchestrator 已批准研发执行 A。
+QA attempt 4：A 可执行，须纳入以下补项；不是 B 批准或完整迁移 PASS。主 Agent 已批准研发执行 A。
 恢复容器启动前 MemAvailable 至少 640MiB，运行中 256MiB 为止损阈值；停 API 后核查事务、事件与其他 writer。
 最终源聚合必须停写后重取，恢复必须干净临时库；失败先停恢复容器再恢复旧 API/任务。
 仅停家政备份/巡检 cron，保留腾讯服务器管理任务和 certbot-renew。
@@ -136,7 +136,7 @@ A 通过后停止旧 DB，保留旧容器、root_mysql_data 卷、媒体和密�
 
 #### C-SUBSCRIPTION：五模板适配（2026-09-07 新交接）
 
-- task_id：TASK-20260907-HOUSEKEEPING-REPLACE；route：GOVERNED_DELIVERY；状态：本地适配 QA PASS，真实微信上线 BLOCKED。
+- task_id：TASK-20260907-HOUSEKEEPING-REPLACE；route：重大任务；状态：本地适配 QA PASS，真实微信上线 BLOCKED。
 - confirmed：已读取用户授权交接任务「撰写小程序介绍」及五张模板详情截图；用户确认纯数字取货码、同意逾期优先复用订单状态变更。截止时间沿用项目权威领取规则，由研发统一中国时区格式化，不要求用户另设日期规则。
 - delta：原四模板改为五模板映射七事件，补齐真实订单/退款/取货字段、逐类型格式与长度校验，检查数字码生成及已有有效码兼容、跨端授权映射和体验版/正式版跳转。
 - authority：实际字段与差异以 docs/wechat-subscription-template-design.md 顶部五模板决定为准；完整账号 template_id 待复制文本校验，模板类目/场景匹配与真实发送未通过。
@@ -155,7 +155,7 @@ A 通过后停止旧 DB，保留旧容器、root_mysql_data 卷、媒体和密�
 
 #### C-TEMPLATE-CONFIG：复制文本落地
 
-- task_id：TASK-20260907-HOUSEKEEPING-REPLACE；route：BOUNDED_CHANGE（已验收逻辑上的本地配置小批次，无生产/渠道写入）；状态 COMPLETE（本地配置落地，独立 QA attempt 24 PASS；完整生产 preflight 未通过）。
+- task_id：TASK-20260907-HOUSEKEEPING-REPLACE；route：范围明确的迭代（已验收逻辑上的本地配置小批次，无生产/渠道写入）；状态 COMPLETE（本地配置落地，独立 QA attempt 24 PASS；完整生产 preflight 未通过）。
 - confirmed：用户在来源任务提供五个完整模板 ID；主线程已读取原始用户消息。仅首条 Markdown 转义下划线规范化，其余字符原样。长度/字符集/唯一性初检通过，实际账号归属与平台接受仍未验证。
 - ownership：研发单写受限本地 deploy env 和 Git 忽略的小程序部署配置；主线程持有任务及模板文档；独立 QA 只读检查实际读回和定向验证证据。
 - acceptance：五 ID 与用户文本逐字符一致，后端五字段 schema 与前端七事件映射一致，HTTPS/微信登录及显式 trial 配置通过本地校验；既有凭据和用户文件保持，真实配置不进入 Git。
@@ -174,7 +174,7 @@ A 通过后停止旧 DB，保留旧容器、root_mysql_data 卷、媒体和密�
 - decision：最新清理授权替代 A+B 阶段“在服务器保留旧容器和旧卷”的措施，保留财务的方式改为已验证可恢复的异机资料。完成 D 后，下文 B 的直接启动旧容器回滚流程失效；如需恢复旧家政，必须从异机归档重建旧镜像、配置和数据库，并重新验证，不能称为快速回滚。
 - scope：核实后删除服务器退役家政代码、静态历史版本、容器、旧库卷、旧镜像及确认为旧构建的缓存；旧库卷删除以异机最终备份完整性和恢复证据通过为前提。
 - non-goals：不清理本机用户项目/备份，不操作旧百度服务器，不删除拼团数据或依赖，不删除拼团沿用的域名配置、HTTPS 证书、微信身份和支付密钥，不发起真实结算。
-- ownership：主 Orchestrator 维护本记录；Engineering Lead 独占服务器清理写入；独立 QA 只读审核精确清单及清理后结果。
+- ownership：主 Agent 维护本记录；Engineering Lead 独占服务器清理写入；独立 QA 只读审核精确清单及清理后结果。
 - required checks：冻结删除与保留清单，检查共享引用、异机备份与恢复证据；QA 预审后执行；记录磁盘前后及真实释放量、拼团 MySQL/Redis 健康、维护页 200/API 503/退役入口 410 和关键保留文件存在。
 - stop conditions：备份不完整、资源归属不明、共享依赖或运行健康异常时暂停对应对象，不使用全局 Docker prune 替代精确清单。
 - status：IN_PROGRESS；初查 Docker 镜像 18.85GB、构建缓存 9.285GB，两者包含共享内容，不能相加作为确定可释放空间。
@@ -206,7 +206,7 @@ A 通过后停止旧 DB，保留旧容器、root_mysql_data 卷、媒体和密�
 
 ### C-LIVE：恢复生产 API 与后台交付
 
-- task_id：TASK-20260907-HOUSEKEEPING-REPLACE；route：GOVERNED_DELIVERY；状态 COMPLETE（API/后台服务部署范围 PASS；浏览器UI与真实微信外部验收 NOT_RUN）。
+- task_id：TASK-20260907-HOUSEKEEPING-REPLACE；route：重大任务；状态 COMPLETE（API/后台服务部署范围 PASS；浏览器UI与真实微信外部验收 NOT_RUN）。
 - confirmed：用户再次指出已提供 ID 并要求解释为何未开放。原“直接开始迁移”、复用家政服务器/域名/消费者身份与支付配置的授权继续适用；不再把已收到的五模板 ID 当作缺失材料。前一配置批次的本地限定已完成，后续部署仍需独立审核和备份回滚。
 - objective：完成当前真实 API、后台产物和 Nginx 连接的准备、审核及获授权部署，提供可测试入口和真实剩余依赖；不把服务健康等同真实支付验收。
 - ownership：研发独占实现、私有配置和服务器写入；主线程持有本任务文档；评估与 QA 只读。

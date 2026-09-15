@@ -1,7 +1,7 @@
 # 点位负责人域名复用
 
 - task_id / run_id：`TASK-20260907-PICKUP-DOMAIN-CONFIG`；attempt：1。
-- 路由：`BOUNDED_CHANGE`；本批状态：`READY_FOR_REVIEW`，仅本地配置草稿，尚未提交、推送或部署。
+- 路由：`范围明确的迭代`；本批状态：`READY_FOR_REVIEW`，仅本地配置草稿，尚未提交、推送或部署。
 - 唯一写入范围：`infra/nginx.host-api.conf` 与本记录。前端品牌实施由另一负责人持有，需其 READY 后统一审核发布。
 
 ## 已确认决定与边界

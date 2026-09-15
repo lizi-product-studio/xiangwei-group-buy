@@ -72,6 +72,23 @@ export interface ProductCategory {
   createdAt: string;
   updatedAt: string;
 }
+export interface HomepageBanner {
+  id: string;
+  title: string;
+  subtitle: string;
+  imageUrl: string;
+  targetType: "NONE" | "CAMPAIGN" | "CATEGORY";
+  targetValue: string | null;
+  scope: "ALL" | "SERVICE_AREA";
+  serviceAreaId: string | null;
+  startsAt: string | null;
+  endsAt: string | null;
+  sortOrder: number;
+  status: "ACTIVE" | "INACTIVE";
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
 export type CampaignInput = {
     title: string;
     serviceAreaId: string;
@@ -782,6 +799,43 @@ export const api = {
     sortOrder?: number;
     status?: "ACTIVE" | "INACTIVE";
   }) => post<ProductCategory>("/api/v1/admin/catalog/categories", body),
+  homepageBanners: () =>
+    request<HomepageBanner[]>("/api/v1/admin/homepage-banners"),
+  createHomepageBanner: (body: {
+    title: string;
+    subtitle: string;
+    imageUrl: string;
+    targetType: HomepageBanner["targetType"];
+    targetValue: string | null;
+    scope: HomepageBanner["scope"];
+    serviceAreaId: string | null;
+    startsAt: string | null;
+    endsAt: string | null;
+    sortOrder: number;
+    status: HomepageBanner["status"];
+  }) => post<HomepageBanner>("/api/v1/admin/homepage-banners", body),
+  updateHomepageBanner: (
+    id: string,
+    body: {
+      version: number;
+      title: string;
+      subtitle: string;
+      imageUrl: string;
+      targetType: HomepageBanner["targetType"];
+      targetValue: string | null;
+      scope: HomepageBanner["scope"];
+      serviceAreaId: string | null;
+      startsAt: string | null;
+      endsAt: string | null;
+      sortOrder: number;
+      status: HomepageBanner["status"];
+    },
+  ) => post<HomepageBanner>("/api/v1/admin/homepage-banners", { id, ...body }),
+  deleteHomepageBanner: (id: string, version: number) =>
+    request<{ id: string; deleted: boolean }>(
+      `/api/v1/admin/homepage-banners/${id}`,
+      { method: "DELETE", body: JSON.stringify({ version }) },
+    ),
   deleteCategory: (id: string) =>
     request<{ deleted: boolean }>(`/api/v1/admin/catalog/categories/${id}`, {
       method: "DELETE",

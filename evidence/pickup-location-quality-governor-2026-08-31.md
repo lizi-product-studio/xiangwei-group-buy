@@ -8,7 +8,7 @@ conclusion: CHALLENGE
 date: "2026-08-31"
 selected_model: gpt-5.6-sol
 reasoning_effort: high
-runtime_attestation: "launch/session attestation based on the Orchestrator's explicit spawn configuration; not independently runtime-verified"
+runtime_attestation: "launch/session attestation based on the Main Agent's explicit spawn configuration; not independently runtime-verified"
 input_fingerprint: 99eadf04e70ac3ab083898e5ec8eeb63058f58ec7a0ee1242174b8da37e1947d
 ---
 
@@ -16,7 +16,7 @@ input_fingerprint: 99eadf04e70ac3ab083898e5ec8eeb63058f58ec7a0ee1242174b8da37e19
 
 ## 结论
 
-`CHALLENGE`。可以继续作为 P1 防御性改进进行技术拆包，但不应按当前文字无条件进入实施；本报告列出的 QG-PL-01–04 必须先被 Requirements/Architect 在实现 Task Package 中明确收紧。本结论不否定“固定自提点需要可信位置”，而是防止把“行政区代码一致”误述为“已证明在真实服务边界内”，或把本地夹具误述为真实地图提供方能力。
+`CHALLENGE`。可以继续作为 P1 防御性改进进行技术拆包，但不应按当前文字无条件进入实施；本报告列出的 QG-PL-01–04 必须先被 Requirements/Architect 在实现 任务说明 中明确收紧。本结论不否定“固定自提点需要可信位置”，而是防止把“行政区代码一致”误述为“已证明在真实服务边界内”，或把本地夹具误述为真实地图提供方能力。
 
 未发现需要停止全部需求工作的 P0。发现 4 个会让实现方向或验收声明失真的 P1 契约问题，以及 1 个 P2 可逆启发式细化项。真实高德 Key、乡镇/POI 覆盖、许可/隐私/限流和边界样本均是 `BLOCKING_UNKNOWN`/`BLOCKING_EXTERNAL`，不阻塞提供方无关的本地实现，但阻塞生产可用与“真实农村覆盖已验证”的声明。
 
@@ -82,7 +82,7 @@ input_fingerprint: 99eadf04e70ac3ab083898e5ec8eeb63058f58ec7a0ee1242174b8da37e19
 
 ## 允许进入研发的最小前置条件
 
-1. Requirements 在下一个实现 Task Package 中明确 ServiceArea 的行政目录语义，并将验收声明限定为“行政路径包含”；如果存在自定义/重叠范围，先回到产品/架构决策。
+1. Requirements 在下一个实现 任务说明 中明确 ServiceArea 的行政目录语义，并将验收声明限定为“行政路径包含”；如果存在自定义/重叠范围，先回到产品/架构决策。
 2. Architect 冻结提供方无关的逆编码结果契约、目录映射失败和未配置时 fail-closed；不得将未批准 OSM 端点作为生产默认。
 3. 实现契约采用无持久验证状态的事件触发矩阵，或另行路由已批准数据契约；不得在 UI/API 中伪造“已核验”持久事实。
 4. 回滚和上游/地图失败保持新建、位置变更和启用的安全拒绝；无提供方时仅允许未变位置的非位置编辑。
@@ -107,9 +107,9 @@ input_fingerprint: 99eadf04e70ac3ab083898e5ec8eeb63058f58ec7a0ee1242174b8da37e19
 
 ## 输入、范围与验证交接
 
-- 已核对输入：`AGENTS.md`、`tasks/TASK-PICKUP-LOCATION-QG-PROBLEM.yaml`、全部 12 份 `input_documents`，以及 dispatch receipt 中的 run/task/input/route fingerprint。
+- 已核对输入：`AGENTS.md` 及全部 12 份相关输入文档。
 - 新增工件：`evidence/pickup-location-quality-governor-2026-08-31.md`。
 - 未修改：需求、UX、架构、API、测试、产品源码、依赖、迁移、配置或外部系统。本证据不替代实现后的独立 QA。
-- 模型声明：Orchestrator 显式以 `gpt-5.6-sol` / `high` 启动本会话；这是 launch/session attestation，不是另一个 runtime 工具的独立回显验证。
+- 模型声明：Main Agent 显式以 `gpt-5.6-sol` / `high` 启动本会话；这是 launch/session attestation，不是另一个 runtime 工具的独立回显验证。
 - 偏差：无。
-- 下一责任角色：Orchestrator 将 QG-PL-01/03 路由给 Requirements，QG-PL-01/02/04 路由给 Architect/UX；收紧后由 Engineering Lead 建立独立实现包，实现者不是最终独立 QA。
+- 下一责任角色：Main Agent 将 QG-PL-01/03 交给 Requirements，QG-PL-01/02/04 交给 Architect/UX；收紧后由 Engineering Lead 独立实现，实现者不是最终独立 QA。

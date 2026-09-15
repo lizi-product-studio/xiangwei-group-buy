@@ -200,3 +200,23 @@ interface PickupPointDto {
   status: "ACTIVE" | "SUSPENDED";
   capacityPerDay: number | null;
 }
+
+interface HomepageBannerDto {
+  id: string;
+  title: string;
+  subtitle?: string | null;
+  imageUrl: string;
+  targetType?: "NONE" | "CAMPAIGN" | "CATEGORY";
+  targetValue?: string | null;
+  sortOrder?: number;
+}
+
+interface ConsumerProfileDto {
+  id: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  phoneNumber: string | null;
+  phoneVerifiedAt?: string | null;
+  profileVersion: number;
+  profileUpdatedAt?: string | null;
+}

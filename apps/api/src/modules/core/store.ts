@@ -16,6 +16,7 @@ import type {
   FulfillmentAllocation,
   FulfillmentException,
   InternalStaff,
+  HomepageBanner,
   LedgerTransaction,
   NotificationPreference,
   Order,
@@ -56,6 +57,8 @@ export const STORE_READ_METHODS: ReadonlySet<string> = new Set([
   "getCatalogSku",
   "listProductCategories",
   "getProductCategory",
+  "listHomepageBanners",
+  "getHomepageBanner",
   "listCampaigns",
   "getCampaign",
   "hasCampaignBusinessReferences",
@@ -223,6 +226,10 @@ export interface CommerceStore {
   getProductCategory(id: string): Promise<ProductCategory | null>;
   saveProductCategory(value: ProductCategory): Promise<void>;
   deleteProductCategory(id: string): Promise<boolean>;
+  listHomepageBanners(includeInactive?: boolean): Promise<HomepageBanner[]>;
+  getHomepageBanner(id: string): Promise<HomepageBanner | null>;
+  saveHomepageBanner(value: HomepageBanner): Promise<void>;
+  deleteHomepageBanner(id: string, expectedVersion: number): Promise<boolean>;
   listCampaigns(): Promise<Campaign[]>;
   getCampaign(id: string): Promise<Campaign | null>;
   getCampaignForUpdate(id: string): Promise<Campaign | null>;
@@ -535,6 +542,7 @@ interface MemoryState {
   points: Map<string, PickupPoint>;
   catalog: Map<string, CatalogSku>;
   categories: Map<string, ProductCategory>;
+  homepageBanners: Map<string, HomepageBanner>;
   campaigns: Map<string, Campaign>;
   idempotency: Map<string, IdempotencyRecord>;
   orders: Map<string, Order>;
@@ -574,6 +582,7 @@ const emptyState = (): MemoryState => ({
   points: new Map(),
   catalog: new Map(),
   categories: new Map(),
+  homepageBanners: new Map(),
   campaigns: new Map(),
   idempotency: new Map(),
   orders: new Map(),
@@ -663,6 +672,18 @@ export class MemoryStore implements CommerceStore {
         // point. Persist only the approved ACTIVE | INACTIVE lifecycle.
         status:
           complete && point.status === "ACTIVE" ? "ACTIVE" : "INACTIVE",
+      });
+    }
+    for (const [id, rawUser] of next.users) {
+      const user = rawUser as User;
+      next.users.set(id, {
+        ...user,
+        displayName: user.displayName ?? null,
+        avatarUrl: user.avatarUrl ?? null,
+        profileUpdatedAt: user.profileUpdatedAt ?? null,
+        profileVersion: typeof user.profileVersion === "number" && Number.isInteger(user.profileVersion) && user.profileVersion >= 0
+          ? user.profileVersion
+          : 0,
       });
     }
     for (const [id, rawCampaign] of next.campaigns) {
@@ -990,6 +1011,25 @@ export class MemoryStore implements CommerceStore {
     if ([...this.data.catalog.values()].some((sku) => sku.categoryId === id))
       return false;
     this.data.categories.delete(id);
+    return true;
+  }
+  public async listHomepageBanners(includeInactive = false) {
+    return clone(
+      [...this.data.homepageBanners.values()]
+        .filter((value) => includeInactive || value.status === "ACTIVE")
+        .sort((a, b) => a.sortOrder - b.sortOrder || b.updatedAt.localeCompare(a.updatedAt)),
+    );
+  }
+  public async getHomepageBanner(id: string) {
+    return clone(this.data.homepageBanners.get(id) ?? null);
+  }
+  public async saveHomepageBanner(value: HomepageBanner) {
+    this.data.homepageBanners.set(value.id, clone(value));
+  }
+  public async deleteHomepageBanner(id: string, expectedVersion: number) {
+    const current = this.data.homepageBanners.get(id);
+    if (!current || current.version !== expectedVersion) return false;
+    this.data.homepageBanners.delete(id);
     return true;
   }
   public async listCampaigns() {

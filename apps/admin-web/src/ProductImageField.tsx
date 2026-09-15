@@ -11,11 +11,13 @@ export function ProductPicture({ src, size = 64 }: { src: string | null; size?: 
   </div>;
 }
 
-export function ProductImageField({ value, onChange, onBusyChange, disabled }: {
+export function ProductImageField({ value, onChange, onBusyChange, disabled, purpose = "商品主图", required = false }: {
   value: string | null;
   onChange: (imageUrl: string | null) => void;
   onBusyChange: (busy: boolean) => void;
   disabled: boolean;
+  purpose?: "商品主图" | "轮播图";
+  required?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -44,12 +46,12 @@ export function ProductImageField({ value, onChange, onBusyChange, disabled }: {
   }
   return <Space direction="vertical" style={{ width: "100%" }} size={12}>
     <ProductPicture src={value} size={136} />
-    <input ref={input} style={{ display: "none" }} type="file" aria-label="上传商品主图" accept="image/jpeg,image/png,image/webp" disabled={busy || disabled}
+    <input ref={input} style={{ display: "none" }} type="file" aria-label={`上传${purpose}`} accept="image/jpeg,image/png,image/webp" disabled={busy || disabled}
       onChange={event => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void upload(file); }} />
-    <Button disabled={disabled} loading={busy} onClick={() => input.current?.click()}>{busy ? "正在上传" : value ? "更换主图" : "上传主图"}</Button>
-    <span style={{ color: "#818780", fontSize: 12 }}>主图公开展示。支持 JPG、PNG、WebP，不超过 5 MB；可不上传。</span>
+    <Button disabled={disabled} loading={busy} onClick={() => input.current?.click()}>{busy ? "正在上传" : value ? `更换${purpose}` : `上传${purpose}`}</Button>
+    <span style={{ color: "#818780", fontSize: 12 }}>{purpose}公开展示。支持 JPG、PNG、WebP，不超过 5 MB；{required ? "必须上传。" : "可不上传。"}</span>
     {busy && <span role="status">正在上传处理，请稍候…</span>}
     {error && <Alert type="error" title={error} showIcon />}
-    {value && <Button disabled={busy || disabled} onClick={() => { setError(""); onChange(null); }}>移除主图</Button>}
+    {value && <Button disabled={busy || disabled} onClick={() => { setError(""); onChange(null); }}>移除{purpose}</Button>}
   </Space>;
 }

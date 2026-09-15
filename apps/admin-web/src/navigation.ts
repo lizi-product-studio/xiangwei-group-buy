@@ -13,7 +13,8 @@ export type AdminPage =
   | "settings"
   | "point-workbench"
   | "categories" | "areas" | "cancellations" | "arrival-exceptions"
-  | "finance-records" | "finance-ledger" | "interests" | "point-pickup";
+  | "finance-records" | "finance-ledger" | "interests" | "point-pickup"
+  | "homepage-banners";
 
 export type AdminNavigationItem = {
   key: AdminPage;
@@ -43,6 +44,9 @@ const mainNavigation: readonly AdminNavigationGroup[] = [
   { key: "products", label: "商品", items: [
     { key: "products", label: "商品列表", roles: ["OPERATOR"] },
     { key: "categories", label: "分类管理", roles: ["OPERATOR"] },
+  ] },
+  { key: "merchandising", label: "页面运营", items: [
+    { key: "homepage-banners", label: "首页轮播", roles: ["OPERATOR"] },
   ] },
   { key: "campaigns", label: "团期", items: [{ key: "campaigns", label: "团期管理", roles: ["OPERATOR"] }] },
   { key: "orders", label: "订单", items: [

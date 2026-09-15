@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>乡味集 · 首页陈列与轮播配置原型</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <aside class="review-panel">
+      <p class="eyebrow">乡味集 · 视觉方向提案</p>
+      <h1>把团购做得更像逛店</h1>
+      <p class="lead">借鉴参考图的高信息密度和暖色氛围，保留固定自提点、团期和取货码等真实业务。</p>
+
+      <section class="review-block">
+        <h2>预览页面</h2>
+        <div class="segmented" id="viewSwitch">
+          <button class="is-active" data-view="home">小程序首页</button>
+          <button data-view="category">分类页</button>
+          <button data-view="mine">我的</button>
+          <button data-view="admin">后台轮播</button>
+        </div>
+      </section>
+
+      <section class="review-block">
+        <h2>这版重点</h2>
+        <ul class="decision-list">
+          <li><strong>首屏先交代在哪买</strong><span>自提点、搜索和轮播顺序固定，减少用户找入口。</span></li>
+          <li><strong>商品改为横向大卡</strong><span>图片、品名、规格、团购价、销量和预计到点窗口一次看清。</span></li>
+          <li><strong>分类提供两种入口</strong><span>首页横向快速筛选；分类页左侧目录适合商品较多时深度浏览。</span></li>
+          <li><strong>轮播有真实数据源</strong><span>后台配置素材、投放范围、时间、跳转和排序，并提供上线前预览。</span></li>
+        </ul>
+      </section>
+
+      <section class="review-block caution">
+        <h2>没有照搬的部分</h2>
+        <p>不新增团长、优惠券、积分商城和“多少人购买头像墙”。这些能力目前没有业务规则或数据来源。</p>
+      </section>
+
+      <p class="prototype-note">静态交互原型，不连接生产接口，不写入真实数据。</p>
+    </aside>
+
+    <main class="preview-stage">
+      <div class="phone" id="phonePreview">
+        <div class="phone-status"><span>9:41</span><span class="island"></span><span>5G ▮▮▮</span></div>
+        <div class="mini-header"><span class="mini-title">乡味集</span><span class="wechat-menu">•••　◉</span></div>
+        <div class="phone-screen" id="phoneScreen"></div>
+        <nav class="tabbar" id="tabbar"></nav>
+        <span class="home-indicator"></span>
+      </div>
+
+      <div class="admin-shell" id="adminPreview" hidden>
+        <aside class="admin-sidebar">
+          <div class="admin-brand"><span class="brand-mark">乡</span><span><b>乡味集</b><small>运营后台</small></span></div>
+          <nav>
+            <button>工作台</button>
+            <button>商品管理</button>
+            <button>团期管理</button>
+            <button class="is-active">首页轮播</button>
+            <button>订单管理</button>
+            <button>履约管理</button>
+            <button>区域与自提点</button>
+          </nav>
+          <div class="admin-user"><span>陈</span><div><b>陈超管</b><small>超级管理员</small></div></div>
+        </aside>
+        <section class="admin-main">
+          <header class="admin-topbar"><span>内容运营 / <b>首页轮播</b></span><button class="ghost-button">刷新</button></header>
+          <div class="admin-content">
+            <div class="admin-title-row">
+              <div><h1>首页轮播管理</h1><p>配置消费者首页首屏运营位，支持按时间和自提点投放。</p></div>
+              <button class="primary-button" data-action="create-banner">新增轮播</button>
+            </div>
+            <div class="metric-row">
+              <article><span>当前展示</span><strong>2</strong><small>自动按排序轮播</small></article>
+              <article><span>待上线</span><strong>1</strong><small>明日 08:00 生效</small></article>
+              <article><span>已停用</span><strong>1</strong><small>保留历史配置</small></article>
+            </div>
+            <div class="admin-table-card">
+              <div class="table-toolbar">
+                <div class="filter-group"><button class="filter is-active">全部 4</button><button class="filter">展示中 2</button><button class="filter">待上线 1</button><button class="filter">已停用 1</button></div>
+                <button class="secondary-button" data-action="preview-banner">预览首页</button>
+              </div>
+              <table>
+                <thead><tr><th>轮播内容</th><th>投放范围</th><th>跳转</th><th>展示时间</th><th>排序</th><th>状态</th><th>操作</th></tr></thead>
+                <tbody>
+                  <tr>
+                    <td><div class="banner-cell"><img src="./assets/hero-field.png" alt="乡野鲜收轮播缩略图"><div><b>乡野鲜收</b><small>本周时蔬 · 产地直达</small></div></div></td>
+                    <td>全部自提点</td><td>分类：时蔬</td><td>长期</td><td>1</td><td><span class="status status--live">展示中</span></td><td><button class="text-button" data-action="edit-banner">编辑</button><button class="text-button" data-action="pause-banner">停用</button></td>
+                  </tr>
+                  <tr>
+                    <td><div class="banner-cell"><img src="./assets/corn.png" alt="鲜食玉米轮播缩略图"><div><b>鲜食玉米到货</b><small>四根一份 · 本团限量</small></div></div></td>
+                    <td>繁兴街</td><td>商品：鲜玉米</td><td>09/15—09/18</td><td>2</td><td><span class="status status--live">展示中</span></td><td><button class="text-button" data-action="edit-banner">编辑</button><button class="text-button" data-action="pause-banner">停用</button></td>
+                  </tr>
+                  <tr>
+                    <td><div class="banner-cell"><img src="./assets/potato.png" alt="秋收土豆轮播缩略图"><div><b>秋收土豆预告</b><small>黄心绵软 · 明日开团</small></div></div></td>
+                    <td>全部自提点</td><td>团期：秋收团</td><td>09/16 08:00 起</td><td>3</td><td><span class="status status--scheduled">待上线</span></td><td><button class="text-button" data-action="edit-banner">编辑</button><button class="text-button danger-text">删除</button></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="admin-footnote">同一自提点最多展示 5 张；先按排序，再按生效时间。无可用轮播时首页自动收起该区域。</p>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <dialog class="banner-dialog" id="bannerDialog">
+      <form method="dialog">
+        <div class="dialog-head"><div><p class="eyebrow">首页运营位</p><h2>编辑轮播</h2></div><button class="dialog-close" value="cancel" aria-label="关闭">×</button></div>
+        <div class="dialog-grid">
+          <label class="field field--full"><span>轮播图片 *</span><div class="upload-preview"><img src="./assets/hero-field.png" alt="当前轮播图"><button type="button" class="secondary-button">更换图片</button><small>建议 750 × 320，JPG/PNG，≤ 2MB</small></div></label>
+          <label class="field"><span>主标题 *</span><input value="乡野鲜收" /></label>
+          <label class="field"><span>副标题</span><input value="本周时蔬 · 产地直达" /></label>
+          <label class="field"><span>投放范围 *</span><select><option>全部自提点</option><option>指定自提点</option></select></label>
+          <label class="field"><span>跳转类型 *</span><select><option>商品分类</option><option>指定商品</option><option>指定团期</option><option>不跳转</option></select></label>
+          <label class="field"><span>跳转对象 *</span><select><option>时蔬</option><option>鲜食</option><option>全部好物</option></select></label>
+          <label class="field"><span>排序 *</span><input type="number" value="1" min="1" /></label>
+          <label class="field field--full"><span>展示时间</span><div class="time-range"><input value="立即生效" /><span>至</span><input value="长期展示" /></div></label>
+        </div>
+        <div class="dialog-actions"><button value="cancel" class="secondary-button">取消</button><button value="default" class="primary-button" data-action="save-banner">保存</button></div>
+      </form>
+    </dialog>
+
+    <dialog class="profile-dialog" id="profileDialog">
+      <form method="dialog">
+        <div class="dialog-head"><div><p class="eyebrow">账号资料</p><h2>编辑个人信息</h2></div><button class="dialog-close" value="cancel" aria-label="关闭">×</button></div>
+        <div class="profile-edit-avatar">
+          <div class="avatar avatar--large" id="profileAvatar">栗</div>
+          <div><button type="button" class="secondary-button" data-action="change-avatar">更换头像</button><p>支持 JPG、PNG，图片将裁剪为正方形。</p></div>
+        </div>
+        <label class="field"><span>姓名或称呼 *</span><input id="profileName" maxlength="30" value="栗子" /><small>用于订单联系人和自提点核对，不会公开展示。</small></label>
+        <div class="field phone-field"><span>已绑定手机号</span><div class="verified-phone"><div><b>138****8000</b><small>已通过微信验证 · 订单联系与售后使用</small></div><button type="button" class="secondary-button" data-action="change-phone">更换手机号</button></div></div>
+        <p class="privacy-note">手机号不能直接输入修改；更换时需要重新完成微信手机号验证。</p>
+        <div class="dialog-actions"><button value="cancel" class="secondary-button">取消</button><button value="default" class="primary-button" data-action="save-profile">保存资料</button></div>
+      </form>
+    </dialog>
+
+    <dialog class="confirm-dialog" id="logoutDialog">
+      <form method="dialog">
+        <div class="confirm-icon">↪</div>
+        <h2>退出当前账号？</h2>
+        <p>退出后，本机将不再显示订单和取货码；重新登录后数据仍会保留。</p>
+        <div class="dialog-actions"><button value="cancel" class="secondary-button">取消</button><button value="default" class="danger-button" data-action="confirm-logout">退出登录</button></div>
+      </form>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+    <script src="./app.js"></script>
+  </body>
+</html>

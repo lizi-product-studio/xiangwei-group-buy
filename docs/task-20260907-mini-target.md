@@ -2,13 +2,13 @@
 
 - run_id / task_id: `TASK-20260907-MINI-TARGET`
 - attempt: 1
-- route: `GOVERNED_DELIVERY`（配置决定 demo / 微信认证；实现严格限定本地配置迁移）
-- role: Engineering Lead；report_to: 主 Orchestrator
+- route: `重大任务`（配置决定 demo / 微信认证；实现严格限定本地配置迁移）
+- role: Engineering Lead；report_to: 主 Agent
 - 状态：实现与开发验证完成；独立 QA attempt 2 PASS（仅本地小程序配置迁移）。
 
 ## 已核对输入和决定
 
-- `CONFIRMED`：本轮主 Orchestrator 任务包转述用户决定：默认 develop 使用 `https://liziqi.icu` 和真实微信登录；仅显式 local 保留本地 demo；本机 release 复用现有 trial 域名和模板映射。
+- `CONFIRMED`：本轮主 Agent 任务包转述用户决定：默认 develop 使用 `https://liziqi.icu` 和真实微信登录；仅显式 local 保留本地 demo；本机 release 复用现有 trial 域名和模板映射。
 - `CONFIRMED`：已加载 `AGENTS.md`、`docs/project-status.json`、`docs/00-project-context.md`、`docs/01-domain-rules.md`、`docs/02-glossary.md`、`README.md`、`docs/PRD.md`、`docs/architecture.md`、`docs/go-live-checklist.md`。
 - `EVIDENCE_INFERRED`：原 `remoteDevelop` 指向旧 HTTP 目标且 authMode=demo；`isDemoDeployment` 允许该远程地址，README 仍指导旧地址；本机 ignored 配置只有 trial。
 - `CONFIRMED`：当前明确迁移决定替代 README 中旧开发目标说明，历史验收证据及历史部署地址不改。
@@ -40,8 +40,8 @@ Engineering Lead 唯一写入：`README.md`、`apps/miniprogram/src/config/deplo
 - `git diff --check` PASS；`rg '180\\.76\\.100\\.156' apps/miniprogram README.md` 无匹配。
 - `git check-ignore apps/miniprogram/src/config/deployment.local.ts` 确认被忽略。
 - `pnpm check` exit 0：lint/typecheck/test/build PASS，342 测试通过、8 MySQL/Redis 集成测试因未提供集成环境而跳过；现有前端大 chunk 构建警告保留。原始日志 `/tmp/task-20260907-mini-target-check.log`、`/tmp/task-20260907-mini-target-e2e.log`。
-- 首轮 E2E：12 PASS / 1 FAIL，`apps/admin-web/e2e/community-ui.spec.ts:253` 点击“重试核验”超时，trace 显示按钮不稳定后 DOM detached；按主 Orchestrator 指令单例重跑 exit 0，1/1 PASS（30.3 秒），日志 `/tmp/task-20260907-mini-target-e2e-retry.log`。首次全量 exit 1 与失败原貌保留，不将其改写成首次全量通过；未修改后台源码。
-- 新增测试先出现 lint 类型导入约束、随后出现小程序仅微信类型环境不支持 Node 测试 helper，以及 ignored release 可选类型赋值错误；按主 Orchestrator 授权将 helper 移到根目录 `.test.mjs` 并显式检查 trial，定向 lint、typecheck、112 测试复验 PASS。
+- 首轮 E2E：12 PASS / 1 FAIL，`apps/admin-web/e2e/community-ui.spec.ts:253` 点击“重试核验”超时，trace 显示按钮不稳定后 DOM detached；按主 Agent 指令单例重跑 exit 0，1/1 PASS（30.3 秒），日志 `/tmp/task-20260907-mini-target-e2e-retry.log`。首次全量 exit 1 与失败原貌保留，不将其改写成首次全量通过；未修改后台源码。
+- 新增测试先出现 lint 类型导入约束、随后出现小程序仅微信类型环境不支持 Node 测试 helper，以及 ignored release 可选类型赋值错误；按主 Agent 授权将 helper 移到根目录 `.test.mjs` 并显式检查 trial，定向 lint、typecheck、112 测试复验 PASS。
 - 首次测试启动因 shell PATH 无 node 失败（exit 127）；使用宿主已有 bundled Node 后基线及回归成功。未安装软件或改持久环境。
 
 ## 兼容、回滚与外部边界
@@ -54,13 +54,13 @@ Engineering Lead 唯一写入：`README.md`、`apps/miniprogram/src/config/deplo
 ## Git 与交接
 
 - 基线 HEAD：`d78bb90e60d6f4fb37b247718642f468b6eba378`；分支 `codex/audit-remediation`。
-- 主 Orchestrator 已转交独立 QA attempt 2 原始结论 PASS，并授权仅本轮 10 个明确文件创建本地提交；不推送，GitHub 鉴权阻断保留。
-- GitHub 同步外部阻断：主 Orchestrator 报告 `git ls-remote origin` exit 128，`could not read Username for https://github.com: Device not configured`；不改凭据、不重复尝试。
-- 下一责任人：主 Orchestrator 汇总验收、本地提交与 Git 同步阻断。
+- 主 Agent 已转交独立 QA attempt 2 原始结论 PASS，并授权仅本轮 10 个明确文件创建本地提交；不推送，GitHub 鉴权阻断保留。
+- GitHub 同步外部阻断：主 Agent 报告 `git ls-remote origin` exit 128，`could not read Username for https://github.com: Device not configured`；不改凭据、不重复尝试。
+- 下一责任人：主 Agent 汇总验收、本地提交与 Git 同步阻断。
 
 ## 独立 QA 交接
 
 - run_id / task_id：`TASK-20260907-MINI-TARGET`；QA attempt：2。
-- `CONFIRMED`：主 Orchestrator 转交独立 QA 原始结论 `PASS`，仅限本地小程序配置迁移，无未解决实现发现。
+- `CONFIRMED`：主 Agent 转交独立 QA 原始结论 `PASS`，仅限本地小程序配置迁移，无未解决实现发现。
 - 8 项集成测试 skip、真实微信未验收、E2E 首轮失败及单例重跑通过记录全部保留。
 - 本地提交按本轮 10 文件白名单执行，关联任务 ID；不纳入用户 `project.config.json`、`.codex/` 或 ignored 本地配置。提交号由 Git 历史和最终交接记录给出，避免文档自引用。

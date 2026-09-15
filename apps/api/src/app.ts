@@ -3,9 +3,12 @@ import { operationsPageSchema } from "./routes/operations-pagination.js";
 import { z } from "zod";
 import { ProductImages } from './modules/media/product-images.js';
 import { registerProductImageRoutes } from './routes/product-image-routes.js';
+import { registerMerchandisingRoutes } from "./routes/merchandising-routes.js";
+import { registerProfileRoutes } from "./routes/profile-routes.js";
 import { WechatApiPhoneExchange, type WechatPhoneExchange } from './modules/auth/wechat-phone.js';
 import type { OrderNotificationType } from './modules/core/types.js';
 import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
@@ -236,7 +239,8 @@ export async function buildApp(
 ): Promise<FastifyInstance> {
   const { config } = dependencies;
   const productImages = new ProductImages(config.PRODUCT_IMAGE_DIR);
-  await productImages.initialize();
+  const profileImages = new ProductImages(resolve(config.PRODUCT_IMAGE_DIR, "profiles"), "/api/v1/profile-images/");
+  await Promise.all([productImages.initialize(), profileImages.initialize()]);
   const app = Fastify({
     logger:
       config.NODE_ENV === "test"
@@ -729,7 +733,16 @@ export async function buildApp(
     return { status: "ok", dependencies };
   });
 
-  registerProductImageRoutes(app, productImages);
+  registerProductImageRoutes(app, { productImages, profileImages, store });
+  registerMerchandisingRoutes(app, {
+    store,
+    images: productImages,
+  });
+  registerProfileRoutes(app, {
+    store,
+    images: profileImages,
+    authService,
+  });
   registerAuthRoutes(app, {
     authService,
     adminAuthService,

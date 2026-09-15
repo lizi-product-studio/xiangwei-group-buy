@@ -73,15 +73,15 @@ describe("profile page protected entry behavior", () => {
     expect(switchTab).not.toHaveBeenCalled();
   });
 
-  it("keeps a logged-in order entry on the orders tab", async () => {
+  it("opens logged-in orders as a regular page from the profile tab", async () => {
     storage.set("hometown-demo-customer-session", true);
     const { definition, navigateTo, switchTab } = await loadPage();
     definition.openOrders.call(definition, {
       currentTarget: { dataset: { filter: "ALL" } },
     });
 
-    expect(switchTab).toHaveBeenCalledWith({ url: "/pages/orders/index" });
-    expect(navigateTo).not.toHaveBeenCalled();
+    expect(navigateTo).toHaveBeenCalledWith({ url: "/pages/orders/index" });
+    expect(switchTab).not.toHaveBeenCalled();
   });
 
   it("keeps area failures separate from the order summary and offers an area retry", async () => {
