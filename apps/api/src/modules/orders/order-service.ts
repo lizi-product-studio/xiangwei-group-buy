@@ -46,16 +46,13 @@ export class OrderService {
     if (Date.parse(campaign.cutoffAt) <= Date.now())
       throw new BusinessError("CAMPAIGN_CLOSED", "团期已截单", 409);
     if (
-      !campaign.estimatedArrivalStartAt ||
-      !campaign.estimatedArrivalEndAt ||
-      Date.parse(campaign.estimatedArrivalStartAt) <
-        Date.parse(campaign.dispatchAt) ||
-      Date.parse(campaign.estimatedArrivalEndAt) <
-        Date.parse(campaign.estimatedArrivalStartAt)
+      Boolean(campaign.estimatedArrivalStartAt) !== Boolean(campaign.estimatedArrivalEndAt) ||
+      (campaign.estimatedArrivalStartAt && Date.parse(campaign.estimatedArrivalStartAt) < Date.parse(campaign.dispatchAt)) ||
+      (campaign.estimatedArrivalStartAt && campaign.estimatedArrivalEndAt && Date.parse(campaign.estimatedArrivalEndAt) < Date.parse(campaign.estimatedArrivalStartAt))
     )
       throw new BusinessError(
         "CAMPAIGN_NOT_OPEN",
-        "团期未配置有效的预计到货时间",
+        "团期预计到货时间窗口无效",
         409,
       );
     if (campaign.serviceAreaId !== input.serviceAreaId)

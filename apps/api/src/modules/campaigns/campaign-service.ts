@@ -115,12 +115,6 @@ export class CampaignService {
       return (
         campaign.status === "OPEN" &&
         Date.parse(campaign.cutoffAt) > now &&
-        Boolean(campaign.estimatedArrivalStartAt) &&
-        Boolean(campaign.estimatedArrivalEndAt) &&
-        Date.parse(campaign.estimatedArrivalStartAt) >=
-          Date.parse(campaign.dispatchAt) &&
-        Date.parse(campaign.estimatedArrivalEndAt) >=
-          Date.parse(campaign.estimatedArrivalStartAt) &&
         enabledAreas.has(campaign.serviceAreaId) &&
         plan?.serviceAreaId === campaign.serviceAreaId &&
         isDeliveryPlanReadyForSale(plan) &&
@@ -172,14 +166,9 @@ export class CampaignService {
         );
       const before = structuredClone(campaign);
       const now = Date.now();
-      if (
-        [
-          input.cutoffAt,
-          input.dispatchAt,
-          input.estimatedArrivalStartAt,
-          input.estimatedArrivalEndAt,
-        ].some((value) => Date.parse(value) <= now)
-      )
+      if ([input.cutoffAt, input.dispatchAt].some((value) => Date.parse(value) <= now) ||
+        (input.estimatedArrivalStartAt && Date.parse(input.estimatedArrivalStartAt) <= now) ||
+        (input.estimatedArrivalEndAt && Date.parse(input.estimatedArrivalEndAt) <= now))
         throw new BusinessError(
           "VALIDATION_ERROR",
           "顺延后的截单、发车和预计到货时间必须晚于当前时间",
@@ -187,15 +176,12 @@ export class CampaignService {
         );
       const arrivalStartAt = input.estimatedArrivalStartAt;
       const arrivalEndAt = input.estimatedArrivalEndAt;
-      if (
-        !arrivalStartAt ||
-        !arrivalEndAt ||
-        Date.parse(arrivalStartAt) < Date.parse(input.dispatchAt) ||
-        Date.parse(arrivalEndAt) < Date.parse(arrivalStartAt)
-      )
+      if (Boolean(arrivalStartAt) !== Boolean(arrivalEndAt) ||
+        (arrivalStartAt && Date.parse(arrivalStartAt) < Date.parse(input.dispatchAt)) ||
+        (arrivalStartAt && arrivalEndAt && Date.parse(arrivalEndAt) < Date.parse(arrivalStartAt)))
         throw new BusinessError(
           "VALIDATION_ERROR",
-          "顺延后必须保留有效的预计到货时间窗口",
+          "顺延后的预计到货时间窗口不完整或顺序无效",
           400,
         );
       const expected = campaign.version;
@@ -263,16 +249,13 @@ export class CampaignService {
           409,
         );
       if (
-        !campaign.estimatedArrivalStartAt ||
-        !campaign.estimatedArrivalEndAt ||
-        Date.parse(campaign.estimatedArrivalStartAt) <
-          Date.parse(campaign.dispatchAt) ||
-        Date.parse(campaign.estimatedArrivalEndAt) <
-          Date.parse(campaign.estimatedArrivalStartAt)
+        (Boolean(campaign.estimatedArrivalStartAt) !== Boolean(campaign.estimatedArrivalEndAt)) ||
+        (campaign.estimatedArrivalStartAt && Date.parse(campaign.estimatedArrivalStartAt) < Date.parse(campaign.dispatchAt)) ||
+        (campaign.estimatedArrivalStartAt && campaign.estimatedArrivalEndAt && Date.parse(campaign.estimatedArrivalEndAt) < Date.parse(campaign.estimatedArrivalStartAt))
       )
         throw new BusinessError(
           "DELIVERY_SITE_NOT_CONFIRMED",
-          "开售前必须配置有效的预计到货时间窗口",
+          "预计到货时间窗口不完整或顺序无效",
           409,
         );
       const expected = campaign.version;

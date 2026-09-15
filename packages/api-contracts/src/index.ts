@@ -102,8 +102,8 @@ export const communityCampaignSchema = z
     pickupPointId: identifierSchema,
     cutoffAt: z.iso.datetime({ offset: true }),
     dispatchAt: z.iso.datetime({ offset: true }),
-    estimatedArrivalStartAt: z.iso.datetime({ offset: true }),
-    estimatedArrivalEndAt: z.iso.datetime({ offset: true }),
+    estimatedArrivalStartAt: z.iso.datetime({ offset: true }).nullable().default(null),
+    estimatedArrivalEndAt: z.iso.datetime({ offset: true }).nullable().default(null),
     minTotalQuantity: z.int().min(1).max(1_000_000).default(1),
     failureAction: z.enum(["CANCEL_AND_REFUND", "POSTPONE"]),
     items: z
@@ -124,13 +124,19 @@ export const communityCampaignSchema = z
         path: ["dispatchAt"],
         message: "发车时间必须晚于截团时间",
       });
-    if (Date.parse(value.estimatedArrivalStartAt) < Date.parse(value.dispatchAt))
+    if (Boolean(value.estimatedArrivalStartAt) !== Boolean(value.estimatedArrivalEndAt))
+      context.addIssue({
+        code: "custom",
+        path: [value.estimatedArrivalStartAt ? "estimatedArrivalEndAt" : "estimatedArrivalStartAt"],
+        message: "预计到货开始和结束时间必须同时填写或同时留空",
+      });
+    if (value.estimatedArrivalStartAt && Date.parse(value.estimatedArrivalStartAt) < Date.parse(value.dispatchAt))
       context.addIssue({
         code: "custom",
         path: ["estimatedArrivalStartAt"],
         message: "预计到货开始时间不能早于发车时间",
       });
-    if (Date.parse(value.estimatedArrivalEndAt) < Date.parse(value.estimatedArrivalStartAt))
+    if (value.estimatedArrivalStartAt && value.estimatedArrivalEndAt && Date.parse(value.estimatedArrivalEndAt) < Date.parse(value.estimatedArrivalStartAt))
       context.addIssue({
         code: "custom",
         path: ["estimatedArrivalEndAt"],
@@ -152,8 +158,8 @@ export const postponeCampaignSchema = z
   .object({
     cutoffAt: z.iso.datetime({ offset: true }),
     dispatchAt: z.iso.datetime({ offset: true }),
-    estimatedArrivalStartAt: z.iso.datetime({ offset: true }),
-    estimatedArrivalEndAt: z.iso.datetime({ offset: true }),
+    estimatedArrivalStartAt: z.iso.datetime({ offset: true }).nullable().default(null),
+    estimatedArrivalEndAt: z.iso.datetime({ offset: true }).nullable().default(null),
   })
   .superRefine((value, context) => {
     if (Date.parse(value.dispatchAt) <= Date.parse(value.cutoffAt))
@@ -162,13 +168,21 @@ export const postponeCampaignSchema = z
         path: ["dispatchAt"],
         message: "发车时间必须晚于截单时间",
       });
-    if (Date.parse(value.estimatedArrivalStartAt) < Date.parse(value.dispatchAt))
+    if (Boolean(value.estimatedArrivalStartAt) !== Boolean(value.estimatedArrivalEndAt))
+      context.addIssue({
+        code: "custom",
+        path: [value.estimatedArrivalStartAt ? "estimatedArrivalEndAt" : "estimatedArrivalStartAt"],
+        message: "预计到货开始和结束时间必须同时填写或同时留空",
+      });
+    if (value.estimatedArrivalStartAt && Date.parse(value.estimatedArrivalStartAt) < Date.parse(value.dispatchAt))
       context.addIssue({
         code: "custom",
         path: ["estimatedArrivalStartAt"],
         message: "预计到货开始时间不能早于发车时间",
       });
     if (
+      value.estimatedArrivalStartAt &&
+      value.estimatedArrivalEndAt &&
       Date.parse(value.estimatedArrivalEndAt) <
       Date.parse(value.estimatedArrivalStartAt)
     )
@@ -285,7 +299,10 @@ export const batchCreatePickupPointsSchema = z.object({
 
 export const bookVehicleSchema = z.object({
   logisticsPlatform: z.string().trim().min(2).max(80),
-  vehicleOrderNo: z.string().trim().min(2).max(100),
+  vehicleOrderNo: z.preprocess(
+    (value) => typeof value === "string" && value.trim() === "" ? null : value,
+    z.string().trim().min(2).max(100).nullable().default(null),
+  ),
   driverName: z.string().trim().min(2).max(80).nullable().default(null),
   driverPhone: mainlandChinaMobileSchema.nullable().default(null),
   vehiclePlate: z.string().trim().min(2).max(32).nullable().default(null),

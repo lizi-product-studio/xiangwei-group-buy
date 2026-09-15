@@ -78,8 +78,8 @@ export type CampaignInput = {
     pickupPointId: string;
     cutoffAt: string;
     dispatchAt: string;
-    estimatedArrivalStartAt: string;
-    estimatedArrivalEndAt: string;
+    estimatedArrivalStartAt: string | null;
+    estimatedArrivalEndAt: string | null;
     minTotalQuantity: number;
     failureAction: "CANCEL_AND_REFUND" | "POSTPONE";
     items: Array<{
@@ -95,8 +95,8 @@ export interface Campaign {
   serviceAreaId: string;
   cutoffAt: string;
   dispatchAt: string;
-  estimatedArrivalStartAt: string;
-  estimatedArrivalEndAt: string;
+  estimatedArrivalStartAt: string | null;
+  estimatedArrivalEndAt: string | null;
   minTotalQuantity: number;
   failureAction: "CANCEL_AND_REFUND" | "POSTPONE";
   status: string;
@@ -155,8 +155,8 @@ export interface Order {
     status: string;
     siteName: string;
     address: string;
-    arrivalStartAt: string;
-    arrivalEndAt: string;
+    arrivalStartAt: string | null;
+    arrivalEndAt: string | null;
     estimatedArrivalAt: string | null;
   } | null;
   qualityDeadlineAt?: string | null;
@@ -858,8 +858,8 @@ export const api = {
     body: {
       cutoffAt: string;
       dispatchAt: string;
-      estimatedArrivalStartAt: string;
-      estimatedArrivalEndAt: string;
+      estimatedArrivalStartAt: string | null;
+      estimatedArrivalEndAt: string | null;
     },
   ) => post<Campaign>(`/api/v1/admin/campaigns/${id}/postpone`, body),
   packingLabels: (id: string) =>
@@ -873,7 +873,7 @@ export const api = {
     id: string,
     body: {
       logisticsPlatform: string;
-      vehicleOrderNo: string;
+      vehicleOrderNo: string | null;
       driverName: string | null;
       driverPhone: string | null;
       vehiclePlate: string | null;
@@ -885,7 +885,7 @@ export const api = {
     id: string,
     body: {
       logisticsPlatform: string;
-      vehicleOrderNo: string;
+      vehicleOrderNo: string | null;
       driverName: string | null;
       driverPhone: string | null;
       vehiclePlate: string | null;

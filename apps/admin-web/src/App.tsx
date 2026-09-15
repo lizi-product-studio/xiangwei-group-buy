@@ -246,8 +246,8 @@ type CampaignDraftValues = {
   pickupPointId: string;
   cutoffAt: dayjs.Dayjs;
   dispatchAt: dayjs.Dayjs;
-  estimatedArrivalStartAt: dayjs.Dayjs;
-  estimatedArrivalEndAt: dayjs.Dayjs;
+  estimatedArrivalStartAt?: dayjs.Dayjs;
+  estimatedArrivalEndAt?: dayjs.Dayjs;
   minTotalQuantity: number;
   failureAction: "CANCEL_AND_REFUND" | "POSTPONE";
   items: Array<{
@@ -1331,8 +1331,8 @@ function Campaigns({
       ...campaign,
       pickupPointId: campaign.deliveryPlan?.pickupPointId,
       cutoffAt: dayjs(campaign.cutoffAt), dispatchAt: dayjs(campaign.dispatchAt),
-      estimatedArrivalStartAt: dayjs(campaign.estimatedArrivalStartAt),
-      estimatedArrivalEndAt: dayjs(campaign.estimatedArrivalEndAt),
+        ...(campaign.estimatedArrivalStartAt ? { estimatedArrivalStartAt: dayjs(campaign.estimatedArrivalStartAt) } : {}),
+        ...(campaign.estimatedArrivalEndAt ? { estimatedArrivalEndAt: dayjs(campaign.estimatedArrivalEndAt) } : {}),
       items: campaign.items.map(item => ({catalogSkuId:item.skuId,retailPriceYuan:(item.unitPriceCents/100).toFixed(2),sellableQuantity:item.stock})),
     });
     setOpen(true);
@@ -1356,9 +1356,8 @@ function Campaigns({
         ...campaign,
         cutoffAt: campaign.cutoffAt.toISOString(),
         dispatchAt: campaign.dispatchAt.toISOString(),
-        estimatedArrivalStartAt:
-          campaign.estimatedArrivalStartAt.toISOString(),
-        estimatedArrivalEndAt: campaign.estimatedArrivalEndAt.toISOString(),
+        estimatedArrivalStartAt: campaign.estimatedArrivalStartAt?.toISOString() ?? null,
+        estimatedArrivalEndAt: campaign.estimatedArrivalEndAt?.toISOString() ?? null,
         items: items.map(({ retailPriceYuan, ...item }) => ({
           ...item,
           retailPriceCents: yuanToCents(retailPriceYuan),
@@ -1459,8 +1458,8 @@ function Campaigns({
   const postpone = async (value: {
     cutoffAt: dayjs.Dayjs;
     dispatchAt: dayjs.Dayjs;
-    estimatedArrivalStartAt: dayjs.Dayjs;
-    estimatedArrivalEndAt: dayjs.Dayjs;
+    estimatedArrivalStartAt?: dayjs.Dayjs;
+    estimatedArrivalEndAt?: dayjs.Dayjs;
   }) => {
     if (!postponeCampaign) return;
     setSubmitting(true);
@@ -1468,8 +1467,8 @@ function Campaigns({
       await api.postponeCampaign(postponeCampaign.id, {
         cutoffAt: value.cutoffAt.toISOString(),
         dispatchAt: value.dispatchAt.toISOString(),
-        estimatedArrivalStartAt: value.estimatedArrivalStartAt.toISOString(),
-        estimatedArrivalEndAt: value.estimatedArrivalEndAt.toISOString(),
+        estimatedArrivalStartAt: value.estimatedArrivalStartAt?.toISOString() ?? null,
+        estimatedArrivalEndAt: value.estimatedArrivalEndAt?.toISOString() ?? null,
       });
       setPostponeCampaign(null);
       postponeForm.resetFields();
@@ -1593,7 +1592,9 @@ function Campaigns({
           {
             title: "预计到货",
             render: (_, v) =>
-              `${dateTime(v.estimatedArrivalStartAt)} 至 ${dateTime(v.estimatedArrivalEndAt)}`,
+              v.estimatedArrivalStartAt && v.estimatedArrivalEndAt
+                ? `${dateTime(v.estimatedArrivalStartAt)} 至 ${dateTime(v.estimatedArrivalEndAt)}`
+                : "到货时间待确认",
           },
           {
             title: "固定自提点",
@@ -1627,8 +1628,8 @@ function Campaigns({
                       postponeForm.setFieldsValue({
                         cutoffAt: dayjs(v.cutoffAt),
                         dispatchAt: dayjs(v.dispatchAt),
-                        estimatedArrivalStartAt: dayjs(v.estimatedArrivalStartAt),
-                        estimatedArrivalEndAt: dayjs(v.estimatedArrivalEndAt),
+                        ...(v.estimatedArrivalStartAt ? { estimatedArrivalStartAt: dayjs(v.estimatedArrivalStartAt) } : {}),
+                        ...(v.estimatedArrivalEndAt ? { estimatedArrivalEndAt: dayjs(v.estimatedArrivalEndAt) } : {}),
                       });
                     }}
                   >
@@ -1738,12 +1739,13 @@ function Campaigns({
           <div className="form-grid">
             <Form.Item
               name="estimatedArrivalStartAt"
-              label="预计到货开始"
+              label="预计到货时段（可选）· 开始"
               dependencies={["dispatchAt"]}
               rules={[
-                { required: true },
                 ({ getFieldValue }) => ({
                   validator: (_, value: dayjs.Dayjs | undefined) => {
+                    const endAt = getFieldValue("estimatedArrivalEndAt") as dayjs.Dayjs | undefined;
+                    if (Boolean(value) !== Boolean(endAt)) return Promise.reject(new Error("预计到货开始和结束必须同时填写或同时留空"));
                     const dispatchAt = getFieldValue("dispatchAt") as
                       | dayjs.Dayjs
                       | undefined;
@@ -1763,10 +1765,9 @@ function Campaigns({
             </Form.Item>
             <Form.Item
               name="estimatedArrivalEndAt"
-              label="预计到货结束"
+              label="预计到货时段（可选）· 结束"
               dependencies={["estimatedArrivalStartAt"]}
               rules={[
-                { required: true },
                 ({ getFieldValue }) => ({
                   validator: (_, value: dayjs.Dayjs | undefined) => {
                     const startAt = getFieldValue(
@@ -1777,6 +1778,7 @@ function Campaigns({
                       value,
                       { estimatedArrivalStartAt: startAt },
                     );
+                    if (Boolean(value) !== Boolean(startAt)) return Promise.reject(new Error("预计到货开始和结束必须同时填写或同时留空"));
                     return error
                       ? Promise.reject(new Error(error))
                       : Promise.resolve();
@@ -1935,12 +1937,13 @@ function Campaigns({
           <div className="form-grid">
             <Form.Item
               name="estimatedArrivalStartAt"
-              label="新预计到货开始"
+              label="新预计到货时段（可选）· 开始"
               dependencies={["dispatchAt"]}
               rules={[
-                { required: true, message: "请选择预计到货开始" },
                 ({ getFieldValue }) => ({
                   validator: (_, value: dayjs.Dayjs | undefined) => {
+                    const end = getFieldValue("estimatedArrivalEndAt") as dayjs.Dayjs | undefined;
+                    if (Boolean(value) !== Boolean(end)) return Promise.reject(new Error("预计到货开始和结束必须同时填写或同时留空"));
                     const dispatchAt = getFieldValue("dispatchAt") as dayjs.Dayjs | undefined;
                     return !value || !dispatchAt || !value.isBefore(dispatchAt)
                       ? Promise.resolve()
@@ -1953,13 +1956,13 @@ function Campaigns({
             </Form.Item>
             <Form.Item
               name="estimatedArrivalEndAt"
-              label="新预计到货结束"
+              label="新预计到货时段（可选）· 结束"
               dependencies={["estimatedArrivalStartAt"]}
               rules={[
-                { required: true, message: "请选择预计到货结束" },
                 ({ getFieldValue }) => ({
                   validator: (_, value: dayjs.Dayjs | undefined) => {
                     const start = getFieldValue("estimatedArrivalStartAt") as dayjs.Dayjs | undefined;
+                    if (Boolean(value) !== Boolean(start)) return Promise.reject(new Error("预计到货开始和结束必须同时填写或同时留空"));
                     return !value || !start || !value.isBefore(start)
                       ? Promise.resolve()
                       : Promise.reject(new Error("预计到货结束不能早于开始"));
@@ -1991,8 +1994,12 @@ function Campaigns({
             point={points.find((v) => v.id === createReview.pickupPointId)}
             cutoffAt={createReview.cutoffAt}
             dispatchAt={createReview.dispatchAt}
-            estimatedArrivalStartAt={createReview.estimatedArrivalStartAt}
-            estimatedArrivalEndAt={createReview.estimatedArrivalEndAt}
+            {...(createReview.estimatedArrivalStartAt
+              ? { estimatedArrivalStartAt: createReview.estimatedArrivalStartAt }
+              : {})}
+            {...(createReview.estimatedArrivalEndAt
+              ? { estimatedArrivalEndAt: createReview.estimatedArrivalEndAt }
+              : {})}
             minTotalQuantity={createReview.minTotalQuantity}
             failureAction={failureActionText(createReview.failureAction)}
             items={createReview.items.map((item) => ({
@@ -2134,7 +2141,9 @@ function Campaigns({
                 已支付 {closeReview.paidQuantity ?? closeReview.items.reduce((sum, item) => sum + (item.paidQuantity ?? 0), 0)} / {closeReview.minTotalQuantity} 件
               </Descriptions.Item>
               <Descriptions.Item label="预计到货">
-                {dateTime(closeReview.estimatedArrivalStartAt)} 至 {dateTime(closeReview.estimatedArrivalEndAt)}
+                {closeReview.estimatedArrivalStartAt && closeReview.estimatedArrivalEndAt
+                  ? `${dateTime(closeReview.estimatedArrivalStartAt)} 至 ${dateTime(closeReview.estimatedArrivalEndAt)}`
+                  : "到货时间待确认"}
               </Descriptions.Item>
             </Descriptions>
           </Space>
@@ -2205,8 +2214,8 @@ function CampaignReview({
   point: PickupPoint | undefined;
   cutoffAt: string | dayjs.Dayjs;
   dispatchAt: string | dayjs.Dayjs;
-  estimatedArrivalStartAt: string | dayjs.Dayjs;
-  estimatedArrivalEndAt: string | dayjs.Dayjs;
+  estimatedArrivalStartAt?: string | dayjs.Dayjs | null;
+  estimatedArrivalEndAt?: string | dayjs.Dayjs | null;
   minTotalQuantity: number;
   failureAction: string;
   items: Array<{
@@ -2222,7 +2231,7 @@ function CampaignReview({
         type="warning"
         showIcon
         message="开售后不可修改"
-        description="固定自提点、截单时间、预计到货窗口、商品及售价、可售量、成团门槛和未成团处理将被锁定。"
+        description="固定自提点、截单时间、预计到货时段（如填写）、商品及售价、可售量、成团门槛和未成团处理将被锁定。"
       />
       <Descriptions bordered size="small" column={1}>
         <Descriptions.Item label="团期">{title}</Descriptions.Item>
@@ -2236,7 +2245,9 @@ function CampaignReview({
           {dateTime(dispatchAt)}
         </Descriptions.Item>
         <Descriptions.Item label="预计到货窗口">
-          {dateTime(estimatedArrivalStartAt)} 至 {dateTime(estimatedArrivalEndAt)}
+          {estimatedArrivalStartAt && estimatedArrivalEndAt
+            ? `${dateTime(estimatedArrivalStartAt)} 至 ${dateTime(estimatedArrivalEndAt)}`
+            : "到货时间待确认"}
         </Descriptions.Item>
         <Descriptions.Item label="最小成团件数">
           {minTotalQuantity} 件
@@ -2695,6 +2706,7 @@ function Logistics({
 }) {
   const { message } = AntApp.useApp();
   const [vehicle, setVehicle] = useState<DeliveryPlan | null>(null);
+  const [transportType, setTransportType] = useState<"PLATFORM_SELF" | "THIRD_PARTY">("THIRD_PARTY");
   const [vehicleEmergency, setVehicleEmergency] = useState(false);
   const [vehicleForm] = Form.useForm();
   const [arrival, setArrival] = useState<CommunityDelivery | null>(null);
@@ -2744,15 +2756,13 @@ function Logistics({
   const openVehicle = (plan: DeliveryPlan, emergency = false) => {
     setVehicleEmergency(emergency);
     setVehicle(plan);
+    setTransportType(plan.logisticsPlatform === "平台自送" ? "PLATFORM_SELF" : "THIRD_PARTY");
     vehicleForm.setFieldsValue({
       logisticsPlatform: plan.logisticsPlatform ?? undefined,
       vehicleOrderNo: plan.vehicleOrderNo ?? undefined,
       driverName: plan.driverName ?? undefined,
       driverPhone: plan.driverPhone ?? undefined,
       vehiclePlate: plan.vehiclePlate ?? undefined,
-      estimatedArrivalAt: plan.estimatedArrivalAt
-        ? dayjs(plan.estimatedArrivalAt)
-        : undefined,
       reason: undefined,
     });
   };
@@ -2784,23 +2794,25 @@ function Logistics({
   };
   const saveVehicle = async (value: {
     logisticsPlatform: string;
-    vehicleOrderNo: string;
+    vehicleOrderNo?: string;
     driverName?: string;
     driverPhone?: string;
     vehiclePlate?: string;
-    estimatedArrivalAt?: dayjs.Dayjs;
     reason?: string;
   }) => {
     if (!vehicle || vehicleSubmitting) return;
     setVehicleSubmitting(true);
     try {
       const body = {
-        logisticsPlatform: value.logisticsPlatform,
-        vehicleOrderNo: value.vehicleOrderNo,
+        logisticsPlatform: transportType === "PLATFORM_SELF" ? "平台自送" : value.logisticsPlatform,
+        vehicleOrderNo:
+          transportType === "PLATFORM_SELF"
+            ? (vehicle.vehicleOrderNo ?? null)
+            : (value.vehicleOrderNo?.trim() || null),
         driverName: value.driverName ?? null,
         driverPhone: value.driverPhone ?? null,
         vehiclePlate: value.vehiclePlate ?? null,
-        estimatedArrivalAt: value.estimatedArrivalAt?.toISOString() ?? null,
+        estimatedArrivalAt: vehicle.estimatedArrivalAt ?? null,
       };
       if (vehicleEmergency)
         await api.correctVehicle(vehicle.id, {
@@ -2901,10 +2913,6 @@ function Logistics({
                 emergencyProxy,
                 ...(batch ? { batchStatus: batch.status } : {}),
               });
-              const overdue =
-                v.status === "IN_TRANSIT" &&
-                Boolean(v.estimatedArrivalAt) &&
-                dayjs(v.estimatedArrivalAt).isBefore(dayjs());
               return (
                 <Space wrap>
                   {actionLabels.includes("登记运输信息") && (
@@ -2939,9 +2947,6 @@ function Logistics({
                     <Typography.Text type="secondary">
                       批次已创建，等待运营确认发车
                     </Typography.Text>
-                  )}
-                  {overdue && (
-                    <Tag color="red">已超过预计到达时间，请跟进</Tag>
                   )}
                 </Space>
               );
@@ -3063,20 +3068,36 @@ function Logistics({
           layout="vertical"
           onFinish={(v) => void saveVehicle(v)}
         >
-          <Form.Item
-            name="logisticsPlatform"
-            label="承运方"
-            rules={[{ required: true }]}
-          >
-            <Input />
+          <Form.Item label="运输方式" required>
+            <Select
+              value={transportType}
+              onChange={(value: "PLATFORM_SELF" | "THIRD_PARTY") => {
+                setTransportType(value);
+                if (value === "PLATFORM_SELF") vehicleForm.setFieldValue("logisticsPlatform", "平台自送");
+                else if (vehicleForm.getFieldValue("logisticsPlatform") === "平台自送") vehicleForm.setFieldValue("logisticsPlatform", undefined);
+              }}
+              options={[{ value: "PLATFORM_SELF", label: "平台自送" }, { value: "THIRD_PARTY", label: "第三方承运" }]}
+              disabled={vehicleSubmitting}
+            />
           </Form.Item>
-          <Form.Item
-            name="vehicleOrderNo"
-            label="运输单号"
-            rules={[{ required: true }]}
-          >
-            <Input />
-          </Form.Item>
+          {transportType === "THIRD_PARTY" && (
+            <>
+              <Form.Item
+                name="logisticsPlatform"
+                label="承运方"
+                rules={[{ required: true, message: "请填写第三方承运方" }]}
+              >
+                <Input placeholder="例如：第三方物流或合作车队" />
+              </Form.Item>
+              <Form.Item
+                name="vehicleOrderNo"
+                label="运单号（可选）"
+                extra="第三方承运提供的货物查询编号，没有可留空"
+              >
+                <Input placeholder="有运单号时填写" />
+              </Form.Item>
+            </>
+          )}
           <div className="form-grid">
             <Form.Item name="driverName" label="司机">
               <Input />
@@ -3087,9 +3108,6 @@ function Logistics({
           </div>
           <Form.Item name="vehiclePlate" label="车牌">
             <Input />
-          </Form.Item>
-          <Form.Item name="estimatedArrivalAt" label="预计到达">
-            <DatePicker showTime />
           </Form.Item>
           {vehicleEmergency && (
             <Form.Item
@@ -3146,11 +3164,6 @@ function Logistics({
               {[dispatchReview.driverName, dispatchReview.vehiclePlate]
                 .filter(Boolean)
                 .join(" / ") || "—"}
-            </Descriptions.Item>
-            <Descriptions.Item label="预计到达">
-              {dispatchReview.estimatedArrivalAt
-                ? dateTime(dispatchReview.estimatedArrivalAt)
-                : "—"}
             </Descriptions.Item>
             <Descriptions.Item label="已付款发货订单 / 商品数量">
               {dispatchLabels === null ? "待核实" : `${dispatchLabels.length} 单 / ${dispatchQuantity} 件`}
@@ -4102,8 +4115,13 @@ function PointWorkbench({
               },
             ]}
           />
-          <Space style={{ marginTop: 16 }}>
+          <Space
+            wrap
+            size="small"
+            style={{ marginTop: 16, width: "100%" }}
+          >
             <Button
+              size="middle"
               disabled={submittingPickup}
               onClick={() =>
                 setPickupQuantities(
@@ -4119,6 +4137,7 @@ function PointWorkbench({
               全部领取
             </Button>
             <Button
+              size="middle"
               disabled={submittingPickup}
               onClick={() =>
                 setPickupQuantities(
@@ -4128,13 +4147,13 @@ function PointWorkbench({
             >
               清空数量
             </Button>
-            <Typography.Text type="secondary">取货码：{code}</Typography.Text>
             <Button
+              size="middle"
               type="primary"
               disabled={!/^\d{6}$/.test(code) || submittingPickup || !order.items.some(item => item.remainingPickupQuantity > 0)}
               onClick={openPickupReview}
             >
-              确认本次领取
+              确认领取
             </Button>
           </Space>
         </Card>

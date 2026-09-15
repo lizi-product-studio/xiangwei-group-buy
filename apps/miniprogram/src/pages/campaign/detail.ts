@@ -129,7 +129,7 @@ Page({
         total: formatMoney(product.unitPriceCents * this.data.quantity),
         cutoffText: formatChinaDateTime(campaign.cutoffAt, true),
         countdownText: cutoffCountdown(campaign.cutoffAt),
-        estimatedArrivalText: arrivalText ?? "预计到货时间未配置，本团暂不可购买",
+        estimatedArrivalText: arrivalText ? `预计到货时段：${arrivalText}` : "到货时间待确认，到货后通知",
         unformedRuleText: unformedRuleText(campaign),
         canBuy,
       });

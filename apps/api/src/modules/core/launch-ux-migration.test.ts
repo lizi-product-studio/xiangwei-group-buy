@@ -3,7 +3,6 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CampaignService } from "../campaigns/campaign-service.js";
 import { NoopCampaignScheduler } from "../campaigns/campaign-scheduler.js";
-import { OrderService } from "../orders/order-service.js";
 import { MemoryStore } from "./store.js";
 
 class SnapshotStore extends MemoryStore {
@@ -59,7 +58,7 @@ describe("launch UX forward migration", () => {
     ]);
   });
 
-  it("does not expose a legacy open campaign without an arrival window", async () => {
+  it("exposes a legacy open campaign without an arrival window", async () => {
     const store = new SnapshotStore(false);
     const now = new Date().toISOString();
     const campaign = {
@@ -121,18 +120,9 @@ describe("launch UX forward migration", () => {
     });
 
     const campaigns = new CampaignService(store, new NoopCampaignScheduler());
-    expect(await campaigns.listPublic(Date.parse("2099-01-01T00:00:00Z"))).toEqual(
-      [],
-    );
-    const orders = new OrderService(store, campaigns);
-    await expect(
-      orders.preview("user-1", {
-        campaignId: campaign.id,
-        serviceAreaId: "area-1",
-        pickupPointId: completePoint.id,
-        items: [{ skuId: "sku-1", quantity: 1 }],
-      }),
-    ).rejects.toMatchObject({ code: "CAMPAIGN_NOT_OPEN" });
+    expect(
+      await campaigns.listPublic(Date.parse("2099-01-01T00:00:00Z")),
+    ).toEqual([expect.objectContaining({ id: campaign.id })]);
     expect((await store.getCampaign(campaign.id))?.estimatedArrivalStartAt).toBe(
       "",
     );

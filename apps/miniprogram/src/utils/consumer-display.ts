@@ -82,13 +82,9 @@ export function isCampaignPurchasable(
 ): boolean {
   const arrivalStart = Date.parse(campaign.estimatedArrivalStartAt ?? "");
   const arrivalEnd = Date.parse(campaign.estimatedArrivalEndAt ?? "");
-  return (
-    campaign.status === "OPEN" &&
-    Date.parse(campaign.cutoffAt) > now &&
-    Number.isFinite(arrivalStart) &&
-    Number.isFinite(arrivalEnd) &&
-    arrivalEnd >= arrivalStart
-  );
+  return campaign.status === "OPEN" && Date.parse(campaign.cutoffAt) > now &&
+    ((Number.isFinite(arrivalStart) && Number.isFinite(arrivalEnd) && arrivalEnd >= arrivalStart) ||
+      (!campaign.estimatedArrivalStartAt && !campaign.estimatedArrivalEndAt));
 }
 
 export function campaignPaidQuantity(

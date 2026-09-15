@@ -84,7 +84,7 @@ function locationCopy(plan: DeliveryPlanDto | null) {
   return {
     name: plan.siteName ?? "集中领取地点已确认",
     address: plan.address ?? "",
-    time: eta ? `预计 ${formatDateTime(eta)} 到达` : "到货时间待确认",
+    time: eta ? `预计到货时段：${formatDateTime(eta)}` : "到货时间待确认，到货后通知",
   };
 }
 

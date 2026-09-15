@@ -59,7 +59,7 @@ Page({
           ...campaign, skuId: product.skuId, productTitle: product.title, skuName: product.skuName, category: product.category,
           imageUrl: product.imageUrl, origin: product.origin, priceText: formatMoney(product.unitPriceCents), soldQuantity: product.soldQuantity,
           cutoffText: formatChinaDateTime(campaign.cutoffAt, true), dispatchText: formatChinaDateTime(campaign.dispatchAt),
-          arrivalText: estimatedArrivalText(campaign) ?? '',
+          arrivalText: estimatedArrivalText(campaign) ?? '到货时间待确认',
         })));
       const categories = [...new Set(campaigns.map((item) => item.category))];
       const categoryItems: CategoryItem[] = [
@@ -68,7 +68,7 @@ Page({
       ];
       const first = campaigns[0];
       const deliveryText = first?.deliveryPlan?.pickupPointId
-        ? `截单 ${first.cutoffText} · 预计 ${first.arrivalText} 到货`
+        ? `截单 ${first.cutoffText} · ${first.arrivalText}`
         : selectedPoint ? '本期好物正在筹备，开团后即可选购' : '请选择方便领取的固定自提点';
       const currentCartCount = readCartCount();
       this.setData({ availableAreaCount: areaContext.areas.length, campaigns, allProducts: campaigns, categories, categoryItems, activeCategory: '全部', imageRefreshKey: this.data.imageRefreshKey + 1, area: areaContext.selected,pickupPoint:selectedPoint, deliveryText, cartCount: shouldShowFloatingCart(currentCartCount) ? currentCartCount : 0 });

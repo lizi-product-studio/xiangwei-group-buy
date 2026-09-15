@@ -14,9 +14,26 @@ import {
   wechatLoginSchema,
   productCategorySchema,
   catalogSkuSchema,
+  bookVehicleSchema,
 } from "./index.js";
 
 describe("public API contracts", () => {
+  it("allows optional arrival windows and normalizes an empty transport number", () => {
+    const campaign = {
+      title: "无预计到货团期",
+      serviceAreaId: "area-1",
+      pickupPointId: "point-1",
+      cutoffAt: "2030-01-01T08:00:00+08:00",
+      dispatchAt: "2030-01-02T08:00:00+08:00",
+      estimatedArrivalStartAt: null,
+      estimatedArrivalEndAt: null,
+      failureAction: "CANCEL_AND_REFUND",
+      items: [{ catalogSkuId: "sku-1", retailPriceCents: 100, sellableQuantity: 1 }],
+    } as const;
+    expect(communityCampaignSchema.safeParse(campaign).success).toBe(true);
+    expect(bookVehicleSchema.parse({ logisticsPlatform: "平台自送", vehicleOrderNo: "" }).vehicleOrderNo).toBeNull();
+    expect(bookVehicleSchema.parse({ logisticsPlatform: "第三方车队", vehicleOrderNo: "OLD-1" }).vehicleOrderNo).toBe("OLD-1");
+  });
   it("allows eight-character administrator passwords and validates password-change challenges", () => {
     expect(
       adminLoginSchema.safeParse({ username: "ops.admin", password: "Eight123" }).success,
@@ -180,9 +197,10 @@ describe("public API contracts", () => {
     expect(
       communityCampaignSchema.safeParse({
         ...input,
-        estimatedArrivalStartAt: undefined,
+        estimatedArrivalStartAt: null,
+        estimatedArrivalEndAt: null,
       }).success,
-    ).toBe(false);
+    ).toBe(true);
     expect(
       communityCampaignSchema.safeParse({
         ...input,

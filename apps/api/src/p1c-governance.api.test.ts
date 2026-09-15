@@ -1023,7 +1023,7 @@ describe("P1-C governance API contracts", () => {
     ).toBe("ACTIVE");
   });
 
-  it("requires a complete future postpone schedule, writes audit/outbox facts, and hides inactive items publicly", async () => {
+  it("accepts an omitted arrival window, rejects a partial one, writes audit/outbox facts, and hides inactive items publicly", async () => {
     const now = Date.now();
     const cutoffAt = new Date(now + 60 * 60_000).toISOString();
     const dispatchAt = new Date(now + 2 * 60 * 60_000).toISOString();
@@ -1126,13 +1126,17 @@ describe("P1-C governance API contracts", () => {
       createdAt,
       updatedAt: createdAt,
     });
-    const missingArrival = await app.inject({
+    const partialArrival = await app.inject({
       method: "POST",
       url: "/api/v1/admin/campaigns/campaign-1/postpone",
       headers: superAdmin,
-      payload: { cutoffAt, dispatchAt },
+      payload: {
+        cutoffAt,
+        dispatchAt,
+        estimatedArrivalStartAt: arrivalStartAt,
+      },
     });
-    expect(missingArrival.statusCode).toBe(400);
+    expect(partialArrival.statusCode).toBe(400);
     const notificationWrite = vi.spyOn(
       store,
       "createOrderNotificationIfAbsent",
@@ -1185,15 +1189,12 @@ describe("P1-C governance API contracts", () => {
       method: "POST",
       url: "/api/v1/admin/campaigns/campaign-1/postpone",
       headers: superAdmin,
-      payload: {
-        cutoffAt,
-        dispatchAt,
-        estimatedArrivalStartAt: arrivalStartAt,
-        estimatedArrivalEndAt: arrivalEndAt,
-      },
+      payload: { cutoffAt, dispatchAt },
     });
     expect(postponed.statusCode, postponed.body).toBe(200);
     expect(postponed.json().data.status).toBe("OPEN");
+    expect(postponed.json().data.estimatedArrivalStartAt).toBeNull();
+    expect(postponed.json().data.estimatedArrivalEndAt).toBeNull();
     expect(
       (await store.listAuditLogs(20)).some(
         (entry) => entry.action === "CAMPAIGN_POSTPONED",

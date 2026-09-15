@@ -19,8 +19,8 @@ export interface Campaign {
   serviceAreaId: string;
   cutoffAt: string;
   dispatchAt: string;
-  estimatedArrivalStartAt: string;
-  estimatedArrivalEndAt: string;
+  estimatedArrivalStartAt: string | null;
+  estimatedArrivalEndAt: string | null;
   minTotalQuantity: number;
   failureAction: "CANCEL_AND_REFUND" | "POSTPONE";
   /** Number of completed re-openings after a failed close. */

@@ -129,7 +129,11 @@ describe("single community application surface", () => {
         ],
       },
     });
-    expect(missingArrivalWindow.statusCode).toBe(400);
+    expect(missingArrivalWindow.statusCode, missingArrivalWindow.body).toBe(201);
+    expect(missingArrivalWindow.json().data).toMatchObject({
+      estimatedArrivalStartAt: null,
+      estimatedArrivalEndAt: null,
+    });
     const invalidSchedule = await app.inject({
       method: "POST",
       url: "/api/v1/admin/campaigns",

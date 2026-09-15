@@ -27,14 +27,14 @@ describe("consumer launch display rules", () => {
     expect(cutoffCountdown(cutoff, Date.parse(cutoff))).toBe("已截单");
   });
 
-  it("requires a configured campaign arrival window before an open campaign is buyable", () => {
+  it("allows an open campaign without an arrival estimate and rejects malformed windows", () => {
     const base = {
       status: "OPEN" as const,
       cutoffAt: "2026-08-22T00:00:00.000Z",
       estimatedArrivalStartAt: null,
       estimatedArrivalEndAt: null,
     };
-    expect(isCampaignPurchasable(base, Date.parse("2026-08-21T00:00:00.000Z"))).toBe(false);
+    expect(isCampaignPurchasable(base, Date.parse("2026-08-21T00:00:00.000Z"))).toBe(true);
     expect(
       isCampaignPurchasable(
         {

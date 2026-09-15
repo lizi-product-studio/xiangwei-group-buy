@@ -43,7 +43,7 @@ function planCopy(plan: DeliveryPlanDto | null, arrivalText: string): {
     title: plan.siteName ?? "固定自提点",
     note: [
       plan.address,
-      `预计 ${arrivalText} 到货`,
+      arrivalText ? `预计到货时段：${arrivalText}` : "到货时间待确认，到货后通知",
     ]
       .filter(Boolean)
       .join(" · "),
@@ -140,7 +140,7 @@ Page({
       // overwriting a newer identity or load generation.
       if (!loadCoordinator.isCurrent(loadGuard, customerAuth.captureSessionEpoch())) return;
       saveCheckoutDraft(refreshed);
-      const arrivalText = estimatedArrivalText(campaign)!;
+      const arrivalText = estimatedArrivalText(campaign) ?? "";
       const delivery = planCopy(campaign.deliveryPlan, arrivalText);
       this.setData({
         draft: refreshed,

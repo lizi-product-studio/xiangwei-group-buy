@@ -8,7 +8,7 @@
     <view class="ui-view progress-track"><view class="ui-view progress-track__value" style="width: {{progressPercent}}%;"></view></view>
     <view class="ui-view time-row"><text class="ui-text">截单时间</text><text class="ui-text">{{cutoffText}}</text></view>
     <view class="ui-view countdown">{{countdownText}}</view>
-    <view class="ui-view time-row"><text class="ui-text">预计到货</text><text class="ui-text">{{estimatedArrivalText}}</text></view>
+    <view class="ui-view time-row"><text class="ui-text">到货安排</text><text class="ui-text">{{estimatedArrivalText}}</text></view>
     <text class="ui-text group-card__explain">最小成团件数：{{campaign.minTotalQuantity}} 件。{{unformedRuleText}}</text>
   </view>
   <view class="ui-view pickup-card">

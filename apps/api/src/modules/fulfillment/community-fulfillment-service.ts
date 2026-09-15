@@ -20,8 +20,8 @@ export type CommunityCampaignInput = {
   pickupPointId: string;
   cutoffAt: string;
   dispatchAt: string;
-  estimatedArrivalStartAt: string;
-  estimatedArrivalEndAt: string;
+  estimatedArrivalStartAt: string | null;
+  estimatedArrivalEndAt: string | null;
   minTotalQuantity: number;
   failureAction: "CANCEL_AND_REFUND" | "POSTPONE";
   items: Array<{
