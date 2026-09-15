@@ -60,6 +60,20 @@ describe("history-safe operations queues", () => {
     const legacy = await get(path, role);
     expect(Array.isArray(legacy.json().data)).toBe(true);
   });
+  it.each(["EXPIRED_PENDING", "REFUND_PENDING"])("prioritizes the earliest deadline before paginating %s", async status => {
+    const entry = (id: string, deadlineAt: string) => [id, {id, orderId: id, status, deadlineAt, createdAt: recent}];
+    store.seed({windows: [entry("later", recent), entry("older-b", old), entry("older-a", old)]});
+    const before = store.snapshot();
+    const ids: string[] = [];
+    for (let page = 1; page <= 3; page++) {
+      const response = await get(`/api/v1/admin/community/pickup-windows?status=${status}&page=${page}&pageSize=1`);
+      expect(response.statusCode).toBe(200);
+      expect(response.json().pagination.total).toBe(3);
+      ids.push(response.json().data[0].orderId);
+    }
+    expect(ids).toEqual(["older-a", "older-b", "later"]);
+    expect(store.snapshot()).toBe(before);
+  });
   it("filters role scope before totals and rejects out-of-scope requests", async () => {
     store.seed({quality: [["private", {id: "private", orderId: "order", status: "REGISTERED", registeredAt: old, items: []}]], cancellations: [["private", {id: "private", orderId: "order", status: "PENDING_REVIEW", requestedAt: old}]]});
     for (const path of ["/api/v1/admin/quality-cases", "/api/v1/admin/community/cancellation-requests"]) {
