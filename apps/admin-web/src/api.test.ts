@@ -112,6 +112,13 @@ describe("community admin API", () => {
     );
   });
 
+  it("looks up pickup code within a point and only supplies an order number for disambiguation", async () => {
+    await api.lookupPickupCode("point-1", "012345");
+    expect(fetch).toHaveBeenLastCalledWith("/api/v1/pickup/orders/lookup?pickupPointId=point-1&code=012345", expect.any(Object));
+    await api.lookupPickupCode("point-1", "012345", "ORDER-1");
+    expect(fetch).toHaveBeenLastCalledWith("/api/v1/pickup/orders/lookup?pickupPointId=point-1&code=012345&orderNo=ORDER-1", expect.any(Object));
+  });
+
   it("fails closed for malformed bearer role arrays while accepting the staff role enum", () => {
     expect(isValidStaffRoles(["SUPER_ADMIN", "FINANCE"])).toBe(true);
     expect(isValidStaffRoles([])).toBe(false);
