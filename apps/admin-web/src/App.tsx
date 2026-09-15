@@ -1420,11 +1420,21 @@ function Campaigns({
     if (!closeReview) return;
     setSubmitting(true);
     try {
-      await api.campaignAction(closeReview.id, "close", {});
+      const result = await api.campaignAction(closeReview.id, "close", {
+        reason: "运营后台手动截单",
+      });
       setCloseReview(null);
-      await refreshAfterMutation(reload, message, "团期已截单，库存和订单状态已更新");
+      const successText =
+        result.status === "LOCKED"
+          ? "已截单并成团，已付款订单进入履约"
+          : result.status === "POSTPONED"
+            ? "本次未成团，团期已顺延一次"
+            : result.status === "CANCELLED"
+              ? "本次未成团，团期已取消并进入退款处理"
+              : "团期截单结果已更新";
+      await refreshAfterMutation(reload, message, successText);
     } catch (error) {
-      void message.error(mutationErrorText(error));
+      void message.error(campaignError(error));
     } finally {
       setSubmitting(false);
     }
@@ -2094,8 +2104,8 @@ function Campaigns({
       </Modal>
       <Modal
         open={!!closeReview}
-        title="截单前二次确认"
-        okText="确认截单"
+        title="确认立即截单"
+        okText="立即截单"
         cancelText="返回"
         confirmLoading={submitting}
         onOk={() => void confirmClose()}
@@ -2107,12 +2117,19 @@ function Campaigns({
             <Alert
               type="warning"
               showIcon
-              message={`${closeReview.title} 截单后不可重新开售`}
-              description="截单会锁定商品和库存，待付款订单将停止支付，已付款订单进入履约。请确认团期、时间和配送信息无误。"
+              message={`${closeReview.title} 将立即停止收单`}
+              description={
+                (closeReview.paidQuantity ?? closeReview.items.reduce((sum, item) => sum + (item.paidQuantity ?? 0), 0)) < closeReview.minTotalQuantity
+                  ? `当前未达到 ${closeReview.minTotalQuantity} 件成团门槛；截单后将按“${closeReview.failureAction === "POSTPONE" && (closeReview.postponementCount ?? 0) < 1 ? "顺延一次" : "取消并退款"}”处理。`
+                  : "已达到成团门槛；截单后待付款订单将关闭，已付款订单进入履约。"
+              }
             />
             <Descriptions bordered size="small" column={1}>
-              <Descriptions.Item label="截单时间">
+              <Descriptions.Item label="原计划截单">
                 {dateTime(closeReview.cutoffAt)}
+              </Descriptions.Item>
+              <Descriptions.Item label="当前成团进度">
+                已支付 {closeReview.paidQuantity ?? closeReview.items.reduce((sum, item) => sum + (item.paidQuantity ?? 0), 0)} / {closeReview.minTotalQuantity} 件
               </Descriptions.Item>
               <Descriptions.Item label="预计到货">
                 {dateTime(closeReview.estimatedArrivalStartAt)} 至 {dateTime(closeReview.estimatedArrivalEndAt)}
