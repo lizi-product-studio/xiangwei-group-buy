@@ -114,7 +114,7 @@ test('同一主图商品与网页开售团贯穿运输到货及分批核销（�
   expect(await readOrder()).toMatchObject({ campaignId: campaign.id, status: 'PAID_WAITING_CLOSE', items: [{ skuId, quantity: 2 }] });
   await expect.poll(() => Date.now(), { timeout: 35_000, intervals: [500] }).toBeGreaterThan(cutoffAt);
   await campaignRow.getByRole('button', { name: /截\s*单/ }).click();
-  await page.getByRole('button', { name: '确认截单', exact: true }).click();
+  await page.getByRole('button', { name: '立即截单', exact: true }).click();
   await expect(campaignRow.getByRole('button', { name: '生成装袋标签' })).toBeVisible();
   await page.getByRole('menuitem', { name: '发货与运输' }).click();
   const planRow = page.getByRole('row').filter({ hasText: campaignTitle });
