@@ -338,9 +338,19 @@ export const communityArrivalSchema = z
   })
   .strict();
 export const pickupOrderLookupQuerySchema = z.object({
-  deliveryPlanId: identifierSchema,
-  orderNo: z.string().trim().min(1).max(64),
-});
+  deliveryPlanId: identifierSchema.optional(),
+  orderNo: z.string().trim().min(1).max(64).optional(),
+  pickupPointId: identifierSchema.optional(),
+  code: z.string().regex(/^\d{6}$/).optional(),
+}).refine(
+  (value) =>
+    Boolean(value.deliveryPlanId && value.orderNo) ||
+    Boolean(value.pickupPointId && value.code),
+  {
+    message:
+      "查询订单需要配送计划号和订单号，或自提点号和六位取货码",
+  },
+);
 export const verifyPickupSchema = z.object({
   orderId: identifierSchema,
   deliveryPlanId: identifierSchema,
