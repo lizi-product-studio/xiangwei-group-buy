@@ -8,6 +8,7 @@ import {
 import { BusinessError } from "@hometown/domain";
 import { requireActor } from "../modules/auth/auth.js";
 import type { CommerceStore } from "../modules/core/store.js";
+import type { DeliveryPlan, Order } from "../modules/core/types.js";
 import type { FulfillmentService } from "../modules/fulfillment/fulfillment-service.js";
 
 export function registerFulfillmentRoutes(
@@ -51,7 +52,24 @@ export function registerFulfillmentRoutes(
   app.get("/api/v1/pickup/orders/lookup", async (request) => {
     const actor = requireActor(request, ["PICKUP_MANAGER"]);
     const query = pickupOrderLookupQuerySchema.parse(request.query);
-    const plan = await store.getDeliveryPlan(query.deliveryPlanId);
+    let plan: DeliveryPlan | null;
+    let order: Order | null = null;
+    if (query.pickupPointId && query.code) {
+      const pickupPoint = (await store.listPickupPoints()).find(
+        (item) => item.id === query.pickupPointId,
+      );
+      if (!pickupPoint || pickupPoint.status !== "ACTIVE")
+        throw new BusinessError("FORBIDDEN", "当前自提点未启用，不能核销", 403);
+      await assertActivePickupPointAccess(actor, query.pickupPointId);
+      order = await fulfillment.lookupByPickupCode(
+        query.pickupPointId,
+        query.code,
+        query.orderNo,
+      );
+      plan = await store.getDeliveryPlan(order.deliveryPlanId);
+    } else {
+      plan = await store.getDeliveryPlan(query.deliveryPlanId!);
+    }
     if (!plan || !plan.pickupPointId || plan.status !== "ARRIVED")
       throw new BusinessError(
         "RESOURCE_NOT_FOUND",
@@ -64,7 +82,7 @@ export function registerFulfillmentRoutes(
     if (!pickupPoint || pickupPoint.status !== "ACTIVE")
       throw new BusinessError("FORBIDDEN", "当前自提点未启用，不能核销", 403);
     await assertActivePickupPointAccess(actor, plan.pickupPointId);
-    const order = await store.getOrderByNo(query.orderNo);
+    order ??= await store.getOrderByNo(query.orderNo!);
     if (
       !order ||
       order.deliveryPlanId !== plan.id ||
