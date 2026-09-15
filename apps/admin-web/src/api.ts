@@ -49,6 +49,7 @@ export interface RegionDirectoryEntry {
 }
 export interface CatalogSku {
   id: string;
+  createdAt?: string;
   productId: string;
   categoryId?: string | null;
   name: string;
@@ -89,6 +90,7 @@ export type CampaignInput = {
   };
 export interface Campaign {
   id: string;
+  createdAt?: string;
   title: string;
   serviceAreaId: string;
   cutoffAt: string;
@@ -224,6 +226,9 @@ export interface InternalStaff {
 }
 export interface CommunityDelivery {
   id: string;
+  createdAt?: string;
+  estimatedArrivalAt?: string | null;
+  arrivalConfirmedAt?: string | null;
   campaignId: string;
   campaignTitle: string;
   pickupPointId: string;
