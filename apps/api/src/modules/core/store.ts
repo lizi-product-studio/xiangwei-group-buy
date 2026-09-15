@@ -1735,7 +1735,14 @@ export class MemoryStore implements CommerceStore {
     const values = [...source.values()]
       .filter(value => kind !== "notifications" || value.status === "MANUAL_REQUIRED" || value.status === "SUBMISSION_UNKNOWN" || (value.status === "PENDING_DELIVERY" && "lastDeliveryError" in value && Boolean(value.lastDeliveryError)))
       .filter(value => (!query.allowedStatuses || query.allowedStatuses.includes(value.status)) && (!query.status || value.status === query.status))
-      .sort((a, b) => sortKey(b).localeCompare(sortKey(a)) || key(a).localeCompare(key(b)));
+      .sort((a, b) => {
+        // Overdue pickup/refund work is oldest-deadline first, before pagination.
+        const urgent = kind === "windows" && ["EXPIRED_PENDING", "REFUND_PENDING"].includes(query.status ?? "");
+        const order = urgent && "deadlineAt" in a && "deadlineAt" in b
+          ? a.deadlineAt.localeCompare(b.deadlineAt)
+          : sortKey(b).localeCompare(sortKey(a));
+        return order || key(a).localeCompare(key(b));
+      });
     const offset = (query.page - 1) * query.pageSize;
     return {items: clone(values.slice(offset, offset + query.pageSize)), total: values.length, page: query.page, pageSize: query.pageSize};
   }
