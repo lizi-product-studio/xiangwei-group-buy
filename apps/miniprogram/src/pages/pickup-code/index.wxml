@@ -8,6 +8,10 @@
     <text class="ui-text pickup-card__hint">有效期至 {{expiresText}}</text>
     <text class="ui-text pickup-card__hint">{{pickupDeadlineText}}</text>
     <text wx:if="{{latestQualityDeadlineText}}" class="ui-text pickup-card__hint">上次领取凭证 · {{latestQualityDeadlineText}}</text>
+    <view wx:if="{{orderNo}}" class="pickup-card__order">
+      <text class="ui-text pickup-card__hint">订单号：{{orderNo}}</text>
+      <button class="ui-button pickup-card__copy" bindtap="copyOrderNo">复制订单号</button>
+    </view>
     <text class="ui-text pickup-card__warning">请勿提前把取货码发送给他人</text>
   </block>
 </view>
