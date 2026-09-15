@@ -1484,19 +1484,15 @@ export async function buildApp(
     app.post(`/api/v1/admin/campaigns/:id/${suffix}`, async (request) => {
       const actor = requireActor(request, ["OPERATOR", "SUPER_ADMIN"]);
       const id = identifierSchema.parse((request.params as { id: string }).id);
-      const context =
+      const reason =
         suffix === "cancel"
-          ? {
-              ...campaignCancelSchema.parse(request.body),
-              actorId: actor.userId,
-              requestId: request.id,
-            }
-          : {
-              ...campaignCloseSchema.parse(request.body ?? {}),
-              actorId: actor.userId,
-              requestId: request.id,
-              reason: null,
-            };
+          ? campaignCancelSchema.parse(request.body).reason
+          : (campaignCloseSchema.parse(request.body ?? {}).reason ?? null);
+      const context = {
+        actorId: actor.userId,
+        requestId: request.id,
+        reason,
+      };
       const beforeForOpen = suffix === "open" ? await campaigns.get(id) : null;
       const after =
         suffix === "cancel"
