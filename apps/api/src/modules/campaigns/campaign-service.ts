@@ -297,16 +297,10 @@ export class CampaignService {
     scheduledVersion?: number,
     context?: CampaignActionAuditContext,
   ): Promise<Campaign> {
-    if (!triggeredByScheduler) {
-      const campaign = await this.get(id);
-      if (Date.parse(campaign.cutoffAt) > Date.now())
-        throw new BusinessError(
-          "CAMPAIGN_CLOSED",
-          "未到截单时间，不能提前结团",
-          409,
-        );
-      await this.scheduler.cancelClose(id).catch(() => undefined);
-    }
+    // Operators may stop taking orders before the planned cutoff. The
+    // transaction below remains the single authority for locking paid
+    // orders, cancelling unpaid orders and applying the published
+    // unformed-campaign rule.
     const result = await this.store.transaction(async (store) => {
       const campaign = await store.getCampaignForUpdate(id);
       if (!campaign)
@@ -336,6 +330,22 @@ export class CampaignService {
         .reduce((sum, item) => sum + item.quantity, 0);
       if (quantity >= campaign.minTotalQuantity) {
         campaign.status = transitionCampaign(campaign.status, "LOCKED");
+      } else if (
+        campaign.failureAction === "POSTPONE" &&
+        (campaign.postponementCount ?? 0) < 1
+      ) {
+        campaign.status = transitionCampaign(campaign.status, "POSTPONED");
+      } else {
+        campaign.status = transitionCampaign(campaign.status, "CANCELLED");
+      }
+      campaign.version += 1;
+      if (!(await store.updateCampaign(campaign, expected)))
+        throw new BusinessError(
+          "CONCURRENT_MODIFICATION",
+          "团期已被其他操作更新",
+          409,
+        );
+      if (campaign.status === "LOCKED") {
         for (const order of orders) {
           if (order.status === "PAID_WAITING_CLOSE")
             await store.transitionOrderStatus(
@@ -346,13 +356,7 @@ export class CampaignService {
           else if (order.status === "PENDING_PAYMENT")
             await this.cancelPending(store, order);
         }
-      } else if (
-        campaign.failureAction === "POSTPONE" &&
-        (campaign.postponementCount ?? 0) < 1
-      ) {
-        campaign.status = transitionCampaign(campaign.status, "POSTPONED");
-      } else {
-        campaign.status = transitionCampaign(campaign.status, "CANCELLED");
+      } else if (campaign.status === "CANCELLED") {
         for (const order of orders) {
           if (order.status === "PENDING_PAYMENT")
             await this.cancelPending(store, order);
@@ -363,30 +367,27 @@ export class CampaignService {
             await this.createRefundObligation(store, order.id);
         }
       }
-      campaign.version += 1;
-      if (!(await store.updateCampaign(campaign, expected)))
-        throw new BusinessError(
-          "CONCURRENT_MODIFICATION",
-          "团期已被其他操作更新",
-          409,
-        );
+      const finalCampaign = await store.getCampaign(id);
+      if (!finalCampaign)
+        throw new BusinessError("RESOURCE_NOT_FOUND", "团期不存在", 404);
       if (context && this.actionAuditHandler)
         await this.actionAuditHandler(
           store,
           context,
           "CLOSE",
           before,
-          campaign,
+          finalCampaign,
         );
-      return campaign;
+      return finalCampaign;
     });
+    if (!triggeredByScheduler)
+      await this.scheduler.cancelClose(id).catch(() => undefined);
     return result;
   }
   public async cancel(
     id: string,
     context?: CampaignActionAuditContext,
   ): Promise<Campaign> {
-    await this.scheduler.cancelClose(id).catch(() => undefined);
     const result = await this.store.transaction(async (store) => {
       const campaign = await store.getCampaignForUpdate(id);
       if (!campaign)
@@ -399,6 +400,14 @@ export class CampaignService {
         );
       const before = structuredClone(campaign);
       const expected = campaign.version;
+      campaign.status = transitionCampaign(campaign.status, "CANCELLED");
+      campaign.version += 1;
+      if (!(await store.updateCampaign(campaign, expected)))
+        throw new BusinessError(
+          "CONCURRENT_MODIFICATION",
+          "团期已被其他操作更新",
+          409,
+        );
       for (const order of await store.listOrdersByCampaign(id)) {
         if (order.status === "PENDING_PAYMENT")
           await this.cancelPending(store, order);
@@ -408,24 +417,20 @@ export class CampaignService {
         )
           await this.createRefundObligation(store, order.id);
       }
-      campaign.status = transitionCampaign(campaign.status, "CANCELLED");
-      campaign.version += 1;
-      if (!(await store.updateCampaign(campaign, expected)))
-        throw new BusinessError(
-          "CONCURRENT_MODIFICATION",
-          "团期已被其他操作更新",
-          409,
-        );
+      const finalCampaign = await store.getCampaign(id);
+      if (!finalCampaign)
+        throw new BusinessError("RESOURCE_NOT_FOUND", "团期不存在", 404);
       if (context && this.actionAuditHandler)
         await this.actionAuditHandler(
           store,
           context,
           "CANCEL",
           before,
-          campaign,
+          finalCampaign,
         );
-      return campaign;
+      return finalCampaign;
     });
+    await this.scheduler.cancelClose(id).catch(() => undefined);
     return result;
   }
   public async cancelImpact(id: string): Promise<{
