@@ -23,6 +23,20 @@ describe("community admin API", () => {
         details: [{ path: ["category"], message: "String must contain at least 2 character(s)" }],
       }),
     ).toContain("分类");
+    expect(
+      adminErrorText({
+        statusCode: 409,
+        code: "INVALID_STATE_TRANSITION",
+        message: "当前团期已经截单，无需重复操作",
+      }),
+    ).toBe("当前团期已经截单，无需重复操作");
+    expect(
+      adminErrorText({
+        statusCode: 409,
+        code: "CONCURRENT_MODIFICATION",
+        message: "团期已被其他操作更新",
+      }),
+    ).toBe("数据刚刚被其他操作更新，请刷新列表后再试");
   });
 
   it("wraps a rejected fetch before any page can render it as an empty response", async () => {
