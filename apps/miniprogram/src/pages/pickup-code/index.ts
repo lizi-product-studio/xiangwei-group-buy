@@ -8,6 +8,7 @@ const loadCoordinator = new PageLoadCoordinator();
 Page({
   data: {
     orderId: '',
+    orderNo: '',
     code: '',
     expiresText: '',
     pickupDeadlineText: pickupDeadlineText(),
@@ -36,7 +37,7 @@ Page({
     loadCoordinator.show();
     if (!this.data.orderId) return;
     if (!customerAuth.isLoggedIn()) {
-      this.setData({ code: '', expiresText: '', pickupDeadlineText: pickupDeadlineText(), latestQualityDeadlineText: '', loading: false, error: '登录后可查看取货码' });
+      this.setData({ orderNo: '', code: '', expiresText: '', pickupDeadlineText: pickupDeadlineText(), latestQualityDeadlineText: '', loading: false, error: '登录后可查看取货码' });
       return;
     }
     void this.loadPickupCode();
@@ -50,12 +51,13 @@ Page({
   async loadPickupCode() {
     const orderId = this.data.orderId;
     const loadGuard = loadCoordinator.begin(customerAuth.captureSessionEpoch());
-    this.setData({ code: '', expiresText: '', latestQualityDeadlineText: '', loading: true, error: '' });
+    this.setData({ orderNo: '', code: '', expiresText: '', latestQualityDeadlineText: '', loading: true, error: '' });
     try {
       const [result, order] = await Promise.all([api.getPickupCode(orderId), api.getOrder(orderId)]);
       if (!loadCoordinator.isCurrent(loadGuard, customerAuth.captureSessionEpoch()) || !customerAuth.isLoggedIn()) return;
       const latest = (order.pickupReceipts ?? [])[0];
       this.setData({
+        orderNo: order.orderNo,
         code: result.code,
         expiresText: formatDateTime(result.expiresAt),
         pickupDeadlineText: pickupDeadlineText(order.pickupDeadlineAt ?? order.pickupWindow?.deadlineAt),
@@ -79,6 +81,9 @@ Page({
     } finally {
       if (loadCoordinator.isCurrent(loadGuard, customerAuth.captureSessionEpoch())) this.setData({ loading: false });
     }
+  },
+  copyOrderNo() {
+    if (this.data.orderNo) wx.setClipboardData({ data: this.data.orderNo });
   },
   onHide() { loadCoordinator.hide(); },
   onUnload() { loadCoordinator.unload(); },
