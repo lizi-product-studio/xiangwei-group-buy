@@ -1,7 +1,7 @@
 <view class="category-page">
   <view class="category-head"><text class="category-head__title">本期好物</text><text class="category-head__note">按分类挑选，加入购物车后统一结算</text></view>
   <view wx:if="{{loading}}" class="category-state">正在准备商品…</view>
-  <view wx:elif="{{error}}" class="category-state category-state--error"><text>{{error}}</text><button bindtap="loadProducts">重新加载</button></view>
+  <view wx:elif="{{error}}" class="category-state category-state--error"><text>{{error}}</text><button class="category-state__retry" bindtap="loadProducts">重新加载</button></view>
   <view wx:else class="category-layout">
     <scroll-view class="category-nav" scroll-y>
       <view wx:for="{{categories}}" wx:key="*this" class="category-nav__item {{activeCategory === item ? 'category-nav__item--active' : ''}}" data-category="{{item}}" bindtap="selectCategory">{{item}}</view>
@@ -10,7 +10,7 @@
       <view wx:if="{{!products.length}}" class="category-empty">这个分类暂无商品<br/>换个分类看看</view>
       <view wx:for="{{products}}" wx:key="renderKey" class="category-product" data-id="{{item.id}}" data-sku="{{item.skuId}}" bindtap="openProduct">
         <view class="category-product__image"><product-image src="{{item.imageUrl}}" refresh-key="{{imageRefreshKey}}" image-mode="aspectFit" /></view>
-        <view class="category-product__content"><text class="category-product__title">{{item.productTitle}}</text><text class="category-product__sku">{{item.skuName}}</text><text class="category-product__arrival">{{item.arrivalText}}</text><view class="category-product__foot"><text class="category-product__price">¥{{item.priceText}}</text><button class="category-product__add" catchtap="addToCart" data-key="{{item.renderKey}}">加入购物车</button></view></view>
+        <view class="category-product__content"><text class="category-product__title">{{item.productTitle}}</text><text class="category-product__sku">{{item.skuName}}</text><text class="category-product__arrival">{{item.arrivalText}}</text><view class="category-product__foot"><view class="category-product__price-block"><text class="category-product__price">¥{{item.priceText}}</text><text class="category-product__price-note">团购价</text></view><button class="category-product__add" catchtap="addToCart" data-key="{{item.renderKey}}">加入购物车</button></view></view>
       </view>
     </scroll-view>
   </view>
