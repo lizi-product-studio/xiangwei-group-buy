@@ -78,7 +78,8 @@ test('网页草稿过期恢复、编辑开售、无引用删除与消费者只�
   expect((await publicResponse.json()).data).toMatchObject({ id: expired.id, status: 'OPEN', items: [{ skuId: sku.id, unitPriceCents: 1650 }] });
   await page.getByLabel('团期关键词').fill(deleteTitle);
   const deleteRow = page.getByRole('row').filter({ hasText: deleteTitle });
-  await deleteRow.getByRole('button', { name: /删\s*除/ }).click();
+  await deleteRow.getByRole('button', { name: /更\s*多/ }).click();
+  await page.getByRole('menuitem', { name: '删除草稿' }).click();
   const deleteReview = page.getByRole('dialog', { name: '删除草稿团期' });
   await expect(deleteReview).toContainText(deleteTitle);
   const deleted = page.waitForResponse(response => response.url().endsWith(`/api/v1/admin/campaigns/${removable.id}`) && response.request().method() === 'DELETE');

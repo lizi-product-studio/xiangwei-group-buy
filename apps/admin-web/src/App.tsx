@@ -1636,19 +1636,16 @@ function Campaigns({
           { title: "状态", render: (_, v) => <Status value={v.status} /> },
           {
             title: "操作",
+            width: 220,
             render: (_, v) => (
-              <Space>
-                {v.status === "DRAFT" && <>
-                  <Button disabled={submitting} onClick={() => editDraft(v)}>编辑</Button>
-                  <Button danger disabled={submitting} onClick={() => setDeleteReview(v)}>删除</Button>
-                </>}
+              <Space size="small" wrap={false}>
                 {v.status === "DRAFT" && (
-                  <Button loading={submitting} disabled={submitting} onClick={() => setOpenReview(v)}>
+                  <Button type="primary" loading={submitting} disabled={submitting} onClick={() => setOpenReview(v)}>
                     开售
                   </Button>
                 )}
                 {v.status === "OPEN" && (
-                  <Button loading={submitting} disabled={submitting} onClick={() => void action(v.id, "close")}>
+                  <Button type="primary" loading={submitting} disabled={submitting} onClick={() => void action(v.id, "close")}>
                     截单
                   </Button>
                 )}
@@ -1666,13 +1663,39 @@ function Campaigns({
                       });
                     }}
                   >
-                    顺延团期
+                    调整团期
                   </Button>
                 )}
-                {["DRAFT", "OPEN", "POSTPONED"].includes(v.status) && (
-                  <Button danger loading={submitting} disabled={submitting} onClick={() => void action(v.id, "cancel")}>
-                    取消
-                  </Button>
+                {v.status === "DRAFT" && (
+                  <Dropdown
+                    trigger={["click"]}
+                    menu={{
+                      items: [
+                        { key: "edit", label: "编辑草稿" },
+                        { type: "divider" },
+                        { key: "delete", label: "删除草稿", danger: true },
+                      ],
+                      onClick: ({ key }) => {
+                        if (key === "edit") editDraft(v);
+                        if (key === "delete") setDeleteReview(v);
+                      },
+                    }}
+                  >
+                    <Button disabled={submitting}>更多 <DownOutlined /></Button>
+                  </Dropdown>
+                )}
+                {["OPEN", "POSTPONED"].includes(v.status) && (
+                  <Dropdown
+                    trigger={["click"]}
+                    menu={{
+                      items: [{ key: "cancel", label: "取消团期", danger: true }],
+                      onClick: ({ key }) => {
+                        if (key === "cancel") void action(v.id, "cancel");
+                      },
+                    }}
+                  >
+                    <Button disabled={submitting}>更多 <DownOutlined /></Button>
+                  </Dropdown>
                 )}
                 {["LOCKED", "FULFILLING", "COMPLETED"].includes(v.status) && (
                   <Button onClick={() => void openLabels(v)}>
