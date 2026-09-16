@@ -29,7 +29,8 @@
 
 .pickup-card__heading { display: block; margin-bottom: 20rpx; color: #626c60; font-size: 24rpx; font-weight: 650; }
 .pickup-card__row { display: flex; align-items: center; gap: 20rpx; }
-.pickup-card__asset { flex: none; width: 104rpx; height: 104rpx; border-radius: 16rpx; background: #ece6d8; }
+.pickup-card__asset { display: flex; align-items: center; justify-content: center; box-sizing: border-box; flex: none; width: 88rpx; height: 88rpx; padding: 20rpx; border-radius: 20rpx; background: #f0f4ec; }
+.pickup-card__icon { width: 100%; height: 100%; }
 .pickup-card__content { min-width: 0; flex: 1; }
 .pickup-card__content .ui-text { display: block; color: #626c60; font-size: 24rpx; line-height: 1.5; }
 .pickup-card__content .ui-text:first-child { color: #23312d; font-size: 28rpx; font-weight: 700; }
@@ -41,6 +42,7 @@
 .stepper { display: grid; grid-template-columns: repeat(3,1fr); align-items: center; height: 72rpx; overflow: hidden; color: #23312d; text-align: center; background: #f5f2eb; border-radius: 18rpx; font-size: 26rpx; }
 .stepper .ui-text { display: flex; align-items: center; justify-content: center; min-height: 72rpx; }
 .stepper .ui-text:first-child, .stepper .ui-text:last-child { color: #c2412d; font-size: 28rpx; }
-.detail .primary-button, .detail .cart-button { width: 100% !important; min-width: 0; min-height: 72rpx; margin: 0 !important; padding: 8rpx !important; border-radius: 18rpx; font-size: 24rpx; font-weight: 650; line-height: 1.3; }
+.detail .primary-button, .detail .cart-button { display: flex; align-items: center; justify-content: center; box-sizing: border-box; width: 100% !important; min-width: 0; height: 72rpx; min-height: 72rpx; margin: 0 !important; padding: 0 12rpx !important; border-radius: 18rpx; font-size: 24rpx; font-weight: 650; line-height: 1; text-align: center; }
+.detail .primary-button::after, .detail .cart-button::after { border: 0; }
 .cart-button { color: #c2412d; background: #fff7f3; border: 1rpx solid #edb3a4; }
 .primary-button { color: #fff; background: #c9412d; box-shadow: 0 6rpx 14rpx rgba(201,65,45,.18); }

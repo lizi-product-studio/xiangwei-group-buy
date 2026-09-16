@@ -8,9 +8,9 @@
     </scroll-view>
     <scroll-view class="category-products" scroll-y>
       <view wx:if="{{!products.length}}" class="category-empty">这个分类暂无商品<br/>换个分类看看</view>
-      <view wx:for="{{products}}" wx:key="skuId" class="category-product" data-id="{{item.id}}" data-sku="{{item.skuId}}" bindtap="openProduct">
-        <view class="category-product__image"><product-image src="{{item.imageUrl}}" refresh-key="{{imageRefreshKey}}" /></view>
-        <view class="category-product__content"><text class="category-product__title">{{item.productTitle}}</text><text class="category-product__sku">{{item.skuName}}</text><text class="category-product__arrival">{{item.arrivalText}}</text><view class="category-product__foot"><text class="category-product__price">¥{{item.priceText}}</text><button class="category-product__add" catchtap="addToCart" data-sku="{{item.skuId}}">加入购物车</button></view></view>
+      <view wx:for="{{products}}" wx:key="renderKey" class="category-product" data-id="{{item.id}}" data-sku="{{item.skuId}}" bindtap="openProduct">
+        <view class="category-product__image"><product-image src="{{item.imageUrl}}" refresh-key="{{imageRefreshKey}}" image-mode="aspectFit" /></view>
+        <view class="category-product__content"><text class="category-product__title">{{item.productTitle}}</text><text class="category-product__sku">{{item.skuName}}</text><text class="category-product__arrival">{{item.arrivalText}}</text><view class="category-product__foot"><text class="category-product__price">¥{{item.priceText}}</text><button class="category-product__add" catchtap="addToCart" data-key="{{item.renderKey}}">加入购物车</button></view></view>
       </view>
     </scroll-view>
   </view>

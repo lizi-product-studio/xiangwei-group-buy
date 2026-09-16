@@ -8,6 +8,7 @@ import { loadServiceAreaContext, type ServiceAreaSelection } from '../../utils/s
 import { readPickupPointSelection, type PickupPointSelection } from '../../utils/pickup-point';
 
 interface CampaignView extends CampaignDto {
+  renderKey: string;
   cutoffText: string;
   dispatchText: string;
   skuId: string;
@@ -67,7 +68,7 @@ Page({
       const campaigns = allCampaigns
         .filter((campaign) => isCampaignPurchasable(campaign) && areaContext.selected && selectedPoint && campaign.serviceAreaId === areaContext.selected.id && campaign.deliveryPlan?.pickupPointId === selectedPoint.id)
         .flatMap((campaign) => campaign.items.map((product) => ({
-          ...campaign, skuId: product.skuId, productTitle: product.title, skuName: product.skuName, category: product.category, unitPriceCents: product.unitPriceCents, stock: product.stock,
+          ...campaign, renderKey: `${campaign.id}:${product.skuId}`, skuId: product.skuId, productTitle: product.title, skuName: product.skuName, category: product.category, unitPriceCents: product.unitPriceCents, stock: product.stock,
           imageUrl: product.imageUrl, origin: product.origin, priceText: formatMoney(product.unitPriceCents), soldQuantity: product.soldQuantity,
           cutoffText: formatChinaDateTime(campaign.cutoffAt, true), dispatchText: formatChinaDateTime(campaign.dispatchAt),
           arrivalText: estimatedArrivalText(campaign) ?? '到货时间待确认',
@@ -108,7 +109,7 @@ Page({
     }
   },
   addToCart(event: WechatMiniprogram.BaseEvent) {
-    const item = this.data.allProducts.find((candidate) => candidate.skuId === event.currentTarget.dataset.sku);
+    const item = this.data.allProducts.find((candidate) => candidate.renderKey === event.currentTarget.dataset.key);
     if (!item || !this.data.area || !this.data.pickupPoint) return;
     const base: Omit<CartSnapshot, 'items' | 'updatedAt'> = {
       campaignId: item.id,

@@ -6,6 +6,7 @@ import { loadServiceAreaContext, type ServiceAreaSelection } from "../../utils/s
 import { readPickupPointSelection, type PickupPointSelection } from "../../utils/pickup-point";
 
 interface CategoryProduct extends CampaignDto {
+  renderKey: string;
   skuId: string;
   productTitle: string;
   skuName: string;
@@ -54,6 +55,7 @@ Page({
         .filter((campaign) => isCampaignPurchasable(campaign) && context.selected && pickupPoint && campaign.serviceAreaId === context.selected.id && campaign.deliveryPlan?.pickupPointId === pickupPoint.id)
         .flatMap((campaign) => campaign.items.map((item) => ({
           ...campaign,
+          renderKey: `${campaign.id}:${item.skuId}`,
           skuId: item.skuId,
           productTitle: item.title,
           skuName: item.skuName,
@@ -85,7 +87,7 @@ Page({
     void wx.navigateTo({ url: `/pages/campaign/detail?id=${encodeURIComponent(event.currentTarget.dataset.id as string)}&skuId=${encodeURIComponent(event.currentTarget.dataset.sku as string)}` });
   },
   addToCart(event: WechatMiniprogram.BaseEvent) {
-    const item = this.data.allProducts.find((candidate) => candidate.skuId === event.currentTarget.dataset.sku);
+    const item = this.data.allProducts.find((candidate) => candidate.renderKey === event.currentTarget.dataset.key);
     if (!item || !this.data.area || !this.data.pickupPoint) return;
     const base: Omit<CartSnapshot, "items" | "updatedAt"> = { campaignId: item.id, campaignTitle: item.title, serviceAreaId: item.serviceAreaId, serviceAreaName: this.data.area.name, pickupPointId: this.data.pickupPoint.id, pickupPointName: this.data.pickupPoint.name, pickupPointAddress: this.data.pickupPoint.address };
     const existing = readCart();

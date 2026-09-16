@@ -1,7 +1,7 @@
 <view wx:if="{{loading}}" class="ui-view detail-state">正在加载商品…</view>
 <view wx:elif="{{error}}" class="ui-view detail-state detail-state--error"><text class="ui-text">{{error}}</text><button class="ui-button" size="mini" bindtap="retryLoad">重新加载</button></view>
 <view wx:else class="ui-view detail">
-  <view class="ui-view product-hero"><view class="ui-image"><product-image src="{{product.imageUrl}}" /></view><text class="ui-text">{{product.origin}} · 产地直采</text></view>
+  <view class="ui-view product-hero"><view class="ui-image"><product-image src="{{product.imageUrl}}" image-mode="aspectFit" /></view><text class="ui-text">{{product.origin}} · 产地直采</text></view>
   <view class="ui-view product-summary"><view class="ui-view price-row"><text class="ui-text price"><text class="ui-text">¥</text>{{priceText}}</text><text class="ui-text price-tag">团购价</text><text class="ui-text sold">已支付 {{product.paidQuantity || 0}} 件</text></view><text class="ui-text product-summary__title">{{product.title}}</text><text class="ui-text product-summary__desc">{{product.skuName}} · 团期集中送达</text></view>
   <view class="ui-view group-card">
     <view class="ui-view group-card__head"><text class="ui-text">本团成团进度</text><text class="ui-text">已支付 {{campaignSoldQuantity}} / {{campaign.minTotalQuantity}} 件</text></view>
@@ -14,8 +14,8 @@
   <view class="ui-view pickup-card">
     <text class="ui-text pickup-card__heading">本团固定自提点</text>
     <view class="ui-view pickup-card__row">
-      <image class="ui-image pickup-card__asset" src="/assets/pickup-point.jpg" mode="aspectFill" bindtap="openPickup"/>
-      <view class="ui-view pickup-card__content" bindtap="openPickup"><text class="ui-text">{{area ? deliveryTitle : '请选择本团收货区域'}}</text><text class="ui-text">{{deliveryNote}}</text><text class="ui-text" wx:if="{{pickupPoint.businessHours}}">{{pickupPoint.businessHours}} · 点位负责人 {{pickupPoint.contactName || '未配置'}}</text></view>
+      <view class="ui-view pickup-card__asset" bindtap="openPickup"><image class="ui-image pickup-card__icon" src="/assets/location-green.png" mode="aspectFit"/></view>
+      <view class="ui-view pickup-card__content" bindtap="openPickup"><text class="ui-text">{{area ? deliveryTitle : '请选择本团收货区域'}}</text><text class="ui-text">{{deliveryNote}}</text><text class="ui-text" wx:if="{{pickupPoint.businessHours}}">{{pickupPoint.businessHours}}</text><text class="ui-text" wx:if="{{pickupPoint.contactName}}">点位负责人 {{pickupPoint.contactName}}</text></view>
       <view class="ui-view pickup-card__tools"><text class="ui-text" catchtap="openLocation">导航</text><text class="ui-text" catchtap="callPickupPoint">电话</text></view>
     </view>
   </view>

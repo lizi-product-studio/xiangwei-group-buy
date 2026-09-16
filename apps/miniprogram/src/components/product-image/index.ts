@@ -3,6 +3,7 @@ import { resetProductImageState } from '../../utils/product-image-state';
 Component({
   properties: {
     src: { type: String, value: '' },
+    imageMode: { type: String, value: 'aspectFill' },
     // Parents increment this when a wx:for list is filtered back to a prior
     // view. This forces the image state to be reset even when src is identical.
     refreshKey: { type: Number, value: 0 },

@@ -75,4 +75,16 @@ describe('mini-program upload package assets', () => {
       expect(statSync(join(sourceRoot, 'assets', filename)).size).toBeLessThan(20 * 1024);
     }
   });
+
+  it('renders uploaded product images without cropping and does not invent pickup-point photos', () => {
+    const homeMarkup = readFileSync(join(sourceRoot, 'pages/home/index.wxml'), 'utf8');
+    const categoryMarkup = readFileSync(join(sourceRoot, 'pages/category/index.wxml'), 'utf8');
+    const detailMarkup = readFileSync(join(sourceRoot, 'pages/campaign/detail.wxml'), 'utf8');
+
+    expect(homeMarkup).toContain('image-mode="aspectFit"');
+    expect(categoryMarkup).toContain('image-mode="aspectFit"');
+    expect(detailMarkup).toContain('image-mode="aspectFit"');
+    expect(detailMarkup).toContain('/assets/location-green.png');
+    expect(detailMarkup).not.toContain('/assets/pickup-point.jpg');
+  });
 });

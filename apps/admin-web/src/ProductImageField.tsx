@@ -6,7 +6,7 @@ export function ProductPicture({ src, size = 64 }: { src: string | null; size?: 
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   return <div style={{ width: size, height: size, flex: "none", borderRadius: 8, overflow: "hidden", background: "#f1f2ee", display: "grid", placeItems: "center", color: "#818780", fontSize: 12 }}>
     {src && failedSrc !== src
-      ? <img src={src} alt="商品主图" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={() => setFailedSrc(src)} />
+      ? <img src={src} alt="商品主图" style={{ width: "100%", height: "100%", objectFit: "contain" }} onError={() => setFailedSrc(src)} />
       : <span>暂无图片</span>}
   </div>;
 }
@@ -49,7 +49,7 @@ export function ProductImageField({ value, onChange, onBusyChange, disabled, pur
     <input ref={input} style={{ display: "none" }} type="file" aria-label={`上传${purpose}`} accept="image/jpeg,image/png,image/webp" disabled={busy || disabled}
       onChange={event => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void upload(file); }} />
     <Button disabled={disabled} loading={busy} onClick={() => input.current?.click()}>{busy ? "正在上传" : value ? `更换${purpose}` : `上传${purpose}`}</Button>
-    <span style={{ color: "#818780", fontSize: 12 }}>{purpose}公开展示。支持 JPG、PNG、WebP，不超过 5 MB；{required ? "必须上传。" : "可不上传。"}</span>
+    <span style={{ color: "#818780", fontSize: 12 }}>{purpose}公开展示。上传后会自动旋转、压缩并转为 WebP，小程序会完整显示图片；建议使用 1:1 或 4:3 构图。支持 JPG、PNG、WebP，不超过 5 MB；{required ? "必须上传。" : "可不上传。"}</span>
     {busy && <span role="status">正在上传处理，请稍候…</span>}
     {error && <Alert type="error" title={error} showIcon />}
     {value && <Button disabled={busy || disabled} onClick={() => { setError(""); onChange(null); }}>移除{purpose}</Button>}
