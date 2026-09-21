@@ -22,8 +22,13 @@ it("does not show withdrawal success after the follow-up refresh expires the ses
   }));
   vi.doMock("../../utils/auth-navigation", () => ({ navigateToCustomerLogin }));
   vi.stubGlobal("wx", { showToast });
-  let page: any;
-  vi.stubGlobal("Page", (definition: any) => { page = definition; });
+  type InterestPage = {
+    data: Record<string, unknown>;
+    setData: (patch: Record<string, unknown>) => void;
+    confirmWithdraw: (id: string) => Promise<void>;
+  };
+  let page!: InterestPage;
+  vi.stubGlobal("Page", (definition: InterestPage) => { page = definition; });
   await import("./index");
   page.setData = (patch: Record<string, unknown>) => Object.assign(page.data, patch);
   await page.confirmWithdraw("interest-1");
