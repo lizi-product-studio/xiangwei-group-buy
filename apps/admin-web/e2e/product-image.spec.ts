@@ -69,7 +69,7 @@ test('商品主图真实上传、公开读取、编辑保留与移除', async ({
   await expect(dialog).not.toBeVisible();
   await expect(row.getByRole('img', { name: '商品主图', exact: true })).toHaveAttribute('src', imageUrl);
   await row.getByRole('button', { name: /编\s*辑/ }).click();
-  await page.getByRole('button', { name: '移除主图' }).click();
+  await page.getByRole('button', { name: '移除商品主图' }).click();
   await page.getByRole('button', { name: '保存商品' }).click();
   await expect(dialog).not.toBeVisible();
   await expect(row.getByText('暂无图片')).toBeVisible();

@@ -61,8 +61,8 @@ test('网页草稿过期恢复、编辑开售、无引用删除与消费者只�
   await expect(editor).toContainText(productTitle);
   await editor.getByLabel('截单时间').fill(inputTime(1_800_000));
   await editor.getByLabel('计划发车时间').fill(inputTime(3_600_000));
-  await editor.getByLabel('预计到货开始').fill(inputTime(7_200_000));
-  await editor.getByLabel('预计到货结束').fill(inputTime(10_800_000));
+  await editor.getByLabel(/预计到货时段.*开始/).fill(inputTime(7_200_000));
+  await editor.getByLabel(/预计到货时段.*结束/).fill(inputTime(10_800_000));
   await editor.getByLabel('本团售价（元）').fill('16.50');
   await editor.getByRole('button', { name: '下一步：发布复核' }).click();
   const updated = page.waitForResponse(response => response.url().endsWith(`/api/v1/admin/campaigns/${expired.id}`) && response.request().method() === 'PATCH');

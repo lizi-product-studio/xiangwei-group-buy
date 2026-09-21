@@ -146,13 +146,13 @@ test("超管通过网页复核运输、发车、紧急纠正、订单详情和�
   await expect(planRow.getByRole("button", { name: "登记运输信息" })).toBeVisible();
   await planRow.getByRole("button", { name: "登记运输信息" }).click();
   await page.getByLabel("承运方").fill("网页验收车队");
-  await page.getByLabel("运输单号").fill("WEB-CAR-001");
+  await page.getByLabel("运单号（可选）").fill("WEB-CAR-001");
   await page.getByLabel("司机").fill("网页司机");
   await page.getByLabel("车牌").fill("京W00001");
   await page.locator('.ant-modal:visible button[type="submit"]').click();
   await expect(planRow.getByRole("button", { name: "编辑运输信息" })).toBeVisible();
   await planRow.getByRole("button", { name: "编辑运输信息" }).click();
-  await expect(page.getByLabel("运输单号")).toHaveValue("WEB-CAR-001");
+  await expect(page.getByLabel("运单号（可选）")).toHaveValue("WEB-CAR-001");
   await page.locator('.ant-modal:visible button[type="submit"]').click();
   await planRow.getByRole("button", { name: /确认发车|创建批次并发车/ }).click();
   const review = page.getByRole("dialog", { name: "发车前复核" });

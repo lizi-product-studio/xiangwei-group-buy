@@ -38,7 +38,7 @@ test('同一主图商品与网页开售团贯穿运输到货及分批核销（�
     expect(outgoing.headers()['x-demo-role']).toBeUndefined();
     if (!outgoing.url().endsWith('/product-images')) mutations.push({ path: new URL(outgoing.url()).pathname, body: outgoing.postDataJSON() ?? {} });
   });
-  const area = await post<{ id: string }>(request, '/api/v1/admin/service-areas', { regionCode: '110101' });
+  const area = await post<{ id: string; name: string }>(request, '/api/v1/admin/service-areas', { regionCode: '110101' });
   await post(request, `/api/v1/admin/service-areas/${area.id}/order-status`, { orderEnabled: true });
   const point = await post<{ id: string }>(request, '/api/v1/admin/pickup-points', {
     serviceAreaId: area.id, name: pointName, address: '东城区社区服务站 1 号', businessHours: '每日 09:00–20:00', pickupInstructions: '出示取货码', longitude: 116.4167, latitude: 39.9289,
@@ -76,14 +76,14 @@ test('同一主图商品与网页开售团贯穿运输到货及分批核销（�
   await page.getByRole('button', { name: '创建团期' }).click();
   await page.getByLabel('团期名称').fill(campaignTitle);
   const areaSelect = page.getByLabel('服务区域');
-  if (await areaSelect.count()) { await areaSelect.click(); await page.locator('.ant-select-item-option').last().click(); }
+  if (await areaSelect.count()) { await areaSelect.click(); await page.locator('.ant-select-item-option').filter({ hasText: area.name }).click(); }
   await page.getByLabel('固定自提点').locator('xpath=../..').click();
   await page.getByText(pointName, { exact: true }).last().click();
   const cutoffAt = Date.now() + 30_000;
   await page.getByLabel('截单时间').fill(dateInput(30_000));
   await page.getByLabel('计划发车时间').fill(dateInput(3_600_000));
-  await page.getByLabel('预计到货开始').fill(dateInput(7_200_000));
-  await page.getByLabel('预计到货结束').fill(dateInput(10_800_000));
+  await page.getByLabel(/预计到货时段.*开始/).fill(dateInput(7_200_000));
+  await page.getByLabel(/预计到货时段.*结束/).fill(dateInput(10_800_000));
   await page.getByLabel('商品', { exact: true }).click();
   await page.getByText(`${productTitle} · 一份 · 产地：本地农场`, { exact: true }).last().click();
   await page.getByLabel('本团售价（元）').fill('12.50');

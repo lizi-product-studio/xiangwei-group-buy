@@ -13,11 +13,11 @@
 
 | 编号 | 要求/问题 | 状态 | 责任人及证据 |
 |---|---|---|---|
-| REL-01 | 修复 MySQL snapshot 5 项资料默认字段断言失败，不降低数据契约 | 进行中 | 执行者；GitHub run 35550962278 |
+| REL-01 | 修复 MySQL snapshot 5 项资料默认字段断言失败，不降低数据契约 | 已修复并复验 | 执行者；真实集成21/21，当前CI check通过 |
 | REL-02 | lint、类型、单元、真实隔离 MySQL/Redis 集成、构建和浏览器正常/异常流程 | 进行中 | 执行者；需零隐瞒失败/跳过 |
-| REL-03 | 独立审核核心权限、金额/退款、并发核销、失败恢复和验收覆盖 | 待冻结版本 | 审核者 |
+| REL-03 | 独立审核核心权限、金额/退款、并发核销、失败恢复和验收覆盖 | dfeba12代码复核通过，浏览器与发布后验待完成 | 审核者 |
 | REL-04 | 核实生产日志、请求定位、脱敏、轮转与使用说明 | 进行中 | 主负责人 |
-| REL-05 | 审核通过后同步及服务器发布，备份/回滚和上线后核心检查 | 未开始 | 主负责人控制唯一发布窗口 |
+| REL-05 | 审核通过后同步及服务器发布，备份/回滚和上线后核心检查 | 源码已同步，候选API构建完成；因E2E失败暂停发布 | 主负责人控制唯一发布窗口 |
 | REL-06 | 微信隐私声明、真实授权与上传/审核/发布状态 | 待核实 | 平台依赖单独记录，不用 mock 替代 |
 
 ## 初审发现与当前证据
@@ -64,3 +64,16 @@
 - 执行候选dfeba123a963567e4aa4488ee08bcf5b3992dea4，桌面整合f9b351c，源码树均为aa15521d3e1357e0953166aed8867659477595c3。独立QA按冻结版本增量检查，QA03/06/10/12代码范围通过；真实MySQL专项9/9由执行者日志佐证，Chromium浏览器与实际部署日志后验仍待完成。
 - 当前测试机仅本轮专属MySQL/Redis与浏览器runner运行；生产健康检查各依赖仍ok。
 - 已知非阻塞边界：登录失效直接导航路径没有把401编号写入小程序最近失败入口；常规业务失败支持复制，不宣称所有入口都已覆盖。
+
+## 浏览器实际执行与发布暂停
+
+- 桌面候选f22109bb40fd86915c0ecb84c3883833e9c0811b、GitHub main 900525e4baf8af25dfc89765057582b025ff948a的源码树均为13f20a209ce3157725ab6a17462110bfee20fa61。内置连接器完成同步；CI run 35555159065的check及coverage通过，浏览器门禁执行中，不能称为CI全通过。
+- 测试机首次缺Chromium，安装依赖后已进入18项实际浏览器流程。发现6项控件定位失败：campaign-crud:54、community-ui:237、full-business-flow:85、governance-ui:290、operations-closure:149、pickup-location-recovery:77。部分是改版前标签，其他弹窗/表单定位需核对实际DOM。不能删去业务门禁断言，也不能把运行后的失败归为浏览器未安装。
+- 原始失败证据：测试机 `/root/release-20260921/test-results/*/trace.zip`。已交工程执行修复，并要求独立QA检查测试契约和增量修复。
+- 主负责人候选构建与执行者测试环境隔离：`/root/release-20260921-artifact-f22109b`。API镜像 `hometown-api:f22109bb40fd86915c0ecb84c3883833e9c0811b`，镜像ID `sha256:0fba6847bf5618af7cd91744f5d9aec883cb13aefe77478976e19517b0492e94`。构建前后源码manifest一致；receipt保存在该目录build-receipt.json。此包未部署，后续代码变更须重新绑定候选并验证。
+- 该候选源码归档SHA256 `2633cff05fc3e22fecdc01a85e80475ffb8de93c001823ae6bd8f10c2bc4f0dd`；manifest SHA256 `403d842c6cbf217e6fa762efdf53639bf0123e47e0a0108827ad48734f183eae`；API构建日志SHA256 `a2c6f9adc0318307d6527fd982e88caa464815646a417ecadb208aa5f45273c7`。
+- 发布辅助脚本增量审查后的当前摘要：build-admin-verified.py `e2122bf1f2577aa153fe104561db09d6912f587bad2544100bade8ee1aed5d04`；deploy.py `5536f004b90773a7e963cb36ee5f51ad01327128af531b0dc1a24d58b91d5132`（替代上文早期摘要）。后台静态包将按逐文件SHA256核验，不在生产运行后台Docker镜像。
+- 生产未切换API、后台或Nginx；未执行真实交易或清库。
+- 首轮测试机完整结果18项：9通过、9失败；原始失败包 `/root/release-20260921-artifact-f22109b/e2e-first-run-failed.tar.gz`（64,727,080 bytes），SHA256 `692c94e80fa557777304728631a0bdf536c3aeb6066e6173c770680021c8d983`。为保留失败证据独立归档，后续复跑不得替代此记录。
+- CI run35555159065最终失败：E2E6失败、1不稳定重试通过、11通过；正常检查及覆盖率均通过（API267、后台93、小程序153、契约28、领域5项测试）。额外发现GitHub artifact storage quota hit，报告上传失败，两个镜像构建步骤被跳过。
+- 报告上传可用性与业务门禁分开：quality.yml仅Upload Playwright evidence设continue-on-error；上传失败或报告缺文件显式warning及job摘要，if-no-files-found为warn。E2E、check、coverage、REQUIRE_INTEGRATION_TESTS及Docker构建仍为阻断检查。独立QA增量审查通过；摘要shell语法与失败/缺文件/成功三分支验证通过。本次发布必须另存匹配版本原始测试报告、位置与SHA256；CI绿色不代表报告已上传。

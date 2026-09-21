@@ -48,6 +48,10 @@ export default defineConfig({
       reuseExistingServer: false,
       env: {
         ...process.env,
+        // Keep the Vite/Ant Design runtime out of NODE_ENV=test. rc-util's
+        // test-only useId fallback reuses one id for every modal, which makes
+        // otherwise distinct dialog locators ambiguous in browser tests.
+        NODE_ENV: "development",
         VITE_AUTH_MODE: "bearer",
         VITE_API_TARGET: apiUrl,
       },

@@ -47,14 +47,34 @@ jobs:
       - name: Run community group-buying browser gate
         run: pnpm test:e2e
       - name: Upload Playwright evidence
+        id: upload_playwright_evidence
         if: always()
+        # Report storage availability is separate from the blocking browser gate.
+        # A failed upload must remain visible and requires alternative release evidence.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: playwright-community-group-buying-${{ github.run_id }}
           path: |
             playwright-report
             test-results
-          if-no-files-found: ignore
+          if-no-files-found: warn
           retention-days: 14
+      - name: Report Playwright evidence availability
+        if: always()
+        env:
+          UPLOAD_OUTCOME: ${{ steps.upload_playwright_evidence.outcome }}
+        run: |
+          if [ "$UPLOAD_OUTCOME" = 'success' ] && [ -s playwright-report/index.html ] && [ -n "$(find test-results -type f -size +0c -print -quit 2>/dev/null)" ]; then
+            echo 'Playwright report upload completed. This does not override the browser test result.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '::warning::Playwright report is unavailable or incomplete. Test results remain blocking. Release requires separately retained evidence from a verified matching test run.'
+            cat >> "$GITHUB_STEP_SUMMARY" <<'REPORT'
+          ### Playwright report upload unavailable
+
+          The artifact upload failed or report files are missing. This does not change any test, coverage, integration, or build result.
+          Before release, retain the raw Playwright report from a verified matching test run separately and record its location, source revision, and SHA-256 in the release record.
+          REPORT
+          fi
       - run: docker build -f apps/api/Dockerfile -t hometown-api:ci .
       - run: docker build -f apps/admin-web/Dockerfile -t hometown-admin:ci .

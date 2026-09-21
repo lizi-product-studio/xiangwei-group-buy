@@ -467,7 +467,8 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
   await logout(page);
   await loginInBrowser(page, operator.username, password);
   await page.getByRole("menuitem", { name: "区域开通意向", exact: true }).click();
-  const interestRow = page.getByRole("region", { name: "区域开通意向" }).getByRole("row").filter({ hasText: "朝阳区望京" });
+  const interestRow = page.getByRole("region", { name: "区域开通意向" }).locator(`tr[data-row-key="${areaInterest.id}"]`);
+  await expect(interestRow).toHaveCount(1);
   await expect(interestRow.getByText("139****0000", { exact: true })).toBeVisible();
   await interestRow.getByRole("button", { name: "登记已联系" }).click();
   const interestForm = page.getByRole("dialog", { name: "登记已联系" });
@@ -594,7 +595,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
 
   await page.getByRole("menuitem", { name: "团期管理" }).click();
   const postponedRow = page.getByRole("row").filter({ hasText: `P1-C 网页顺延团 ${suffix}` });
-  await postponedRow.getByRole("button", { name: "顺延团期" }).click();
+  await postponedRow.getByRole("button", { name: "调整团期", exact: true }).click();
   const postponeDialog = page.getByRole("dialog", { name: "顺延团期" });
   const fillDate = async (label: string, value: string) => {
     const control = postponeDialog.getByLabel(label);
