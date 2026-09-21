@@ -25,6 +25,7 @@ export interface PickupPoint {
   contactName: string;
   contactPhone: string;
   status: "ACTIVE" | "INACTIVE";
+  archivedAt?: string | null;
   capacityPerDay: number | null;
   createdAt: string;
 }
@@ -602,6 +603,8 @@ function adminErrorTextBase(error: unknown): string {
     "区域仍有进行中团期或未完成订单，不能暂停下单",
     "自提点仍有进行中团期、配送或授权负责人，不能停用",
     "存在进行中履约或有效点位负责人授权，不能停用自提点",
+    "自提点仍被进行中团期、待履约流程或未完成订单引用，不能删除",
+    "已删除自提点不可重新启用，请新建自提点",
     "分类仍被商品引用，只能停用，不能删除",
   ].find((candidate) => message.includes(candidate));
   if (businessMessage) return businessMessage;
@@ -910,6 +913,10 @@ export const api = {
       status?: "ACTIVE" | "INACTIVE";
     },
   ) => patch<PickupPoint>(`/api/v1/admin/pickup-points/${id}`, body),
+  deletePoint: (id: string) =>
+    request<{deleted: boolean; affectedStaffCount: number}>(`/api/v1/admin/pickup-points/${id}`, {
+      method: "DELETE",
+    }),
   uploadProductImage: (file: File, signal?: AbortSignal) => {
     if (!["image/jpeg", "image/png", "image/webp"].includes(file.type))
       return Promise.reject(new AdminApiError("请选择 JPG、PNG 或 WebP 图片"));

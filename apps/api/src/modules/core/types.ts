@@ -130,6 +130,7 @@ export interface PickupPoint {
   contactName: string;
   contactPhone: string;
   status: "ACTIVE" | "INACTIVE";
+  archivedAt?: string | null;
   capacityPerDay: number | null;
   createdAt: string;
 }

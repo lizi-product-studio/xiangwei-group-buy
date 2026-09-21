@@ -221,6 +221,7 @@ export interface CommerceStore {
   updateServiceAreaOrderEnabled(id: string, enabled: boolean): Promise<boolean>;
   listPickupPoints(serviceAreaId?: string): Promise<PickupPoint[]>;
   savePickupPoint(value: PickupPoint): Promise<void>;
+  deletePickupPoint(id: string): Promise<boolean>;
   listCatalogSkus(): Promise<CatalogSku[]>;
   getCatalogSku(id: string): Promise<CatalogSku | null>;
   saveCatalogSku(value: CatalogSku): Promise<void>;
@@ -986,6 +987,15 @@ export class MemoryStore implements CommerceStore {
   }
   public async savePickupPoint(v: PickupPoint) {
     this.data.points.set(v.id, clone(v));
+  }
+  public async deletePickupPoint(id: string) {
+    const point = this.data.points.get(id);
+    if (!point) return false;
+    if (point.archivedAt) return true;
+    this.data.points.set(id, clone({...point, status: "INACTIVE", archivedAt: new Date().toISOString()}));
+    for (const [key, value] of this.data.staffPoints)
+      if (value.pickupPointId === id) this.data.staffPoints.delete(key);
+    return true;
   }
   public async listCatalogSkus() {
     return clone([...this.data.catalog.values()]);

@@ -35,13 +35,13 @@ const staffNo=():string=>`STF-${new Date().toISOString().replace(/[-:.TZ]/g,'').
 export class StaffService {
   public constructor(private readonly store:CommerceStore) {}
 
-  private async validatePointScope(store:CommerceStore,role:InternalStaffRole,pickupPointIds:string[]):Promise<string[]> {
+  private async validatePointScope(store:CommerceStore,role:InternalStaffRole,pickupPointIds:string[],allowEmpty=false):Promise<string[]> {
     const ids=uniqueIds(pickupPointIds);
     if(role!=='PICKUP_MANAGER'){
       if(ids.length)throw new BusinessError('VALIDATION_ERROR','只有自提点负责人可以绑定自提点',400);
       return [];
     }
-    if(!ids.length)throw new BusinessError('VALIDATION_ERROR','自提点负责人至少需要绑定一个启用自提点',400);
+    if(!ids.length&&!allowEmpty)throw new BusinessError('VALIDATION_ERROR','自提点负责人至少需要绑定一个启用自提点',400);
     const points=await store.listPickupPoints();
     for(const id of ids){
       const point=points.find((item)=>item.id===id);
@@ -144,7 +144,7 @@ export class StaffService {
       const requestedStatus=input.status??before.status;
       // Point scope belongs exclusively to a pickup manager. A hidden form
       // value from a previous role must never survive a role change.
-      const pointIds=await this.validatePointScope(store,nextRole,nextRole==='PICKUP_MANAGER'?(input.pickupPointIds??currentPointIds):[]);
+      const pointIds=await this.validatePointScope(store,nextRole,nextRole==='PICKUP_MANAGER'?(input.pickupPointIds??currentPointIds):[],true);
       const credential=await store.findAdminCredentialByUserId(userId);
       if(!credential)throw new BusinessError('RESOURCE_NOT_FOUND','员工登录凭据不存在',404);
       if(input.status==='PASSWORD_SETUP_REQUIRED')throw new BusinessError('INVALID_STATE_TRANSITION','账号密码状态只能由系统管理',409);

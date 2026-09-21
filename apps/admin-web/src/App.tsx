@@ -3400,10 +3400,10 @@ function Areas({
       </>}
       {view !== "areas" && <>
       <Typography.Title level={4}>自提点</Typography.Title>
-      <ListFilters label="自提点" query={pointQuery} onQuery={setPointQuery} status={pointStatus} onStatus={setPointStatus} statuses={[{value:"ACTIVE",label:"启用"},{value:"INACTIVE",label:"停用"}]} />
+      <ListFilters label="自提点" query={pointQuery} onQuery={setPointQuery} status={pointStatus} onStatus={setPointStatus} statuses={[{value:"ACTIVE",label:"启用"},{value:"INACTIVE",label:"停用"},{value:"ARCHIVED",label:"已删除"}]} />
       <Table
         rowKey="id"
-        dataSource={points.filter(v=>(pointStatus === "ALL" || v.status === pointStatus) && matchesKeyword(pointQuery,v.name,v.address,v.contactName,areas.find(area=>area.id===v.serviceAreaId)?.name))}
+        dataSource={points.filter(v=>(pointStatus === "ALL" || (v.archivedAt ? "ARCHIVED" : v.status) === pointStatus) && matchesKeyword(pointQuery,v.name,v.address,v.contactName,areas.find(area=>area.id===v.serviceAreaId)?.name))}
         locale={{ emptyText: "暂无自提点，请先选择服务区域并新增" }}
         columns={[
           { title: "名称", dataIndex: "name" },
@@ -3416,10 +3416,10 @@ function Areas({
                 ? `${v.contactName} ${v.contactPhone}`.trim()
                 : "未关联负责人",
           },
-          { title: "状态", render: (_, v) => <Status value={v.status} /> },
+          { title: "状态", render: (_, v) => v.archivedAt ? <Tag color="default">已删除</Tag> : <Status value={v.status} /> },
           {
             title: "操作",
-            render: (_, v) => (
+            render: (_, v) => v.archivedAt ? <Typography.Text type="secondary">历史保留</Typography.Text> : (
               <Space>
                 <Button onClick={() => startEditPoint(v)}>编辑</Button>
                 <Button
@@ -3433,6 +3433,33 @@ function Areas({
                   }}
                 >
                   {v.status === "ACTIVE" ? "停用" : "启用"}
+                </Button>
+                <Button
+                  danger
+                  onClick={() => {
+                    Modal.confirm({
+                      title: "确认删除自提点？",
+                      content: "仅无进行中团期、待履约流程和未完成订单的自提点可以删除；已结束订单历史会保留。删除后关联负责人会解除该点位授权并需要重新登录。",
+                      okText: "确认删除",
+                      okButtonProps: { danger: true },
+                      cancelText: "取消",
+                      onOk: async () => {
+                        if (submitting) return;
+                        setSubmitting(true);
+                        try {
+                          await api.deletePoint(v.id);
+                          await refreshAfterMutation(reload, message, "自提点已删除，关联负责人授权已释放");
+                        } catch (error) {
+                          message.error(adminErrorNotice(error, mutationErrorText(error)));
+                          throw error;
+                        } finally {
+                          setSubmitting(false);
+                        }
+                      },
+                    });
+                  }}
+                >
+                  删除
                 </Button>
               </Space>
             ),
@@ -5247,6 +5274,10 @@ function Settings({
     }
     if (value.role !== editing.role) patch.role = value.role;
     if (scopeChanged) patch.pickupPointIds = nextPointIds;
+    if ((patch.role || patch.pickupPointIds) && !value.reason?.trim()) {
+      message.error("角色或授权点位变更必须填写原因");
+      return;
+    }
     if ((patch.role || patch.pickupPointIds) && value.reason?.trim()) {
       patch.reason = value.reason.trim();
     }
@@ -5306,6 +5337,14 @@ function Settings({
   const pointOptions = points
     .filter((v) => v.status === "ACTIVE")
     .map((v) => ({ value: v.id, label: v.name }));
+  const editingPointOptions = editing
+    ? [
+        ...pointOptions,
+        ...editing.pickupPointIds
+          .filter((id) => !pointOptions.some((option) => option.value === id))
+          .map((id) => ({ value: id, label: `已失效点位（${id}，请选择移除）` })),
+      ]
+    : pointOptions;
   return (
     <>
       <PageTitle
@@ -5336,7 +5375,7 @@ function Settings({
           { title: "角色", render: (_, v) => displayLabel(v.role) },
           {
             title: "管理自提点",
-            render: (_, v) => v.role === "SUPER_ADMIN" ? "全部" : v.role === "PICKUP_MANAGER" ? `${v.pickupPointIds.length}个` : "不适用",
+            render: (_, v) => v.role === "SUPER_ADMIN" ? "全部" : v.role === "PICKUP_MANAGER" ? v.pickupPointIds.length ? `${v.pickupPointIds.length}个` : "未分配自提点" : "不适用",
           },
           { title: "状态", render: (_, v) => <Status value={v.status} /> },
           {
@@ -5469,19 +5508,34 @@ function Settings({
                 name="pickupPointIds"
                 label="授权自提点"
                 extra="授权后，该负责人的姓名和手机号会作为自提点联系方式，供消费者拨打"
-                rules={[{ required: true }]}
+                rules={!editing ? [{ required: true, message: "请选择至少一个启用自提点" }] : []}
               >
                 <Select
                   mode="multiple"
                   getPopupContainer={(node) => node.parentElement ?? document.body}
                   optionFilterProp="label"
-                  options={pointOptions}
+                  options={editingPointOptions}
                 />
               </Form.Item>
             ) : null}
           </Form.Item>
-          <Form.Item name="reason" label="变更原因">
-            <Input.TextArea rows={2} placeholder="角色或点位变更时必填" />
+          <Form.Item noStyle shouldUpdate>
+            {({ getFieldValue }) => {
+              const roleChanged = getFieldValue("role") !== editing?.role;
+              const nextPointIds = [...(getFieldValue("pickupPointIds") ?? [])].sort();
+              const currentPointIds = [...(editing?.pickupPointIds ?? [])].sort();
+              const scopeChanged = JSON.stringify(nextPointIds) !== JSON.stringify(currentPointIds);
+              const required = Boolean(editing && (roleChanged || scopeChanged));
+              return (
+                <Form.Item
+                  name="reason"
+                  label="变更原因"
+                  rules={required ? [{ required: true, min: 2, message: "角色或授权点位变更时必须填写原因" }] : [{ min: 2, message: "变更原因至少填写 2 个字" }]}
+                >
+                  <Input.TextArea rows={2} placeholder={required ? "本次变更必须填写原因" : "角色或点位变更时必填"} />
+                </Form.Item>
+              );
+            }}
           </Form.Item>
           <Button type="primary" htmlType="submit" loading={submitting}>保存并使旧会话失效</Button>
         </Form>

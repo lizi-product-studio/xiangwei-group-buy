@@ -1029,7 +1029,7 @@ export async function buildApp(
     );
     if (!serviceArea)
       throw new BusinessError("RESOURCE_NOT_FOUND", "服务区域不存在", 404);
-    const existingPoints = await pointStore.listPickupPoints();
+    const existingPoints = (await pointStore.listPickupPoints()).filter((point) => !point.archivedAt);
     const location = await validatePickupPointLocation({
       adapter: reverseLocationAdapter,
       serviceArea,
@@ -1141,6 +1141,8 @@ export async function buildApp(
       );
       if (!before)
         throw new BusinessError("RESOURCE_NOT_FOUND", "自提点不存在", 404);
+      if (before.archivedAt && input.status === "ACTIVE")
+        throw new BusinessError("INVALID_STATE_TRANSITION", "已删除自提点不可重新启用，请新建自提点", 409);
       const requested = { ...before, ...input } as PickupPoint;
       const locationChanged = hasPickupLocationVerificationTrigger(
         before,
@@ -1257,6 +1259,67 @@ export async function buildApp(
       throw duplicateError(result.candidates);
     }
     return { data: result.after };
+  });
+  app.delete("/api/v1/admin/pickup-points/:id", async (request) => {
+    const actor = requireActor(request, ["OPERATOR", "SUPER_ADMIN"]);
+    const id = identifierSchema.parse((request.params as { id: string }).id);
+    const result = await store.transaction(async (transactionStore) => {
+      const before = (await transactionStore.listPickupPoints()).find((point) => point.id === id);
+      if (!before) throw new BusinessError("RESOURCE_NOT_FOUND", "自提点不存在", 404);
+      if (before.archivedAt) throw new BusinessError("INVALID_STATE_TRANSITION", "自提点已删除，请勿重复操作", 409);
+      const [campaigns, plans, orders, assignments, staff] = await Promise.all([
+        transactionStore.listCampaigns(),
+        transactionStore.listDeliveryPlans(),
+        transactionStore.listOrders(Number.MAX_SAFE_INTEGER),
+        transactionStore.listStaffPickupPointAssignments(),
+        transactionStore.listInternalStaff(),
+      ]);
+      const campaignById = new Map(campaigns.map((campaign) => [campaign.id, campaign]));
+      const referencedPlans = plans.filter((plan) => plan.pickupPointId === id);
+      const inProgressPlans = referencedPlans.filter((plan) => {
+        const campaign = campaignById.get(plan.campaignId);
+        return ["SITE_CONFIRMED", "VEHICLE_BOOKED", "IN_TRANSIT"].includes(plan.status)
+          || ["OPEN", "CLOSING", "LOCKED", "FULFILLING", "POSTPONED"].includes(campaign?.status ?? "");
+      });
+      const unfinishedOrders = orders.filter((order) =>
+        order.pickupPointId === id && !["CANCELLED", "REFUNDED", "PICKED_UP", "COMPLETED"].includes(order.status),
+      );
+      if (inProgressPlans.length || unfinishedOrders.length) {
+        throw new BusinessError(
+          "RESOURCE_IN_USE",
+          "自提点仍被进行中团期、待履约流程或未完成订单引用，不能删除",
+          409,
+          {deliveryPlanCount: inProgressPlans.length, unfinishedOrderCount: unfinishedOrders.length},
+        );
+      }
+      const affectedAssignments = assignments.filter((assignment) => assignment.pickupPointId === id);
+      const assignmentsByStaff = new Map<string, typeof assignments>();
+      for (const assignment of assignments) {
+        const values = assignmentsByStaff.get(assignment.staffUserId) ?? [];
+        values.push(assignment);
+        assignmentsByStaff.set(assignment.staffUserId, values);
+      }
+      const staffById = new Map(staff.map((member) => [member.userId, member]));
+      const now = new Date().toISOString();
+      for (const staffUserId of new Set(affectedAssignments.map((assignment) => assignment.staffUserId))) {
+        const member = staffById.get(staffUserId);
+        const remaining = (assignmentsByStaff.get(staffUserId) ?? []).filter((assignment) => assignment.pickupPointId !== id);
+        await transactionStore.replaceStaffPickupPointAssignments(staffUserId, remaining);
+        if (!member) continue;
+        const credential = await transactionStore.findAdminCredentialByUserId(staffUserId);
+        const nextVersion = Math.max(member.authorizationVersion, credential?.authorizationVersion ?? 0) + 1;
+        await transactionStore.saveInternalStaff({...member, authorizationVersion: nextVersion, updatedAt: now});
+        await transactionStore.replaceUserRoles(staffUserId, [member.role], nextVersion);
+        await transactionStore.deleteAuthSessionsByUser(staffUserId);
+      }
+      const deleted = await transactionStore.deletePickupPoint(id);
+      if (!deleted) throw new BusinessError("RESOURCE_NOT_FOUND", "自提点不存在", 404);
+      await auditInTransaction(transactionStore, request, actor.userId, "PICKUP_POINT_DELETED", "PICKUP_POINT", id, before, {
+        releasedStaffUserIds: [...new Set(affectedAssignments.map((assignment) => assignment.staffUserId))],
+      });
+      return {deleted, affectedStaffCount: new Set(affectedAssignments.map((assignment) => assignment.staffUserId)).size};
+    });
+    return {data: result};
   });
   app.post("/api/v1/admin/pickup-points/batch", async (request, reply) => {
     const actor = requireActor(request, ["OPERATOR", "SUPER_ADMIN"]);
