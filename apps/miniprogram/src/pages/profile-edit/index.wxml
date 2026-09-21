@@ -7,11 +7,10 @@
   <view wx:else class="profile-edit__content">
     <view class="profile-edit__card profile-edit__card--avatar">
       <text class="profile-edit__label">头像</text>
-      <button class="profile-edit__avatar-button" open-type="chooseAvatar" bindchooseavatar="chooseAvatar">
-        <image wx:if="{{avatarUrl}}" class="profile-edit__avatar" src="{{avatarUrl}}" mode="aspectFill"/>
-        <image wx:else class="profile-edit__avatar" src="/assets/user-gray.png" mode="aspectFit"/>
-        <view class="profile-edit__avatar-copy"><text class="profile-edit__avatar-action">更换头像</text><text class="profile-edit__hint">仅在你主动选择后上传</text></view>
-      </button>
+      <view class="profile-edit__avatar-row">
+        <image class="profile-edit__avatar" src="/assets/user-gray.png" mode="aspectFit"/>
+        <text class="profile-edit__avatar-caption">默认头像</text>
+      </view>
     </view>
     <view class="profile-edit__card profile-edit__card--field">
       <text class="profile-edit__label">姓名</text>

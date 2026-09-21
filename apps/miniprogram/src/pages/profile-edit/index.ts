@@ -10,7 +10,6 @@ function emptyProfileData() {
   return {
     profileLoaded: false,
     displayName: "",
-    avatarUrl: "",
     avatarRef: "",
     phoneNumber: "",
     profileVersion: 0,
@@ -33,14 +32,8 @@ Page({
     }
     try {
       const profile = await api.getMyProfile();
-      const avatarUrl = profile.avatarUrl
-        ? await api.downloadMyProfileImage(profile.avatarUrl).catch((error) => {
-            if (error instanceof AuthExpiredError) throw error;
-            return "";
-          })
-        : "";
       if (!loadCoordinator.isCurrent(loadGuard, customerAuth.captureSessionEpoch()) || !customerAuth.isLoggedIn()) return;
-      this.setData({ profileLoaded: true, displayName: profile.displayName ?? "", avatarRef: profile.avatarUrl ?? "", avatarUrl, phoneNumber: profile.phoneNumber ?? "未绑定手机号", profileVersion: profile.profileVersion, loading: false });
+      this.setData({ profileLoaded: true, displayName: profile.displayName ?? "", avatarRef: profile.avatarUrl ?? "", phoneNumber: profile.phoneNumber ?? "未绑定手机号", profileVersion: profile.profileVersion, loading: false });
     } catch (error) {
       const ownExpiry = error instanceof AuthExpiredError &&
         error.sessionWasCleared &&
@@ -59,28 +52,6 @@ Page({
     }
   },
   onNameInput(event: WechatMiniprogram.Input) { this.setData({ displayName: event.detail.value }); },
-  async chooseAvatar(event: { detail: { avatarUrl: string } }) {
-    const path = event.detail.avatarUrl;
-    if (!path) return;
-    const action = actionCoordinator.begin(customerAuth.captureSessionEpoch());
-    const current = () => actionCoordinator.isCurrent(action, customerAuth.captureSessionEpoch()) && customerAuth.isLoggedIn();
-    if (!current()) return;
-    this.setData({ saving: true, error: "" });
-    try {
-      const result = await api.uploadProfileImage(path);
-      if (!current()) return;
-      this.setData({ avatarRef: result.imageUrl, avatarUrl: path });
-      void wx.showToast({ title: "头像已上传", icon: "success" });
-    } catch (error) {
-      if (error instanceof AuthExpiredError) {
-        if (!isOwnedAuthExpiry(error, action, customerAuth.captureSessionEpoch()) || !actionCoordinator.isActive(action)) return;
-        this.setData({ saving: false, error: "", ...emptyProfileData() });
-        navigateToCustomerLogin("profile", "/pages/profile/index");
-        return;
-      }
-      if (current()) this.setData({ error: customerErrorMessage(error, "头像上传失败，请稍后重试") });
-    } finally { if (current()) this.setData({ saving: false }); }
-  },
   async saveProfile() {
     const displayName = this.data.displayName.trim();
     if (!displayName) { this.setData({ error: "请输入姓名" }); return; }

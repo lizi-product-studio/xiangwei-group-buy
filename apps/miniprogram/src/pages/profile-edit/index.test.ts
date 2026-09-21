@@ -4,6 +4,7 @@ type ProfileEditPage = {
   data: Record<string, unknown>;
   setData: (patch: Record<string, unknown>) => void;
   onLoad: () => void;
+  saveProfile: () => Promise<void>;
   loadProfile: () => Promise<void>;
   authorizePhone: (event: { detail: { errMsg: string; code?: string } }) => Promise<void>;
 };
@@ -14,7 +15,7 @@ describe("profile editor session recovery", () => {
     vi.unstubAllGlobals();
   });
 
-  async function fixture(options: { loggedIn?: boolean; expired?: boolean; emptyName?: boolean } = {}) {
+  async function fixture(options: { loggedIn?: boolean; expired?: boolean; emptyName?: boolean; legacyAvatar?: string } = {}) {
     let epoch = 4;
     class ExpiredError extends Error {
       readonly sessionWasCleared: boolean;
@@ -27,6 +28,8 @@ describe("profile editor session recovery", () => {
       }
     }
     const navigateToCustomerLogin = vi.fn();
+    const downloadMyProfileImage = vi.fn();
+    const updateMyProfile = vi.fn(async (payload) => ({ ...payload, profileVersion: 2 }));
     vi.doMock("../../utils/api", () => ({
       AuthExpiredError: ExpiredError,
       customerErrorMessage: (_error: unknown, fallback: string) => fallback,
@@ -40,9 +43,10 @@ describe("profile editor session recovery", () => {
             epoch += 1;
             throw new ExpiredError(4, true);
           }
-          return { displayName: options.emptyName ? "" : "微信用户", avatarUrl: null, phoneNumber: "199****9869", profileVersion: 1 };
+          return { displayName: options.emptyName ? "" : "微信用户", avatarUrl: options.legacyAvatar ?? null, phoneNumber: "199****9869", profileVersion: 1 };
         },
-        downloadMyProfileImage: vi.fn(),
+        downloadMyProfileImage,
+        updateMyProfile,
       },
     }));
     vi.doMock("../../utils/auth-navigation", () => ({ navigateToCustomerLogin }));
@@ -52,7 +56,7 @@ describe("profile editor session recovery", () => {
     await import("./index");
     if (!page) throw new Error("profile edit page was not registered");
     page.setData = (patch) => Object.assign(page!.data, patch);
-    return { page, navigateToCustomerLogin };
+    return { page, navigateToCustomerLogin, downloadMyProfileImage, updateMyProfile };
   }
 
   it("routes a signed-out visitor through the shared login intent instead of keeping the editor open", async () => {
@@ -65,12 +69,12 @@ describe("profile editor session recovery", () => {
 
   it("clears profile fields and opens login when a stored token receives 401", async () => {
     const { page, navigateToCustomerLogin } = await fixture({ expired: true });
-    Object.assign(page.data, { displayName: "旧账号", avatarUrl: "old", phoneNumber: "199****9869", profileVersion: 8 });
+    Object.assign(page.data, { displayName: "旧账号", avatarRef: "old", phoneNumber: "199****9869", profileVersion: 8 });
 
     await page.loadProfile.call(page);
 
     expect(navigateToCustomerLogin).toHaveBeenCalledWith("profile", "/pages/profile/index");
-    expect(page.data).toMatchObject({ loading: false, displayName: "", avatarUrl: "", phoneNumber: "", profileVersion: 0 });
+    expect(page.data).toMatchObject({ loading: false, displayName: "", avatarRef: "", phoneNumber: "", profileVersion: 0 });
   });
 
   it("keeps a loaded empty-name profile and bound phone when replacement is cancelled", async () => {
@@ -78,5 +82,17 @@ describe("profile editor session recovery", () => {
     await page.loadProfile();
     await page.authorizePhone({ detail: { errMsg: "getPhoneNumber:fail user deny" } });
     expect(page.data).toMatchObject({ profileLoaded: true, displayName: "", phoneNumber: "199****9869", error: "本次更换已取消，原手机号未变更" });
+  });
+
+  it("ignores historical avatars for display and preserves them when saving the name", async () => {
+    const legacyAvatar = "/api/v1/profile-images/old.webp";
+    const { page, downloadMyProfileImage, updateMyProfile } = await fixture({ legacyAvatar });
+    await page.loadProfile();
+    expect(downloadMyProfileImage).not.toHaveBeenCalled();
+    expect(page.data).toMatchObject({ profileLoaded: true, displayName: "微信用户" });
+    page.setData({ displayName: "新的姓名" });
+    await page.saveProfile();
+    expect(updateMyProfile).toHaveBeenCalledWith({ displayName: "新的姓名", avatarUrl: legacyAvatar, expectedVersion: 1 });
+    expect(page.data.profileVersion).toBe(2);
   });
 });

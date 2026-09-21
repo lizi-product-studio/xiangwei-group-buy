@@ -26,7 +26,6 @@ Page({
     loading: true,
     error: "",
     userName: "微信用户",
-    avatarUrl: "",
     phoneNumber: "",
     loggedIn: false,
     wechatMode: false,
@@ -73,7 +72,6 @@ Page({
       loggedIn,
       wechatMode: customerAuth.isWechatMode(),
       userName: "微信用户",
-      avatarUrl: "",
       phoneNumber: "",
       orderTotal: 0,
       counts: { pending: 0, active: 0, ready: 0, afterSale: 0 },
@@ -108,14 +106,8 @@ Page({
           counts.active += 1;
         else if (order.status === "READY_FOR_PICKUP") counts.ready += 1;
       }
-      const avatarUrl = profile?.avatarUrl
-        ? await api.downloadMyProfileImage(profile.avatarUrl).catch((error) => {
-            if (error instanceof AuthExpiredError) throw error;
-            return "";
-          })
-        : "";
       if (!loadCoordinator.isCurrent(loadGuard, customerAuth.captureSessionEpoch()) || !customerAuth.isLoggedIn()) return;
-      this.setData({ orderTotal: orders.length, counts, userName: profile?.displayName || "微信用户", avatarUrl, phoneNumber: profile?.phoneNumber ?? "" });
+      this.setData({ orderTotal: orders.length, counts, userName: profile?.displayName || "微信用户", phoneNumber: profile?.phoneNumber ?? "" });
     } catch (error) {
       const ownExpiry = error instanceof AuthExpiredError &&
         error.sessionWasCleared &&
