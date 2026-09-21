@@ -36,10 +36,10 @@ docker inspect --format '{{.State.Health.Status}}' hometown-food-api-1
 ## 留存与隐私
 
 - 2026-09-21 实测生产 Docker API 日志采用 `json-file`，每份最大 10 MB、最多 3 份（按容量而非天数）。Nginx 每日轮转、最多 10 份、压缩旧日志。
-- 本轮候选 Nginx 配置 `infra/nginx.host-api.conf` 的 access log 仅记录 `$uri`，不记录 query、body、cookie、authorization、referrer。请求编号取后端 `X-Request-Id`；Nginx 自行产生的响应可能无后端编号。
+- 2026-09-21 已部署 Nginx 配置 `infra/nginx.host-api.conf` 的 access log 仅记录 `$uri`，不记录 query、body、cookie、authorization、referrer。请求编号取后端 `X-Request-Id`；Nginx 自行产生的响应可能无后端编号。
 - 新后台取货码查询应使用 POST body；旧版本产生的历史日志可能包含 query，不能宣传历史数据已经脱敏。Nginx error log 是标准诊断格式，可能包含原始请求行，读取和导出时同样需要控制访问并脱敏。
 - 日志只供获授权维护人员排障，不应通过公网静态目录暴露。向外分享日志前再次检查；不要直接导出生产请求 body 或环境变量。
-- 上线后实际格式、版本与测试编号回查证据记录在 `task-20260921-release-verification.md`；候选配置存在不代表已部署。
+- 上线后已实测 API/Nginx 编号联查与 query 脱敏，实际版本与测试编号回查证据记录在 `task-20260921-release-verification.md`。
 
 ## 回退与留证
 
