@@ -8,7 +8,7 @@
     <view class="profile-edit__card profile-edit__card--avatar">
       <text class="profile-edit__label">头像</text>
       <view class="profile-edit__avatar-row">
-        <image class="profile-edit__avatar" src="/assets/user-gray.png" mode="aspectFit"/>
+        <image class="profile-edit__avatar" src="/assets/avatar-persimmon.png" mode="aspectFit"/>
         <text class="profile-edit__avatar-caption">默认头像</text>
       </view>
     </view>

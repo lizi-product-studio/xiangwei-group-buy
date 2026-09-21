@@ -46,3 +46,12 @@
 - 姓名/手机号、登录过期处理继续沿用既有逻辑。保存姓名时按原接口保留历史头像引用，不清库、不删除历史文件；旧版客户端接口兼容保留。
 - 定向验证：profile-edit与profile共7项测试通过，覆盖旧头像不下载、保存姓名保留原数据、401恢复和取消更换手机号；小程序TypeScript检查通过，git diff空白检查通过。
 - 当前工具无法读取已运行微信开发者工具窗口（noWindowsAvailable），未将代码/单测结果冒充模拟器或真机视觉验收。此变更仅小程序源码，不涉及服务器发布；本轮未执行微信上传、审核或发布。
+
+
+### 默认头像视觉资产
+
+用户要求默认头像需要实际小图。使用内置image_gen生成“微笑小柿子”：米白底、暖橙柿子和两片绿叶，简洁无性别、无文字；保留圆形裁切留白。运行资产为 `apps/miniprogram/src/assets/avatar-persimmon.png`，256×256、约71KiB，个人中心两种登录态和资料页统一引用；个人资料功能菜单仍沿用线性人形图标。生成原图保留在Codex generated_images，项目仅打包缩小后的文件。
+
+最终提示词（内置工具）：Use case: illustration-story. Create ONE polished default account avatar illustration for 乡味集, a Chinese neighborhood group-buying mini program. A friendly gender-neutral little persimmon mascot: warm burnt-orange rounded persimmon face/body, two simple dark seed-shaped eyes and a small relaxed curved smile, a broad two-leaf deep green sprout on top. Sophisticated minimal flat illustration with very subtle paper softness, not a 3D toy. Warm ivory uniform background #fff4df, burnt orange #c2412d and leaf green #416744, dark brown facial marks. Centered symmetrical square composition 1:1, very large simple silhouette filling 75 percent of frame, generous safe margins for circular cropping, no hands, no props, no letters, no text, no watermark, no decorative rings, no tiny details, no drop shadows. Must read clearly as a personable avatar at 48px and 56px. Output a square PNG asset, ideally 256x256 and compact file size suitable for a mini program.
+
+已直接查看256px产物；包资源3项检查通过，上传源码仍在现有1.2MiB预算内。未读取到微信开发者工具窗口，不声称真机视觉已验收。服务器当前86e27b0的API及后台源码与最新提交相关目录无差异；此后修改仅为小程序和文档，不触发服务器重部署。本轮资源须随微信新版上传发布。
