@@ -5,12 +5,75 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+  actions: read
+
+# A newer revision supersedes an older run on the same event/ref, not other branches.
+concurrency:
+  group: quality-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  verify:
+  scope:
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.plan.outputs.api }}
+      admin: ${{ steps.plan.outputs.admin }}
+      mini: ${{ steps.plan.outputs.mini }}
+      shared: ${{ steps.plan.outputs.shared }}
+      checks: ${{ steps.plan.outputs.checks }}
+      browser: ${{ steps.plan.outputs.browser }}
+      images: ${{ steps.plan.outputs.images }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: node --test scripts/ci-scope.test.mjs
+      - name: Find a successful ancestor, including unverified intermediate commits
+        id: baseline
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { execFileSync } = require('node:child_process');
+            // A manual run is always full. A PR compares against a verified target
+            // ancestor, not just its last commit or an unverified target tip.
+            if (context.eventName === 'workflow_dispatch') return;
+            try {
+              const branch = context.payload.pull_request?.base.ref ?? context.ref.replace(/^refs\/heads\//, '');
+              const { data } = await github.rest.actions.listWorkflowRuns({
+                ...context.repo, workflow_id: 'quality.yml', branch,
+                event: 'push', status: 'success', per_page: 100,
+              });
+              const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+              for (const run of data.workflow_runs) {
+                if (run.head_sha === head || !/^[0-9a-f]{40}$/.test(run.head_sha)) continue;
+                try {
+                  execFileSync('git', ['merge-base', '--is-ancestor', run.head_sha, head], { stdio: 'pipe' });
+                  core.setOutput('sha', run.head_sha);
+                  return;
+                } catch { /* Not an available ancestor; try an older success. */ }
+              }
+              core.warning('No successful ancestor found; running full validation.');
+            } catch (error) {
+              core.warning(`Baseline lookup unavailable; running full validation: ${error.message}`);
+            }
+      - name: Plan affected checks and images
+        id: plan
+        env:
+          CI_BASE: ${{ steps.baseline.outputs.sha }}
+          CI_FULL: ${{ github.event_name == 'workflow_dispatch' }}
+        run: node scripts/ci-scope.mjs
+
+  checks:
+    needs: scope
+    if: needs.scope.outputs.checks == 'true'
     runs-on: ubuntu-latest
     services:
       mysql:
-        image: mysql:8.4
+        image: ${{ needs.scope.outputs.api == 'true' && 'mysql:8.4' || '' }}
         env:
           MYSQL_DATABASE: hometown_food
           MYSQL_USER: app
@@ -21,10 +84,11 @@ jobs:
           --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot_password"
           --health-interval=5s --health-timeout=5s --health-retries=20
       redis:
-        image: redis:7.4-alpine
+        image: ${{ needs.scope.outputs.api == 'true' && 'redis:7.4-alpine' || '' }}
         ports: ['6379:6379']
         options: >-
-          --health-cmd="redis-cli ping" --health-interval=5s --health-timeout=5s --health-retries=20
+          --health-cmd="redis-cli ping"
+          --health-interval=5s --health-timeout=5s --health-retries=20
     env:
       DATABASE_URL: mysql://app:app_password@127.0.0.1:3306/hometown_food
       INTEGRATION_DATABASE_URL: mysql://app:app_password@127.0.0.1:3306/hometown_food
@@ -38,19 +102,49 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
-      - run: pnpm db:migrate
-      - name: Verify migration replay is idempotent
+      - run: pnpm lint
+      - run: pnpm --filter @hometown/domain build && pnpm --filter @hometown/api-contracts build
+      - if: needs.scope.outputs.api == 'true'
         run: pnpm db:migrate
-      - run: pnpm check
-      - run: pnpm test:coverage
+      - name: Verify migration replay is idempotent
+        if: needs.scope.outputs.api == 'true'
+        run: pnpm db:migrate
+      - name: Typecheck and test affected packages once, with coverage
+        env:
+          API: ${{ needs.scope.outputs.api }}
+          ADMIN: ${{ needs.scope.outputs.admin }}
+          MINI: ${{ needs.scope.outputs.mini }}
+          SHARED: ${{ needs.scope.outputs.shared }}
+        shell: bash
+        run: |
+          filters=()
+          if [ "$API" = true ]; then filters+=(--filter @hometown/api); fi
+          if [ "$ADMIN" = true ]; then filters+=(--filter @hometown/admin-web); fi
+          if [ "$MINI" = true ]; then filters+=(--filter @hometown/miniprogram); fi
+          if [ "$SHARED" = true ]; then filters+=(--filter @hometown/domain --filter @hometown/api-contracts); fi
+          pnpm "${filters[@]}" -r typecheck
+          pnpm "${filters[@]}" -r test:coverage
+
+  browser:
+    needs: scope
+    if: needs.scope.outputs.browser == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 11.16.0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec eslint apps/admin-web/e2e playwright.config.ts --max-warnings=0
+      - run: pnpm --filter @hometown/domain build && pnpm --filter @hometown/api-contracts build
       - run: pnpm exec playwright install --with-deps chromium
       - name: Run community group-buying browser gate
         run: pnpm test:e2e
       - name: Upload Playwright evidence
         id: upload_playwright_evidence
         if: always()
-        # Report storage availability is separate from the blocking browser gate.
-        # A failed upload must remain visible and requires alternative release evidence.
+        # Evidence upload availability never overrides the blocking browser result.
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
@@ -68,13 +162,55 @@ jobs:
           if [ "$UPLOAD_OUTCOME" = 'success' ] && [ -s playwright-report/index.html ] && [ -n "$(find test-results -type f -size +0c -print -quit 2>/dev/null)" ]; then
             echo 'Playwright report upload completed. This does not override the browser test result.' >> "$GITHUB_STEP_SUMMARY"
           else
-            echo '::warning::Playwright report is unavailable or incomplete. Test results remain blocking. Release requires separately retained evidence from a verified matching test run.'
-            cat >> "$GITHUB_STEP_SUMMARY" <<'REPORT'
-          ### Playwright report upload unavailable
-
-          The artifact upload failed or report files are missing. This does not change any test, coverage, integration, or build result.
-          Before release, retain the raw Playwright report from a verified matching test run separately and record its location, source revision, and SHA-256 in the release record.
-          REPORT
+            echo '::warning::Playwright report unavailable. Before release, retain matching raw evidence, source revision and SHA-256 separately. Test failures remain blocking.'
           fi
-      - run: docker build -f apps/api/Dockerfile -t hometown-api:ci .
-      - run: docker build -f apps/admin-web/Dockerfile -t hometown-admin:ci .
+
+  images:
+    needs: scope
+    if: needs.scope.outputs.images != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.scope.outputs.images) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build affected image with reusable layer cache
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/${{ matrix.target == 'admin' && 'admin-web' || 'api' }}/Dockerfile
+          push: false
+          tags: hometown-${{ matrix.target }}:ci
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
+
+  # Preserve the existing required check name. Skipped expected work is a failure.
+  verify:
+    needs: [scope, checks, browser, images]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Require every planned check to succeed
+        env:
+          PLAN_CHECKS: ${{ needs.scope.outputs.checks }}
+          PLAN_BROWSER: ${{ needs.scope.outputs.browser }}
+          PLAN_IMAGES: ${{ needs.scope.outputs.images }}
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          node --input-type=module <<'JS'
+          import { gatePasses } from './scripts/ci-scope.mjs';
+          const needs = JSON.parse(process.env.RESULTS);
+          const scope = {
+            checks: process.env.PLAN_CHECKS === 'true',
+            browser: process.env.PLAN_BROWSER === 'true',
+            images: JSON.parse(process.env.PLAN_IMAGES || '[]'),
+          };
+          const results = Object.fromEntries(Object.entries(needs).map(([key, value]) => [key, value.result]));
+          console.log({ scope, results });
+          if (!gatePasses(scope, results)) process.exit(1);
+          JS
