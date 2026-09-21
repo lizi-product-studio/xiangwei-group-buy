@@ -1,0 +1,11 @@
+[Unit]
+Description=Check memory every ten seconds
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=10s
+AccuracySec=1s
+Unit=server-guard.service
+
+[Install]
+WantedBy=timers.target

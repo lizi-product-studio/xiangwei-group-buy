@@ -1,0 +1,11 @@
+[Unit]
+Description=Audit SSH, listeners and container safety hourly
+
+[Timer]
+OnBootSec=60s
+OnUnitActiveSec=1h
+AccuracySec=30s
+Unit=server-audit.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,14 @@
+[Unit]
+Description=Emergency swap for test host
+After=local-fs.target
+Before=server-guard.service
+ConditionPathExists=/var/lib/server-guard/emergency.swap
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c '/sbin/swapon --show=NAME --noheadings | /usr/bin/grep -Fxq /var/lib/server-guard/emergency.swap || exec /sbin/swapon /var/lib/server-guard/emergency.swap'
+# No automatic swapoff: unloading occupied swap can exhaust host RAM.
+
+[Install]
+WantedBy=multi-user.target

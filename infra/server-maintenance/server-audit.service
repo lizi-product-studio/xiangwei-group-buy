@@ -1,0 +1,17 @@
+[Unit]
+Description=Read-only server security and container audit
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/lib/server-guard/server_guard.py audit
+TimeoutStartSec=90
+MemoryMax=96M
+CPUQuota=20%
+TasksMax=32
+Nice=10
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+PrivateTmp=true
+ReadWritePaths=/var/lib/server-guard /var/log/server-guard
