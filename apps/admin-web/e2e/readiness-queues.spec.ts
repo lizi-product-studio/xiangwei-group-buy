@@ -50,7 +50,7 @@ test("财务分页请求历史待办且缺金额依据时禁止退款", async ({
   await expect(processing.getByRole("button", {name: "执行退款"})).toHaveCount(0);
   await processing.getByRole("button", {name: "查看详情"}).click();
   await expect(page.getByText("已交支付渠道", {exact: true})).toBeVisible();
-  await page.getByRole("button", {name: "Close", exact: true}).click();
+  await page.locator(".ant-drawer .ant-drawer-close").click();
   const cancellations = page.getByRole("region", {name: "截单后取消退款"});
   await page.getByRole("tab", {name: "取消退款"}).click();
   await expect(quality).toHaveCount(0);
