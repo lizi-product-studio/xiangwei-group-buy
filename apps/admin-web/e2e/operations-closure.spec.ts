@@ -196,7 +196,8 @@ test("超管通过网页复核运输、发车、紧急纠正、订单详情和�
   await page.getByRole("menuitem", { name: "团期管理" }).click();
   await page.getByRole("button", { name: "刷新" }).click();
   const cancelRow = page.getByRole("row").filter({ hasText: `网页取消验收 ${suffix}` });
-  await cancelRow.getByRole("button", { name: /取\s*消/ }).click();
+  await cancelRow.getByRole("button", { name: "更多", exact: true }).click();
+  await page.getByRole("menuitem", { name: "取消团期", exact: true }).click();
   const cancelDialog = page.getByRole("dialog", { name: "取消团期前二次确认" });
   await expect(cancelDialog.getByText("不可重新开售")).toBeVisible();
   await expect(cancelDialog.getByRole("button", { name: "确认取消并创建退款义务" })).toBeDisabled();
