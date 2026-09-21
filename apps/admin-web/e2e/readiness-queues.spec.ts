@@ -26,6 +26,12 @@ test("财务分页请求历史待办且缺金额依据时禁止退款", async ({
     data: [{id: "missing-facts", orderId: "old", orderNo: "缺快照订单", status: "REFUND_CONFIRMED", items: [], refundAmountCents: null, financialFactsError: "关联订单行或价格快照缺失，请联系管理员核查，暂不可执行退款"}],
     pagination: {total: 1, page: 1, pageSize: 20},
   }}));
+  await page.route("**/api/v1/admin/quality-cases*", route => route.fulfill({json: {
+    data: [
+      {id: "quality-pending", orderId: "quality-order", orderNo: "待核对品质订单", status: "REFUNDING", financeRefundStatus: null, refundAmountCents: 1200, refundAmountKind: "PENDING", financialFactsError: null, items: [{name: "新鲜苹果", quantity: 2, description: "顾客反馈破损"}], decisionNote: "运营已核对"},
+      {id: "quality-processing", orderId: "quality-order-2", orderNo: "已提交品质订单", status: "REFUNDING", financeRefundStatus: null, refundAmountCents: 600, refundAmountKind: "RECORDED", refundStatus: "PROCESSING", financialFactsError: null, items: [], decisionNote: "已交支付渠道"},
+    ], pagination: {total: 2, page: 1, pageSize: 20},
+  }}));
   await page.goto("/");
   await page.getByLabel("账号").fill(username);
   await page.getByLabel("密码").fill((await created.json()).data.temporaryPassword);
@@ -33,11 +39,29 @@ test("财务分页请求历史待办且缺金额依据时禁止退款", async ({
   await page.getByLabel("新密码", {exact: true}).fill("readiness finance password");
   await page.getByLabel("确认新密码").fill("readiness finance password");
   await page.getByRole("button", {name: "保存新密码"}).click();
+  const quality = page.getByRole("region", {name: "品质售后退款"});
+  const pending = quality.getByRole("row").filter({hasText: "待核对品质订单"});
+  await expect(pending.getByText("待执行", {exact: true})).toBeVisible();
+  await pending.getByRole("button", {name: "执行退款"}).click();
+  await expect(page.getByRole("dialog").getByText(/退款金额：待执行 ¥12.00/)).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", {name: /取\s*消/}).click();
+  const processing = quality.getByRole("row").filter({hasText: "已提交品质订单"});
+  await expect(processing.getByText("退款处理中", {exact: true})).toBeVisible();
+  await expect(processing.getByRole("button", {name: "执行退款"})).toHaveCount(0);
+  await processing.getByRole("button", {name: "查看详情"}).click();
+  await expect(page.getByText("已交支付渠道", {exact: true})).toBeVisible();
+  await page.getByRole("button", {name: "Close", exact: true}).click();
   const cancellations = page.getByRole("region", {name: "截单后取消退款"});
+  await page.getByRole("tab", {name: "取消退款"}).click();
+  await expect(quality).toHaveCount(0);
   await expect(cancellations.getByText("共 501 条")).toBeVisible();
   await cancellations.locator('.ant-pagination-item[title="26"]').click();
   await expect(cancellations.getByRole("row").filter({hasText: "历史待退款501"})).toBeVisible();
   expect(queries.some(value => value.includes("page=26") && value.includes("status=APPROVED_WAITING_FINANCE"))).toBe(true);
+  await page.getByRole("tab", {name: "到货差异"}).click();
+  await page.getByRole("combobox", {name: "待办状态筛选"}).click();
+  await expect(page.getByRole("option", {name: "全部可见状态"})).toHaveCount(0);
+  await page.keyboard.press("Escape");
   const exception = page.getByRole("region", {name: "到货差异退款"}).getByRole("row").filter({hasText: "缺快照订单"});
   await expect(exception.getByText(/关联订单行或价格快照缺失/)).toBeVisible();
   await expect(exception.getByRole("button", {name: "执行退款"})).toBeDisabled();

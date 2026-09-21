@@ -880,6 +880,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
     "community e2e finance password",
   );
   await expect(page.getByRole("heading", { name: "退款待办" })).toBeVisible();
+  await page.getByRole("tab", { name: "到货差异" }).click();
   const exceptionRow = page.getByRole("row").filter({ hasText: emergencyOrder.orderNo });
   await expect(exceptionRow.getByRole("button", { name: "执行退款" })).toBeVisible();
   let exceptionRefundPosts = 0;
@@ -915,6 +916,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
       ),
     )
     .toBe(true);
+  await page.getByRole("tab", { name: "逾期领取" }).click();
   const pickupRefundRow = page
     .getByRole("region", { name: "逾期领取退款" })
     .getByRole("row")

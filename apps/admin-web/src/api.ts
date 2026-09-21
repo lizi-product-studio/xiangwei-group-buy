@@ -297,6 +297,10 @@ export interface QualityCase {
   status: string;
   /** Provider-facing partial-refund fact, if finance has started execution. */
   financeRefundStatus: string | null;
+  refundAmountCents: number | null;
+  financialFactsError: string | null;
+  refundAmountKind: "PENDING" | "RECORDED" | null;
+  refundStatus: string | null;
   registeredAt: string;
   acceptanceNote: string | null;
   decisionNote: string | null;
@@ -316,6 +320,11 @@ export interface CancellationRequest {
   status: string;
   requestedAt: string;
   reviewNote: string | null;
+  refundAmountCents: number | null;
+  financialFactsError: string | null;
+  refundAmountKind: "PENDING" | "RECORDED" | null;
+  refundStatus: string | null;
+  items: Array<{catalogSkuId: string; name: string; quantity: number}>;
 }
 export interface PickupWindow {
   orderId: string;
@@ -330,8 +339,22 @@ export interface PickupWindow {
   pickupPointId: string | null;
   pickupPointName: string | null;
   nextResponsibility: "OPERATOR" | "FINANCE" | null;
+  refundExceptionId: string | null;
+  refundAmountCents: number | null;
+  financialFactsError: string | null;
+  refundAmountKind: "PENDING" | "RECORDED" | null;
+  refundStatus: string | null;
+}
+export interface FinanceRefundFacts {
+  refundAmountCents: number | null;
+  financialFactsError: string | null;
+  refundAmountKind: "PENDING" | "RECORDED" | null;
+  refundStatus: string | null;
 }
 export interface FulfillmentException {
+  financeRefundFacts?: FinanceRefundFacts;
+  refundAmountKind?: FinanceRefundFacts["refundAmountKind"];
+  refundStatus?: string | null;
   id: string;
   campaignId: string;
   orderId: string | null;
@@ -748,8 +771,8 @@ const patch = <T>(path: string, body: unknown) =>
   request<T>(path, { method: "PATCH", body: JSON.stringify(body) });
 
 export interface QueuePage<T> { data: T[]; pagination: {total: number; page: number; pageSize: number} }
-export interface QueueQuery {page: number; pageSize: number; status?: string}
-const queuePage = <T,>(path: string, query: QueueQuery) => request<QueuePage<T>>(`${path}?${new URLSearchParams({page: String(query.page), pageSize: String(query.pageSize), ...(query.status ? {status: query.status} : {})})}`, {}, true);
+export interface QueueQuery {page: number; pageSize: number; status?: string; sourceStage?: string}
+const queuePage = <T,>(path: string, query: QueueQuery) => request<QueuePage<T>>(`${path}?${new URLSearchParams({page: String(query.page), pageSize: String(query.pageSize), ...(query.status ? {status: query.status} : {}), ...(query.sourceStage ? {sourceStage: query.sourceStage} : {})})}`, {}, true);
 
 export const api = {
   qualityPage: (query: QueueQuery) => queuePage<QualityCase>("/api/v1/admin/quality-cases", query),

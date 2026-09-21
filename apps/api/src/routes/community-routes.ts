@@ -9,6 +9,7 @@ import {
 } from "@hometown/api-contracts";
 import { BusinessError } from "@hometown/domain";
 import { requireActor } from "../modules/auth/auth.js";
+import { exceptionRefundFacts, orderRefundFacts } from "../modules/finance/refund-readmodel.js";
 import type { CommerceStore } from "../modules/core/store.js";
 import type { CommunityFulfillmentService } from "../modules/fulfillment/community-fulfillment-service.js";
 import type { CommunityOperationsService } from "../modules/fulfillment/community-operations-service.js";
@@ -237,9 +238,10 @@ export function registerCommunityRoutes(
     });
     const orders = await Promise.all([...new Set(page.items.map(value => value.orderId))].map(id => store.getOrder(id)));
     const orderById = new Map(orders.filter(value => value !== null).map(order => [order.id, order]));
+    const refunds = await Promise.all(page.items.map(value => store.getOrderRefundByOrder(value.orderId)));
     return {
       pagination: {total: page.total, page: page.page, pageSize: page.pageSize},
-      data: page.items.map((value) => {
+      data: page.items.map((value, index) => {
           const order = orderById.get(value.orderId);
           return {
             id: value.id,
@@ -254,6 +256,7 @@ export function registerCommunityRoutes(
             financeExecutedBy: value.financeExecutedBy,
             financeExecutedAt: value.financeExecutedAt,
             refundId: value.refundId,
+            ...orderRefundFacts(order ?? null, refunds[index] ?? null),
             items: (order?.items ?? []).map((item) => ({
               catalogSkuId: item.skuId,
               name: item.name,
@@ -321,12 +324,14 @@ export function registerCommunityRoutes(
       Promise.all(page.items.map(value => store.getOrder(value.orderId))),
       store.listPickupPoints(),
     ]);
+    const exceptions = await Promise.all(page.items.map((value) => value.refundExceptionId ? store.getFulfillmentException(value.refundExceptionId) : Promise.resolve(null)));
     const orderById = new Map(orders.filter(value => value !== null).map(order => [order.id, order]));
     const pointById = new Map(points.map((point) => [point.id, point]));
     return {
       pagination: {total: page.total, page: page.page, pageSize: page.pageSize},
-      data: page.items.map((window) => {
+      data: await Promise.all(page.items.map(async (window, index) => {
         const order = orderById.get(window.orderId) ?? null;
+        const exception = exceptions[index];
         return {
           ...window,
           orderNo: order?.orderNo ?? null,
@@ -341,8 +346,9 @@ export function registerCommunityRoutes(
               : window.status === "REFUND_PENDING"
                 ? "FINANCE"
                 : null,
+          ...(exception ? await exceptionRefundFacts(store, exception) : {refundAmountCents: null, financialFactsError: "退款事实缺失，请联系管理员核查，暂不可执行退款", refundAmountKind: null, refundStatus: null}),
         };
-      }),
+      })),
     };
   });
 }

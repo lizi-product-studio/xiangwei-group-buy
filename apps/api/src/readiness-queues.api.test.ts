@@ -82,6 +82,18 @@ describe("history-safe operations queues", () => {
       expect((await get(path, "USER")).statusCode).toBe(403);
     }
   });
+  it("filters fulfillment exceptions by source stage before pagination", async () => {
+    store.seed({exceptions: [
+      ["arrival", {id: "arrival", sourceStage: "PICKUP_ARRIVAL", status: "REFUND_CONFIRMED", registeredAt: old, items: []}],
+      ["claim", {id: "claim", sourceStage: "CUSTOMER_CLAIM", status: "REFUND_CONFIRMED", registeredAt: recent, items: []}],
+    ]});
+    const all = await get("/api/v1/admin/fulfillment-exceptions?page=1&pageSize=1");
+    expect(all.json().pagination.total).toBe(2);
+    const arrival = await get("/api/v1/admin/fulfillment-exceptions?sourceStage=PICKUP_ARRIVAL&page=1&pageSize=1");
+    expect(arrival.json()).toMatchObject({pagination: {total: 1}, data: [{id: "arrival"}]});
+    const claim = await get("/api/v1/admin/fulfillment-exceptions?sourceStage=CUSTOMER_CLAIM&page=1&pageSize=1");
+    expect(claim.json()).toMatchObject({pagination: {total: 1}, data: [{id: "claim"}]});
+  });
   it("payment service rejects missing allocation inside transaction but preserves resolved idempotency", async () => {
     const payments = new PaymentService(store, new MockPaymentProvider(), new LedgerService());
     store.seed({exceptions: [["missing", {id: "missing", status: "REFUND_CONFIRMED"}]]});
@@ -105,6 +117,12 @@ describe("history-safe operations queues", () => {
     store.seed({exceptions: [[exception.id, exception]]});
     const row = (await get("/api/v1/admin/fulfillment-exceptions")).json().data[0];
     expect(row).toMatchObject({orderNo: "OLD-1200", refundAmountCents: 1200, financialFactsError: null, items: [{name: "历史蔬菜 · 一份", unitPriceCents: 1200, amountCents: 1200}]});
+    expect(row.financeRefundFacts).toMatchObject({refundAmountCents: 1200, refundAmountKind: "PENDING"});
+    store.seed({partialRefunds: [["partial", {id: "partial", exceptionId: exception.id, orderId: order.id, amountCents: 600, status: "PROCESSING"}]]});
+    const recorded = (await get("/api/v1/admin/fulfillment-exceptions")).json().data[0];
+    expect(recorded.refundAmountCents).toBe(1200); // existing operations total stays intact
+    expect(recorded.financeRefundFacts).toMatchObject({refundAmountCents: 600, refundAmountKind: "RECORDED", refundStatus: "PROCESSING"});
+    store.seed({partialRefunds: []});
     for (const patch of [{orders: []}, {orders: [[order.id, {...order, items: []}]]}, {orders: [[order.id, order]], allocations: []}]) {
       store.seed(patch);
       const before = store.snapshot();

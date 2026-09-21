@@ -34,6 +34,7 @@ import {
   Space,
   Statistic,
   Table,
+  Tabs,
   Tag,
   Typography,
 } from "antd";
@@ -79,6 +80,7 @@ import {
   type PickupWindow,
   type RegionDirectoryEntry,
   type ServiceArea,
+  type QueueQuery,
 } from "./api.ts";
 import {
   getAdminNavigation,
@@ -145,6 +147,14 @@ const Status = ({ value }: { value: string }) => (
   </Tag>
 );
 const money = (cents: number) => `¥${centsToYuan(cents)}`;
+const safeRefundAmount = (value: {refundAmountCents?: unknown; financialFactsError?: string | null}) =>
+  typeof value.refundAmountCents === "number" && Number.isSafeInteger(value.refundAmountCents) && value.refundAmountCents > 0
+    ? value.refundAmountCents
+    : null;
+const refundAmountText = (value: {refundAmountCents?: unknown; financialFactsError?: string | null; refundAmountKind?: string | null}) => {
+  const amount = safeRefundAmount(value);
+  return amount === null ? (value.financialFactsError ?? "金额待核查") : `${value.refundAmountKind === "RECORDED" ? "已提交 " : value.refundAmountKind === "PENDING" ? "待执行 " : ""}${money(amount)}`;
+};
 const normalizePickupLocationText = (value: string) =>
   value
     .normalize("NFKC")
@@ -4702,7 +4712,7 @@ function Service({
                 .map((item) => `${item.name} × ${item.affectedQuantity}`)
                 .join("；"),
           },
-          { title: "预计退款", render: (_, value) => value.refundAmountCents === null ? (value.financialFactsError ?? "金额不可计算") : money(value.refundAmountCents) },
+          { title: "预计退款", render: (_, value) => refundAmountText(value) },
           { title: "状态", render: (_, v) => <Status value={v.status} /> },
           { title: "运营确认说明", dataIndex: "resolutionNote" },
         ]}
@@ -4830,6 +4840,18 @@ function Finance({
     Awaited<ReturnType<typeof api.cancellations>>[number] | null
   >(null);
   const [submitting, setSubmitting] = useState(false);
+  const [activeRefundTab, setActiveRefundTab] = useState("quality");
+  const [financeDetail, setFinanceDetail] = useState<{title: string; rows: Array<{label: string; value: string}>} | null>(null);
+  const openFinanceDetail = (title: string, rows: Array<{label: string; value: string}>) => setFinanceDetail({title, rows});
+  const loadArrivalExceptions = useCallback(async (query: QueueQuery) => {
+    const page = await api.exceptionsPage({...query, sourceStage: "PICKUP_ARRIVAL"});
+    return {...page, data: page.data.map(value => ({...value,
+      refundAmountCents: value.financeRefundFacts?.refundAmountCents ?? null,
+      financialFactsError: value.financialFactsError || value.financeRefundFacts?.financialFactsError || (value.financeRefundFacts ? null : "退款金额待核查，请刷新后重试"),
+      refundAmountKind: value.financeRefundFacts?.refundAmountKind ?? null,
+      refundStatus: value.financeRefundFacts?.refundStatus ?? null,
+    }))};
+  }, []);
   const qualityRefundExecutionLabel = (status: string) => {
     if (status === "SUCCEEDED") return "退款已完成";
     if (status === "MANUAL_HOLD") return "退款已挂起，等待人工处理";
@@ -4838,7 +4860,7 @@ function Finance({
     return "退款处理中";
   };
   const executeExceptionRefund = async () => {
-    if (!refundDraft || refundDraft.exception.financialFactsError || refundDraft.exception.refundAmountCents === null) return;
+    if (!refundDraft || refundDraft.exception.financialFactsError || safeRefundAmount(refundDraft.exception) === null) return;
     setSubmitting(true);
     try {
       await api.refundException(refundDraft.exception.id, refundDraft.note);
@@ -4911,7 +4933,7 @@ function Finance({
   };
   return (
     <>
-      <PageTitle title={view === "finance-records" ? "退款记录" : view === "finance-ledger" ? "账务流水" : "退款待办"} subtitle="查看退款进度与账务明细，按权限处理待办" />
+      <PageTitle title={view === "finance-records" ? "退款记录" : view === "finance-ledger" ? "账务流水" : "退款待办"} subtitle={view === "finance" ? "选择退款类型，核对金额后处理；商品与审核说明可在详情中查看" : "查看退款进度与账务明细"} />
       {loading && <Alert type="info" showIcon message="正在刷新财务数据" />}
       {error && (
         <Alert
@@ -4936,7 +4958,18 @@ function Finance({
       />
       }
       {view === "finance" && <>
-      <section aria-label="品质售后退款">
+      <Tabs
+        activeKey={activeRefundTab}
+        onChange={setActiveRefundTab}
+        items={[
+          {key: "quality", label: "品质退款"},
+          {key: "cancellations", label: "取消退款"},
+          {key: "arrival", label: "到货差异"},
+          {key: "overdue", label: "逾期领取"},
+        ]}
+      />
+      <Card size="small" aria-label="退款待办分类">
+      {activeRefundTab === "quality" && <section aria-label="品质售后退款">
         <Typography.Title level={4}>品质售后退款</Typography.Title>
         <OperationsQueueTable
           rowKey="id"
@@ -4944,31 +4977,21 @@ function Finance({
           locale={{ emptyText: "暂无待执行的品质退款" }}
           columns={[
             { title: "订单", render: (_, value) => value.orderNo ?? value.orderId },
-            {
-              title: "商品/数量",
-              render: (_, value) =>
-                value.items.map((item) => `${item.name} × ${item.quantity}`).join("；"),
-            },
-            { title: "决定说明", render: (_, value) => value.decisionNote ?? "—" },
+            { title: "退款金额", render: (_, value) => refundAmountText(value) },
+            { title: "状态", render: (_, value) => value.financeRefundStatus || value.refundStatus ? qualityRefundExecutionLabel(value.financeRefundStatus || value.refundStatus!) : "待执行" },
             {
               title: "操作",
-              render: (_, value) =>
-                !canExecuteRefund ? (
-                  "当前账号无财务执行权限"
-                ) : value.financeRefundStatus ? (
-                  <Typography.Text type="secondary">
-                    {qualityRefundExecutionLabel(value.financeRefundStatus)}
-                  </Typography.Text>
-                ) : (
-                  <Button type="primary" onClick={() => setQualityRefundTarget(value)}>
-                    执行退款
-                  </Button>
-                ),
+              render: (_, value) => <Space>
+                {canExecuteRefund && value.status === "REFUNDING" && !value.financeRefundStatus && value.refundAmountKind !== "RECORDED" ? (
+                  <Button type="primary" disabled={Boolean(value.financialFactsError) || safeRefundAmount(value) === null} title={value.financialFactsError ?? undefined} onClick={() => setQualityRefundTarget(value)}>执行退款</Button>
+                ) : null}
+                <Button type="link" onClick={() => openFinanceDetail(`品质退款 · ${value.orderNo ?? value.orderId}`, [{label: "商品与数量", value: value.items.map(item => `${item.name} × ${item.quantity}：${item.description}`).join("；") || "—"}, {label: "决定说明", value: value.decisionNote ?? "—"}, {label: "退款金额", value: refundAmountText(value)}])}>查看详情</Button>
+              </Space>,
             },
           ]}
         />
-      </section>
-      <section aria-label="截单后取消退款">
+      </section>}
+      {activeRefundTab === "cancellations" && <section aria-label="截单后取消退款">
         <Typography.Title level={4}>截单后取消退款</Typography.Title>
         <OperationsQueueTable
           rowKey="id"
@@ -4976,73 +4999,61 @@ function Finance({
           locale={{ emptyText: "暂无待执行的截单后取消退款" }}
           columns={[
             { title: "订单", render: (_, value) => value.orderNo ?? value.orderId },
-            { title: "取消原因", dataIndex: "reason" },
-            { title: "运营审核理由", render: (_, value) => value.reviewNote ?? "—" },
+            { title: "退款金额", render: (_, value) => refundAmountText(value) },
+            { title: "状态", render: (_, value) => value.refundStatus ? qualityRefundExecutionLabel(value.refundStatus) : <Status value={value.status} /> },
             {
               title: "操作",
-              render: (_, value) =>
-                canExecuteRefund ? (
-                  <Button type="primary" onClick={() => setCancellationRefundTarget(value)}>
-                    执行退款
-                  </Button>
-                ) : (
-                  "当前账号无财务执行权限"
-                ),
+              render: (_, value) => <Space>
+                {canExecuteRefund && value.status === "APPROVED_WAITING_FINANCE" && value.refundAmountKind !== "RECORDED" ? <Button type="primary" disabled={Boolean(value.financialFactsError) || safeRefundAmount(value) === null} title={value.financialFactsError ?? undefined} onClick={() => setCancellationRefundTarget(value)}>执行退款</Button> : null}
+                <Button type="link" onClick={() => openFinanceDetail(`取消退款 · ${value.orderNo ?? value.orderId}`, [{label: "取消原因", value: value.reason}, {label: "运营审核理由", value: value.reviewNote ?? "—"}, {label: "订单商品", value: value.items.map(item => `${item.name} × ${item.quantity}`).join("；") || "—"}, {label: "退款金额", value: refundAmountText(value)}])}>查看详情</Button>
+              </Space>,
             },
           ]}
         />
-      </section>
-      <section aria-label="到货差异退款">
+      </section>}
+      {activeRefundTab === "arrival" && <section aria-label="到货差异退款">
         <Typography.Title level={4}>到货差异退款</Typography.Title>
         <OperationsQueueTable
           rowKey="id"
-          loadPage={api.exceptionsPage} refreshToken={exceptions} statuses={["REGISTERED", "REFUND_CONFIRMED", "REFUND_PROCESSING", "RESOLVED"]}
+          loadPage={loadArrivalExceptions} refreshToken={exceptions} statuses={["REFUND_CONFIRMED", "REFUND_PROCESSING", "RESOLVED"]} defaultStatus="REFUND_CONFIRMED" allowAllStatuses={false}
           locale={{ emptyText: "暂无履约差异退款" }}
           columns={[
           { title: "订单", render: (_, value) => value.orderNo ?? value.orderId ?? "—" },
           { title: "自提点", render: (_, value) => value.pickupPointName ?? value.pickupPointId ?? "—" },
-          { title: "异常类型", render: (_, value) => value.items.map((item) => displayLabel(item.reason)).join("、") },
-          { title: "逐商品数量", render: (_, value) => value.items.map((item) => `${item.name} × ${item.affectedQuantity}`).join("；") },
-          { title: "退款金额", render: (_, value) => value.refundAmountCents === null ? (value.financialFactsError ?? "金额不可计算") : money(value.refundAmountCents) },
-          { title: "运营确认说明", dataIndex: "resolutionNote" },
-          { title: "状态", render: (_, value) => <Status value={value.status} /> },
+          { title: "退款金额", render: (_, value) => refundAmountText(value) },
+          { title: "状态", render: (_, value) => value.refundStatus ? qualityRefundExecutionLabel(value.refundStatus) : <Status value={value.status} /> },
           {
             title: "操作",
-            render: (_, value) =>
-              canExecuteRefund && value.status === "REFUND_CONFIRMED" ? (
-                <Button type="primary" disabled={Boolean(value.financialFactsError) || value.refundAmountCents === null} title={value.financialFactsError ?? undefined} onClick={() => setRefundTarget(value)}>
-                  执行退款
-                </Button>
-              ) : (
-                "等待可执行状态"
-              ),
+            render: (_, value) => <Space>
+              {canExecuteRefund && value.status === "REFUND_CONFIRMED" && value.refundAmountKind !== "RECORDED" ? <Button type="primary" disabled={Boolean(value.financialFactsError) || safeRefundAmount(value) === null} title={value.financialFactsError ?? undefined} onClick={() => setRefundTarget(value)}>执行退款</Button> : null}
+              <Button type="link" onClick={() => openFinanceDetail(`到货差异 · ${value.orderNo ?? value.orderId ?? "未知订单"}`, [{label: "自提点", value: value.pickupPointName ?? value.pickupPointId ?? "—"}, {label: "异常类型", value: value.items.map(item => displayLabel(item.reason)).join("、") || "—"}, {label: "商品与数量", value: value.items.map(item => `${item.name} × ${item.affectedQuantity}：${item.description}`).join("；") || "—"}, {label: "运营确认说明", value: value.resolutionNote ?? "—"}, {label: "金额事实", value: refundAmountText(value)}])}>查看详情</Button>
+            </Space>,
           },
           ]}
         />
-      </section>
-      <section aria-label="逾期领取退款">
+      </section>}
+      {activeRefundTab === "overdue" && <section aria-label="逾期领取退款">
         <Typography.Title level={4}>逾期领取退款</Typography.Title>
         <OperationsQueueTable
           rowKey="orderId"
           loadPage={api.pickupWindowsPage} refreshToken={pickupWindows} fixedStatus="REFUND_PENDING"
           locale={{ emptyText: "暂无待执行的逾期领取退款" }}
           columns={[
-          { title: "订单", render: (_, value) => value.orderNo ?? value.orderId },
-          { title: "自提点", render: (_, value) => value.pickupPointName ?? value.pickupPointId ?? "—" },
+          { title: "订单/自提点", render: (_, value) => `${value.orderNo ?? value.orderId} · ${value.pickupPointName ?? value.pickupPointId ?? "—"}` },
           { title: "截止时间", render: (_, value) => dateTime(value.deadlineAt) },
-          { title: "状态", render: (_, value) => <Status value={value.status} /> },
-          { title: "下一责任", render: (_, value) => value.nextResponsibility ? displayLabel(value.nextResponsibility) : "—" },
+          { title: "状态", render: (_, value) => value.refundStatus ? qualityRefundExecutionLabel(value.refundStatus) : <Status value={value.status} /> },
+          { title: "退款金额", render: (_, value) => refundAmountText(value) },
           {
             title: "操作",
-            render: (_, value) => canExecuteRefund ? (
-              <Button type="primary" onClick={() => setPickupRefundTarget(value)}>
-                执行退款
-              </Button>
-            ) : "当前账号无财务执行权限",
+            render: (_, value) => <Space>
+              {canExecuteRefund && value.status === "REFUND_PENDING" && value.refundStatus !== "SUCCEEDED" && value.refundAmountKind !== "RECORDED" ? <Button type="primary" disabled={Boolean(value.financialFactsError) || safeRefundAmount(value) === null} title={value.financialFactsError ?? undefined} onClick={() => setPickupRefundTarget(value)}>执行退款</Button> : null}
+              <Button type="link" onClick={() => openFinanceDetail(`逾期领取退款 · ${value.orderNo ?? value.orderId}`, [{label: "截止时间", value: dateTime(value.deadlineAt)}, {label: "处理说明", value: value.dispositionNote ?? "—"}, {label: "退款金额", value: refundAmountText(value)}])}>查看详情</Button>
+            </Space>,
           },
           ]}
         />
-      </section>
+      </section>}
+      </Card>
       </>}
       {view === "finance-ledger" && <section aria-label="财务流水">
         <Typography.Title level={4}>财务流水</Typography.Title>
@@ -5107,7 +5118,7 @@ function Finance({
       >
         <Typography.Paragraph>
           将对订单 {refundDraft?.exception.orderNo ?? refundDraft?.exception.orderId} 执行
-          {refundDraft?.exception.refundAmountCents == null ? "金额不可计算" : money(refundDraft.exception.refundAmountCents)} 的差异退款。
+          {refundDraft ? refundAmountText(refundDraft.exception) : "金额待核查"} 的差异退款。
         </Typography.Paragraph>
         <Typography.Paragraph>确认说明：{refundDraft?.note}</Typography.Paragraph>
       </Modal>
@@ -5121,6 +5132,7 @@ function Finance({
         onCancel={() => !submitting && setPickupRefundTarget(null)}
       >
         确认对订单 {pickupRefundTarget?.orderNo ?? pickupRefundTarget?.orderId} 执行已登记的逾期退款？
+        <Typography.Paragraph>退款金额：{pickupRefundTarget ? refundAmountText(pickupRefundTarget) : "金额待核查"}</Typography.Paragraph>
       </Modal>
       <Modal
         open={Boolean(qualityRefundTarget)}
@@ -5132,6 +5144,7 @@ function Finance({
         onCancel={() => !submitting && setQualityRefundTarget(null)}
       >
         确认对订单 {qualityRefundTarget?.orderNo ?? qualityRefundTarget?.orderId} 执行已批准的品质退款？
+        <Typography.Paragraph>退款金额：{qualityRefundTarget ? refundAmountText(qualityRefundTarget) : "金额待核查"}</Typography.Paragraph>
       </Modal>
       <Modal
         open={Boolean(cancellationRefundTarget)}
@@ -5143,7 +5156,18 @@ function Finance({
         onCancel={() => !submitting && setCancellationRefundTarget(null)}
       >
         确认对订单 {cancellationRefundTarget?.orderNo ?? cancellationRefundTarget?.orderId} 执行运营已批准的取消退款？
+        <Typography.Paragraph>退款金额：{cancellationRefundTarget ? refundAmountText(cancellationRefundTarget) : "金额待核查"}</Typography.Paragraph>
       </Modal>
+      <Drawer
+        open={Boolean(financeDetail)}
+        title={financeDetail?.title}
+        onClose={() => setFinanceDetail(null)}
+        width={560}
+      >
+        <Descriptions bordered size="small" column={1}>
+          {financeDetail?.rows.map((row) => <Descriptions.Item key={row.label} label={row.label}>{row.value}</Descriptions.Item>)}
+        </Descriptions>
+      </Drawer>
     </>
   );
 }

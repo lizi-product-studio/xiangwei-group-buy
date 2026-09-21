@@ -1,4 +1,5 @@
 import { exceptionReadModel } from "./modules/fulfillment/exception-readmodel.js";
+import { exceptionRefundFacts } from "./modules/finance/refund-readmodel.js";
 import { operationsPageSchema } from "./routes/operations-pagination.js";
 import { z } from "zod";
 import { ProductImages } from './modules/media/product-images.js';
@@ -1836,15 +1837,16 @@ export async function buildApp(
       ...operationsPageSchema.parse(request.query),
       ...(visibleStatuses ? {allowedStatuses: visibleStatuses} : {}),
     });
-    const [orders, refunds] = await Promise.all([
+    const [orders, refunds, exceptions] = await Promise.all([
       Promise.all([...new Set(page.items.map(value => value.orderId))].map(id => store.getOrder(id))),
       Promise.all(page.items.filter(value => value.refundExceptionId).map(value => store.listPartialRefundsByException(value.refundExceptionId!))),
+      Promise.all(page.items.map(value => value.refundExceptionId ? store.getFulfillmentException(value.refundExceptionId) : Promise.resolve(null))),
     ]);
     const orderById = new Map(orders.filter(value => value !== null).map(order => [order.id, order]));
     const partialRefundByException = new Map(refunds.flat().map(value => [value.exceptionId, value]));
     return {
       pagination: {total: page.total, page: page.page, pageSize: page.pageSize},
-      data: page.items.map((value) => {
+      data: await Promise.all(page.items.map(async (value, index) => {
           const order = orderById.get(value.orderId);
           const orderItemById = new Map(
             order?.items
@@ -1853,6 +1855,7 @@ export async function buildApp(
               )
               .map((item) => [item.orderLineId, item]) ?? [],
           );
+          const exception = exceptions[index];
           return {
             id: value.id,
             orderId: value.orderId,
@@ -1874,6 +1877,7 @@ export async function buildApp(
               ? (partialRefundByException.get(value.refundExceptionId)?.status ??
                 null)
               : null,
+            ...(exception ? await exceptionRefundFacts(store, exception) : {refundAmountCents: null, financialFactsError: "退款事实缺失，请联系管理员核查，暂不可执行退款", refundAmountKind: null, refundStatus: null}),
             items: value.items.map((item) => ({
               catalogSkuId: item.catalogSkuId,
               name:
@@ -1883,7 +1887,7 @@ export async function buildApp(
               description: item.description,
             })),
           };
-        }),
+        })),
     };
   });
   app.post("/api/v1/admin/quality-cases/:id/accept", async (request) => {
@@ -1956,7 +1960,10 @@ export async function buildApp(
     const page = await store.listOperationsQueue("exceptions", operationsPageSchema.parse(request.query));
     return {
       pagination: {total: page.total, page: page.page, pageSize: page.pageSize},
-      data: await Promise.all(page.items.map(value => exceptionReadModel(store, value))),
+      data: await Promise.all(page.items.map(async value => ({
+        ...await exceptionReadModel(store, value),
+        financeRefundFacts: await exceptionRefundFacts(store, value),
+      }))),
     };
   });
   app.post(

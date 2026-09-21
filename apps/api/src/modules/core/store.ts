@@ -155,6 +155,7 @@ export interface OperationsQueueQuery {
   pageSize: number;
   status?: string | undefined;
   allowedStatuses?: readonly string[];
+  sourceStage?: "PICKUP_ARRIVAL" | "CUSTOMER_CLAIM" | undefined;
 }
 export interface OperationsQueuePage<T> {
   items: T[];
@@ -1784,6 +1785,7 @@ export class MemoryStore implements CommerceStore {
     const values = [...source.values()]
       .filter(value => kind !== "notifications" || value.status === "MANUAL_REQUIRED" || value.status === "SUBMISSION_UNKNOWN" || (value.status === "PENDING_DELIVERY" && "lastDeliveryError" in value && Boolean(value.lastDeliveryError)))
       .filter(value => (!query.allowedStatuses || query.allowedStatuses.includes(value.status)) && (!query.status || value.status === query.status))
+      .filter(value => kind !== "exceptions" || !query.sourceStage || ("sourceStage" in value && value.sourceStage === query.sourceStage))
       .sort((a, b) => {
         // Overdue pickup/refund work is oldest-deadline first, before pagination.
         const urgent = kind === "windows" && ["EXPIRED_PENDING", "REFUND_PENDING"].includes(query.status ?? "");
