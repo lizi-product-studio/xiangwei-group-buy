@@ -367,8 +367,8 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   await page.getByLabel("截单时间").fill(cutoffInput);
   // The client must stop an invalid schedule before the review dialog or POST.
   await page.getByLabel("计划发车时间").fill(dateInput(12));
-  await page.getByLabel("预计到货开始").fill(dateInput(40));
-  await page.getByLabel("预计到货结束").fill(dateInput(44));
+  await page.getByLabel(/预计到货时段.*开始/).fill(dateInput(40));
+  await page.getByLabel(/预计到货时段.*结束/).fill(dateInput(44));
   const beforeInvalidCampaignSubmit = campaignCreateRequests;
   await page.getByRole("button", { name: "下一步：发布复核" }).click();
   await expect(page.getByText("计划发车时间必须晚于截单时间")).toBeVisible();
@@ -591,14 +591,14 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   await page.getByRole("button", { name: "查找待领取商品" }).click();
   const quantityInput = page.getByLabel(`E2E 时蔬 ${suffix} · 一份 本次领取数量`, { exact: true });
   await expect(quantityInput).toBeVisible();
-  await page.getByRole("button", { name: "确认本次领取" }).click();
+  await page.getByRole("button", { name: "确认领取" }).click();
   await expect(page.getByText("请至少填写一项大于 0 的本次领取数量")).toBeVisible();
   expect(pickupPosts).toBe(0);
   await quantityInput.fill("3");
   await quantityInput.blur();
   await expect(quantityInput).toHaveValue("2");
   await quantityInput.fill("1");
-  await page.getByRole("button", { name: "确认本次领取" }).click();
+  await page.getByRole("button", { name: "确认领取" }).click();
   await expect(page.getByRole("dialog", { name: "本次领取复核" })).toBeVisible();
   await page
     .getByRole("dialog", { name: "本次领取复核" })
@@ -612,7 +612,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   );
   expect((await firstPickupOrder.json()).data.items[0].pickedUpQuantity).toBe(1);
   await quantityInput.fill("1");
-  await page.getByRole("button", { name: "确认本次领取" }).click();
+  await page.getByRole("button", { name: "确认领取" }).click();
   await page
     .getByRole("dialog", { name: "本次领取复核" })
     .getByRole("button", { name: "确认提交核销" })

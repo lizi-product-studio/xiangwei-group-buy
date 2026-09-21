@@ -120,7 +120,7 @@ test('同一主图商品与网页开售团贯穿运输到货及分批核销（�
   const planRow = page.getByRole('row').filter({ hasText: campaignTitle });
   await planRow.getByRole('button', { name: '登记运输信息' }).click();
   await page.getByLabel('承运方').fill('本地测试车队');
-  await page.getByLabel('运输单号').fill(`FLOW-${suffix}`);
+  await page.getByLabel('运单号（可选）').fill(`FLOW-${suffix}`);
   await page.getByLabel('司机', { exact: true }).fill('测试司机');
   await page.getByLabel('车牌').fill('京A12345');
   await page.locator('.ant-modal:visible button[type="submit"]').click();
@@ -159,7 +159,7 @@ test('同一主图商品与网页开售团贯穿运输到货及分批核销（�
   await expect(page.getByRole('columnheader', { name: '到货可领总量', exact: true })).toBeVisible();
   for (const quantity of [1, 2]) {
     await pickupQuantity.fill('1');
-    await page.getByRole('button', { name: '确认本次领取' }).click();
+    await page.getByRole('button', { name: '确认领取' }).click();
     await page.getByRole('dialog', { name: '本次领取复核' }).getByRole('button', { name: '确认提交核销' }).click();
     await expect.poll(async () => (await readOrder()).items[0].pickedUpQuantity).toBe(quantity);
     await screenshot(`05-pickup-${quantity}`);

@@ -306,8 +306,9 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
     financeCancellation.getByRole("button", { name: "执行退款" }),
   ).toBeVisible();
   let failedCancellationRefreshes = 0;
+  const cancellationRefreshRoute = "**/api/v1/admin/community/cancellation-requests*";
   await page.route(
-    "**/api/v1/admin/community/cancellation-requests?*",
+    cancellationRefreshRoute,
     async (route) => {
       if (!allowExpectedCancellationRefreshFailure) return route.continue();
       failedCancellationRefreshes += 1;
@@ -323,11 +324,17 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
     },
   );
   allowExpectedCancellationRefreshFailure = true;
+  const cancellationRefund = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().endsWith(`/api/v1/admin/community/orders/${cancelA.id}/cancellation/refund`),
+  );
   await financeCancellation.getByRole("button", { name: "执行退款" }).click();
   await page.getByRole("dialog", { name: "二次确认执行取消退款" }).getByRole("button", { name: "确认执行退款" }).click();
+  expect((await cancellationRefund).ok()).toBe(true);
   await expect.poll(() => failedCancellationRefreshes).toBe(1);
   allowExpectedCancellationRefreshFailure = false;
-  await page.unroute("**/api/v1/admin/community/cancellation-requests?*");
+  await page.unroute(cancellationRefreshRoute);
   await expect(financeCancellation.getByRole("button", { name: "执行退款" })).toHaveCount(0);
 
   // Four one-item orders were paid; cancelA has now been refunded and must
@@ -604,8 +611,8 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
   };
   await fillDate("新截单时间", dateInput(12));
   await fillDate("新发车时间", dateInput(24));
-  await fillDate("新预计到货开始", dateInput(28));
-  await fillDate("新预计到货结束", dateInput(32));
+  await fillDate("新预计到货时段（可选）· 开始", dateInput(28));
+  await fillDate("新预计到货时段（可选）· 结束", dateInput(32));
   await postponeDialog.getByRole("button", { name: "确认顺延" }).click();
   await expect(postponedRow.getByText("开售中", { exact: true })).toBeVisible();
 

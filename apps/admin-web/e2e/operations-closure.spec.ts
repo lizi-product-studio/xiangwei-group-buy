@@ -164,7 +164,7 @@ test("超管通过网页复核运输、发车、紧急纠正、订单详情和�
   await expect(planRow.getByRole("button", { name: "紧急纠正运输信息" })).toBeVisible();
   await planRow.getByRole("button", { name: "紧急纠正运输信息" }).click();
   await page.getByLabel("紧急纠正原因").fill("网页验收：车辆临时替换");
-  await page.getByLabel("运输单号").fill("WEB-CAR-002");
+  await page.getByLabel("运单号（可选）").fill("WEB-CAR-002");
   await page.locator('.ant-modal:visible button[type="submit"]').click();
 
   await page.getByRole("menuitem", { name: "订单列表" }).click();
