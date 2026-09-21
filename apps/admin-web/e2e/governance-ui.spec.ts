@@ -301,6 +301,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
   await logout(page);
   await completeTemporaryPasswordInBrowser(page, finance.username, finance.temporaryPassword, password);
   await expect(page.getByRole("heading", { name: "退款待办" })).toBeVisible();
+  await page.getByRole("tab", { name: "取消退款", exact: true }).click();
   const financeCancellation = page.getByRole("region", { name: "截单后取消退款" }).getByRole("row").filter({ hasText: cancelA.orderNo });
   await expect(
     financeCancellation.getByRole("button", { name: "执行退款" }),
