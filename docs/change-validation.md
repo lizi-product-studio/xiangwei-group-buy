@@ -49,3 +49,10 @@
 - 条件服务依据：[GitHub 官方工作流语法](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idservicesservice_idimage)，空 image 表示服务不启动。
 
 没有承诺任何任务固定几分钟完成；机制减少不必要工作，实际耗时仍取决于改动、缺陷与运行环境。
+
+### 首次远端验证
+
+- GitHub 提交 `8358529e02010a0574cf5331c40421e296e0fb9d`；本地对应 `235bc2cae9bbc2586462d131a73a6fa687549885`，源码 tree 同为 `9451d4e824851ade1961c7313266878b086fae36`。
+- [Quality 35584690209](https://github.com/lizi-product-studio/xiangwei-group-buy/actions/runs/35584690209)：2026-09-21 17:49 全部通过；scope、checks、browser、API/admin 镜像和统一 verify 均 success。浏览器 18 passed（6.3 分钟）；包检查、浏览器及镜像已验证并行运行。
+- 报告附件因 GitHub 既有存储配额满而无法上传。浏览器原始日志保留于 `/tmp/ci-scope-20260921/browser.log`，SHA-256 `cf840dd0ef4211be42b9670af1c91edc63a2d3ebe7f7f46f600404be40183817`；测试通过不等同于附件上传成功。
+- 已通知固定主编排使用新版规则。本轮未部署服务器、未进行微信上传发布；临时 actionlint 下载文件已清理，保留验证日志。未修改或纳入其他任务的业务改动。
