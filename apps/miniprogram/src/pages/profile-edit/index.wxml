@@ -1,1 +1,30 @@
-<view class="profile-edit"><view wx:if="{{loading}}" class="profile-edit__state">正在加载资料…</view><view wx:elif="{{error && !displayName}}" class="profile-edit__state profile-edit__state--error">{{error}}<button bindtap="loadProfile">重新加载</button></view><view wx:else><view class="profile-edit__card"><text class="profile-edit__label">头像</text><button class="profile-edit__avatar-button" open-type="chooseAvatar" bindchooseavatar="chooseAvatar"><image wx:if="{{avatarUrl}}" class="profile-edit__avatar" src="{{avatarUrl}}" mode="aspectFill"/><image wx:else class="profile-edit__avatar" src="/assets/user-gray.png" mode="aspectFit"/><text>点击更换</text></button></view><view class="profile-edit__card"><text class="profile-edit__label">姓名</text><input class="profile-edit__input" value="{{displayName}}" maxlength="30" placeholder="请输入姓名" bindinput="onNameInput"/><text class="profile-edit__hint">用于个人资料展示</text></view><view class="profile-edit__card"><view class="profile-edit__line"><view><text class="profile-edit__label">手机号</text><text class="profile-edit__value">{{phoneNumber}}</text></view><button class="profile-edit__phone" open-type="getPhoneNumber" bindgetphonenumber="authorizePhone">更换手机号</button></view></view><view wx:if="{{error}}" class="profile-edit__error">{{error}}</view><button class="profile-edit__save" loading="{{saving}}" disabled="{{saving}}" bindtap="saveProfile">保存资料</button></view></view>
+<view class="profile-edit">
+  <view wx:if="{{loading}}" class="profile-edit__state">正在加载资料…</view>
+  <view wx:elif="{{error && !profileLoaded}}" class="profile-edit__state profile-edit__state--error">
+    <text>{{error}}</text>
+    <button bindtap="loadProfile">重新加载</button>
+  </view>
+  <view wx:else class="profile-edit__content">
+    <view class="profile-edit__card profile-edit__card--avatar">
+      <text class="profile-edit__label">头像</text>
+      <button class="profile-edit__avatar-button" open-type="chooseAvatar" bindchooseavatar="chooseAvatar">
+        <image wx:if="{{avatarUrl}}" class="profile-edit__avatar" src="{{avatarUrl}}" mode="aspectFill"/>
+        <image wx:else class="profile-edit__avatar" src="/assets/user-gray.png" mode="aspectFit"/>
+        <view class="profile-edit__avatar-copy"><text class="profile-edit__avatar-action">更换头像</text><text class="profile-edit__hint">仅在你主动选择后上传</text></view>
+      </button>
+    </view>
+    <view class="profile-edit__card profile-edit__card--field">
+      <text class="profile-edit__label">姓名</text>
+      <input class="profile-edit__input" value="{{displayName}}" maxlength="30" placeholder="请输入姓名" placeholder-class="profile-edit__placeholder" bindinput="onNameInput"/>
+      <text class="profile-edit__hint">用于个人资料展示</text>
+    </view>
+    <view class="profile-edit__card profile-edit__card--phone">
+      <view class="profile-edit__line">
+        <view class="profile-edit__phone-copy"><text class="profile-edit__label">手机号</text><text class="profile-edit__value">{{phoneNumber}}</text></view>
+        <button class="profile-edit__phone" open-type="getPhoneNumber" bindgetphonenumber="authorizePhone">更换手机号</button>
+      </view>
+    </view>
+    <text wx:if="{{error}}" class="profile-edit__error">{{error}}</text>
+    <button class="profile-edit__save" loading="{{saving}}" disabled="{{saving}}" bindtap="saveProfile">保存资料</button>
+  </view>
+</view>

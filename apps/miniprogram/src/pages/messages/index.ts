@@ -43,10 +43,13 @@ Page({
       const [messages, preferences] = await Promise.all([
         api.listNotifications(),
         templates.length
-          ? api.getNotificationPreferences().catch(() => ({
-              types: [] as NotificationType[],
-              templateIds: {} as Record<string, string>,
-            }))
+          ? api.getNotificationPreferences().catch((error) => {
+              if (error instanceof AuthExpiredError) throw error;
+              return {
+                types: [] as NotificationType[],
+                templateIds: {} as Record<string, string>,
+              };
+            })
           : Promise.resolve({
               types: [] as NotificationType[],
               templateIds: {} as Record<string, string>,
@@ -177,7 +180,16 @@ Page({
     const currentAction = () => actionCoordinator.isCurrent(action, customerAuth.captureSessionEpoch()) && customerAuth.isLoggedIn();
     const id = event.currentTarget.dataset.orderId as string;
     const notificationId = event.currentTarget.dataset.id as string;
-    try { await api.markNotificationRead(notificationId); } catch { /* reading must not block the order view */ }
+    try {
+      await api.markNotificationRead(notificationId);
+    } catch (error) {
+      if (error instanceof AuthExpiredError) {
+        if (isOwnedAuthExpiry(error, action, customerAuth.captureSessionEpoch()) && actionCoordinator.isActive(action))
+          navigateToCustomerLogin('messages', '/pages/messages/index');
+        return;
+      }
+      // A failed read marker must not block an otherwise accessible order.
+    }
     if (!currentAction()) return;
     void wx.navigateTo({ url: `/pages/order-detail/index?id=${encodeURIComponent(id)}` });
   },

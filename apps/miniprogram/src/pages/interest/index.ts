@@ -15,6 +15,20 @@ type InterestView = {
   createdAt: string;
 };
 
+function signedOutInterestData() {
+  return {
+    regionText: '',
+    contactName: '',
+    contactPhone: '',
+    privacyAccepted: false,
+    submitting: false,
+    loading: false,
+    loadError: '',
+    editingId: '',
+    interests: [] as InterestView[],
+  };
+}
+
 Page({
   data: {
     regionText: '',
@@ -32,6 +46,7 @@ Page({
     actionCoordinator.activate();
     this.setData({ submitting: false });
     if (customerAuth.isLoggedIn()) void this.loadInterests();
+    else this.setData(signedOutInterestData());
   },
   onHide() { actionCoordinator.invalidate(); },
   onUnload() { actionCoordinator.invalidate(); },
@@ -51,7 +66,8 @@ Page({
     this.setData({ loading: true, loadError: '' });
     try {
       const interests = await api.listOwnServiceAreaInterests();
-      if (current()) this.setData({
+      if (!current()) return false;
+      this.setData({
         interests: interests.map((item) => ({
           ...item,
           statusText:
@@ -64,10 +80,13 @@ Page({
                   : '已关闭',
         })),
       });
+      return true;
     } catch (error) {
       if (error instanceof AuthExpiredError) {
-        if (isOwnedAuthExpiry(error, action, customerAuth.captureSessionEpoch()) && actionCoordinator.isActive(action))
+        if (isOwnedAuthExpiry(error, action, customerAuth.captureSessionEpoch()) && actionCoordinator.isActive(action)) {
+          this.setData(signedOutInterestData());
           navigateToCustomerLogin('service-area-interest', '/pages/interest/index');
+        }
         return;
       }
       if (current()) this.setData({ loading: false, loadError: customerErrorMessage(error, '意向记录加载失败，请稍后重试') });
@@ -118,9 +137,17 @@ Page({
     try {
       await api.withdrawOwnServiceAreaInterest(id);
       if (!current()) return;
-      await this.loadInterests();
-      void wx.showToast({ title: '意向已撤回', icon: 'success' });
+      const refreshed = await this.loadInterests();
+      if (refreshed && actionCoordinator.isAvailable() && customerAuth.isLoggedIn() && customerAuth.captureSessionEpoch() === action.epoch)
+        void wx.showToast({ title: '意向已撤回', icon: 'success' });
     } catch (error) {
+      if (error instanceof AuthExpiredError) {
+        if (isOwnedAuthExpiry(error, action, customerAuth.captureSessionEpoch()) && actionCoordinator.isActive(action)) {
+          this.setData(signedOutInterestData());
+          navigateToCustomerLogin('service-area-interest', '/pages/interest/index');
+        }
+        return;
+      }
       if (!current()) return;
       void wx.showToast({ title: customerErrorMessage(error, '撤回失败，请稍后重试'), icon: 'none' });
     }
@@ -167,6 +194,7 @@ Page({
     } catch (error) {
       if (error instanceof AuthExpiredError) {
         if (!isOwnedAuthExpiry(error, action, customerAuth.captureSessionEpoch()) || !actionCoordinator.isActive(action)) return;
+        this.setData(signedOutInterestData());
         navigateToCustomerLogin('service-area-interest', '/pages/interest/index', 'submit-service-area-interest');
         return;
       }

@@ -79,7 +79,13 @@ Page({
     });
     if (!loggedIn) return;
     try {
-      const [orders, profile] = await Promise.all([api.listOrders(), api.getMyProfile().catch(() => null)]);
+      const [orders, profile] = await Promise.all([
+        api.listOrders(),
+        api.getMyProfile().catch((error) => {
+          if (error instanceof AuthExpiredError) throw error;
+          return null;
+        }),
+      ]);
       if (!loadCoordinator.isCurrent(loadGuard, customerAuth.captureSessionEpoch()) || !customerAuth.isLoggedIn()) return;
       const counts: OrderCounts = {
         pending: 0,
@@ -101,7 +107,12 @@ Page({
           counts.active += 1;
         else if (order.status === "READY_FOR_PICKUP") counts.ready += 1;
       }
-      const avatarUrl = profile?.avatarUrl ? await api.downloadMyProfileImage(profile.avatarUrl).catch(() => "") : "";
+      const avatarUrl = profile?.avatarUrl
+        ? await api.downloadMyProfileImage(profile.avatarUrl).catch((error) => {
+            if (error instanceof AuthExpiredError) throw error;
+            return "";
+          })
+        : "";
       if (!loadCoordinator.isCurrent(loadGuard, customerAuth.captureSessionEpoch()) || !customerAuth.isLoggedIn()) return;
       this.setData({ orderTotal: orders.length, counts, userName: profile?.displayName || "微信用户", avatarUrl, phoneNumber: profile?.phoneNumber ?? "" });
     } catch (error) {
