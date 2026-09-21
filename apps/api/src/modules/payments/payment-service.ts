@@ -4,6 +4,7 @@ import type { CommerceStore } from "../core/store.js";
 import type { OrderRefund, PartialRefund, Payment } from "../core/types.js";
 import type { LedgerService } from "../finance/ledger-service.js";
 import type { NotificationService } from "../notifications/notification-service.js";
+import { operationalErrorText } from "../core/operational-error.js";
 import type {
   PaymentNotification,
   PaymentProvider,
@@ -753,7 +754,7 @@ export class PaymentService {
     } as T;
   }
   private errorText(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
+    return operationalErrorText(error);
   }
   private afterSubmissionError<T extends OrderRefund | PartialRefund>(
     refund: T,

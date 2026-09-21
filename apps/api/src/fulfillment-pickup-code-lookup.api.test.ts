@@ -81,6 +81,19 @@ describe("pickup code order lookup", () => {
     expect(response.json().data.items[0].remainingPickupQuantity).toBe(1);
   });
 
+  it("accepts the pickup code in a POST body for new workbenches", async () => {
+    await addOrder("order-a", "ORDER-A", "123456", new Date(Date.now() + 60_000).toISOString());
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/pickup/orders/lookup",
+      headers: managerHeaders,
+      payload: { pickupPointId: "point-a", code: "123456" },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json().data).toMatchObject({ id: "order-a", orderNo: "ORDER-A" });
+    expect(response.headers["x-request-id"]).toMatch(/^[0-9a-f-]{36}$/i);
+  });
+
   it.each([
     ["wrong code", "654321", 404],
     ["expired code", "123456", 404],

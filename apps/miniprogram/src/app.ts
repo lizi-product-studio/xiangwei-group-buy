@@ -22,6 +22,7 @@ App<IAppOption>({
     authMode: deployment.authMode,
     demoLoginEnabled: deployment.demoLoginEnabled === true,
     accessToken: null,
+    latestRequestId: "",
     subscriptionTemplates: deployment.subscriptionTemplates,
   },
 });

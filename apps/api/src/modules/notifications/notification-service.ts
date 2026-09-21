@@ -7,6 +7,7 @@ import type {
   OrderNotificationType,
 } from "../core/types.js";
 import type { SubscriptionMessageProvider } from "./wechat-subscription-provider.js";
+import { operationalErrorText } from "../core/operational-error.js";
 import type {
   NotificationCampaignEnqueueStore,
   NotificationOrderEnqueueStore,
@@ -237,7 +238,7 @@ export class NotificationService {
       notification.nextAttemptAt = null;
       notification.deliveryLeaseUntil = null;
       notification.deliveryClaimToken = null;
-      notification.lastDeliveryError = (error instanceof Error ? error.message : String(error)).slice(0, 500);
+      notification.lastDeliveryError = operationalErrorText(error);
       await this.store.saveOrderNotificationIfClaimed(notification, claimToken);
       return;
     }
@@ -291,7 +292,7 @@ export class NotificationService {
         store.recordSubmissionUnknownIfSubmission(
           submission.id,
           attemptId,
-          (error instanceof Error ? error.message : String(error)).slice(0, 500),
+          operationalErrorText(error),
         ),
       );
     }

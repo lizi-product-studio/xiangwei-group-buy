@@ -8,7 +8,16 @@ import type { User } from "./types.js";
 
 const databaseUrl = process.env.INTEGRATION_DATABASE_URL;
 const required = process.env.REQUIRE_INTEGRATION_TESTS === "true";
-const user = (id = randomUUID()): User => ({ id, wechatOpenId: null, status: "ACTIVE", createdAt: new Date().toISOString() });
+const user = (id = randomUUID()): User => ({
+  id,
+  wechatOpenId: null,
+  displayName: null,
+  avatarUrl: null,
+  profileUpdatedAt: null,
+  profileVersion: 0,
+  status: "ACTIVE",
+  createdAt: new Date().toISOString(),
+});
 const gate = () => {
   let release!: () => void;
   const promise = new Promise<void>(resolve => { release = resolve; });

@@ -111,6 +111,25 @@ describe("customer auth session epoch", () => {
     expect(customerAuth.getSessionEpoch()).toBe(1);
   });
 
+  it("preserves a server request id on safe non-auth failures", async () => {
+    const globals = installWechatGlobals();
+    globals.app.globalData.accessToken = "token-a";
+    storage.set("accessToken", "token-a");
+    storage.set("hometown-privacy-notice-version", PRIVACY_NOTICE_VERSION);
+    const { api, customerErrorMessage, ConsumerApiError } = await import("./api");
+    const pending = api.listOrders();
+    await Promise.resolve();
+    globals.respondProtected({
+      statusCode: 503,
+      data: { message: "内部 provider payload 不应展示", requestId: "123e4567-e89b-42d3-a456-426614174000" },
+    });
+    const error = await pending.catch((value) => value);
+    expect(error).toBeInstanceOf(ConsumerApiError);
+    expect(error).toMatchObject({ requestId: "123e4567-e89b-42d3-a456-426614174000" });
+    expect(customerErrorMessage(error)).toContain("请求编号：123e4567-e89b-42d3-a456-426614174000");
+    expect(customerErrorMessage(error)).not.toContain("provider payload");
+  });
+
   it("invalidates the session before a remote logout response arrives", async () => {
     const globals = installWechatGlobals();
     globals.app.globalData.accessToken = "token-a";

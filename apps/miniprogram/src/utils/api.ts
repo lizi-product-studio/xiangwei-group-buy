@@ -9,6 +9,8 @@ interface Envelope<T> {
 }
 interface ErrorEnvelope {
   message?: string;
+  code?: string;
+  requestId?: string;
 }
 interface AuthenticatedLoginResult {
   phoneRequired: false;
@@ -49,6 +51,7 @@ export class AuthExpiredError extends Error {
   constructor(
     readonly requestEpoch = sessionEpoch,
     readonly sessionWasCleared = false,
+    readonly requestId?: string,
   ) {
     super("登录已失效，请重新登录");
     this.name = "AuthExpiredError";
@@ -58,6 +61,43 @@ export class AuthExpiredError extends Error {
 const TECHNICAL_ERROR_PATTERN =
   /(request:fail|errMsg|statuscode|status\s*code|fetch failed|econn|etimedout|socket|http:\/\/|https:\/\/|\b[45]\d{2}\b|(?:\b(?:GET|POST|PUT|PATCH|DELETE|OPTIONS)\s+)?\/api\/[^\s]+|(?:\b(?:GET|POST|PUT|PATCH|DELETE|OPTIONS)\s+)?\/v\d+\/[^\s]+)/i;
 const INTERNAL_CODE_PATTERN = /^(?:[A-Z][A-Z0-9_-]{1,31}|P\d{1,3})$/;
+const REQUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+function safeRequestId(value: unknown): string | undefined {
+  return typeof value === "string" && REQUEST_ID_PATTERN.test(value) ? value : undefined;
+}
+function rememberRequestId(value: unknown): string | undefined {
+  const requestId = safeRequestId(value);
+  if (requestId) app.globalData.latestRequestId = requestId;
+  return requestId;
+}
+export function getLatestRequestId(): string | undefined {
+  return safeRequestId(app.globalData.latestRequestId);
+}
+export function copyLatestRequestId(): void {
+  const requestId = getLatestRequestId();
+  if (!requestId) {
+    void wx.showToast({ title: "暂无可复制的排查编号", icon: "none" });
+    return;
+  }
+  wx.setClipboardData({
+    data: requestId,
+    success: () => void wx.showToast({ title: "排查编号已复制", icon: "success" }),
+  });
+}
+function withRequestId(message: string, requestId: unknown): string {
+  const safe = safeRequestId(requestId);
+  return safe ? `${message}（请求编号：${safe}）` : message;
+}
+export class ConsumerApiError extends Error {
+  readonly requestId: string | undefined;
+  readonly code: string | undefined;
+  constructor(message: string, options: { requestId?: unknown; code?: unknown } = {}) {
+    super(message);
+    this.name = "ConsumerApiError";
+    this.requestId = safeRequestId(options.requestId);
+    this.code = typeof options.code === "string" ? options.code : undefined;
+  }
+}
 
 /**
  * Convert SDK/network/server failures into safe consumer-facing copy.  API
@@ -68,22 +108,28 @@ export function customerErrorMessage(
   error: unknown,
   fallback = "暂时无法完成请求，请稍后重试",
 ): string {
-  if (error instanceof AuthExpiredError) return error.message;
+  const requestId = rememberRequestId(
+    error instanceof AuthExpiredError || error instanceof ConsumerApiError ? error.requestId : undefined,
+  );
+  if (error instanceof AuthExpiredError) return withRequestId(error.message, requestId);
   const message = error instanceof Error ? error.message.trim() : "";
+  let safeMessage: string;
   if (
     !message ||
     TECHNICAL_ERROR_PATTERN.test(message) ||
     INTERNAL_CODE_PATTERN.test(message)
   ) {
     if (isLocalDemoDeployment(app.globalData)) {
-      return "本地服务未启动，请在项目根目录运行 pnpm dev 后重试";
+      safeMessage = "本地服务未启动，请在项目根目录运行 pnpm dev 后重试";
+    } else if (isDemoDeployment(app.globalData)) {
+      safeMessage = "服务暂时不可用，请稍后重试";
+    } else {
+      safeMessage = fallback;
     }
-    if (isDemoDeployment(app.globalData)) {
-      return "服务暂时不可用，请稍后重试";
-    }
-    return fallback;
+  } else {
+    safeMessage = message;
   }
-  return message;
+  return withRequestId(safeMessage, requestId);
 }
 
 function wxLogin(): Promise<string> {
@@ -117,12 +163,11 @@ function loginRequest(
             return resolve(result);
           return reject(new Error("登录响应未完成，请重新登录"));
         }
+        const body = response.data as unknown as ErrorEnvelope;
         reject(
-          new Error(
-            customerErrorMessage(
-              new Error((response.data as unknown as ErrorEnvelope).message ?? "登录失败"),
-              "登录失败",
-            ),
+          new ConsumerApiError(
+            customerErrorMessage(new Error(body.message ?? "登录失败"), "登录失败"),
+            { requestId: body.requestId, code: body.code },
           ),
         );
       },
@@ -211,12 +256,14 @@ async function request<T>(
         if (response.statusCode === 401) {
           const sessionWasCleared = sessionEpoch === requestEpoch;
           if (sessionWasCleared) customerAuth.clearSession();
-          reject(new AuthExpiredError(requestEpoch, sessionWasCleared));
+          const body = response.data as unknown as ErrorEnvelope;
+          reject(new AuthExpiredError(requestEpoch, sessionWasCleared, safeRequestId(body?.requestId)));
           return;
         }
-        const serverMessage = (response.data as unknown as ErrorEnvelope)?.message;
+        const body = response.data as unknown as ErrorEnvelope;
+        const serverMessage = body?.message;
         reject(
-          new Error(
+          new ConsumerApiError(
             response.statusCode >= 500
               ? customerErrorMessage(new Error(`HTTP ${response.statusCode}`))
               : customerErrorMessage(
@@ -225,6 +272,7 @@ async function request<T>(
                     ? "当前操作暂不可用，请刷新后重试"
                     : "请求未完成，请稍后重试",
                 ),
+            { requestId: body?.requestId, code: body?.code },
           ),
         );
       },
@@ -338,11 +386,15 @@ export const api = {
             if (response.statusCode === 401) {
               const sessionWasCleared = sessionEpoch === requestEpoch;
               if (sessionWasCleared) customerAuth.clearSession();
-              reject(new AuthExpiredError(requestEpoch, sessionWasCleared));
+              const body = response.data as unknown as ErrorEnvelope;
+              reject(new AuthExpiredError(requestEpoch, sessionWasCleared, safeRequestId(body?.requestId)));
               return;
             }
-            const serverMessage = (response.data as unknown as ErrorEnvelope)?.message;
-            reject(new Error(customerErrorMessage(new Error(serverMessage ?? `HTTP ${response.statusCode}`), "头像上传失败，请稍后重试")));
+            const body = response.data as unknown as ErrorEnvelope;
+            reject(new ConsumerApiError(
+              customerErrorMessage(new Error(body.message ?? `HTTP ${response.statusCode}`), "头像上传失败，请稍后重试"),
+              { requestId: body.requestId, code: body.code },
+            ));
           },
           fail: (error) => reject(new Error(customerErrorMessage(error, "头像上传失败，请稍后重试"))),
         });

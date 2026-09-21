@@ -114,9 +114,22 @@ describe("community admin API", () => {
 
   it("looks up pickup code within a point and only supplies an order number for disambiguation", async () => {
     await api.lookupPickupCode("point-1", "012345");
-    expect(fetch).toHaveBeenLastCalledWith("/api/v1/pickup/orders/lookup?pickupPointId=point-1&code=012345", expect.any(Object));
+    expect(fetch).toHaveBeenLastCalledWith(
+      "/api/v1/pickup/orders/lookup",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ pickupPointId: "point-1", code: "012345" }) }),
+    );
     await api.lookupPickupCode("point-1", "012345", "ORDER-1");
-    expect(fetch).toHaveBeenLastCalledWith("/api/v1/pickup/orders/lookup?pickupPointId=point-1&code=012345&orderNo=ORDER-1", expect.any(Object));
+    expect(fetch).toHaveBeenLastCalledWith(
+      "/api/v1/pickup/orders/lookup",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ pickupPointId: "point-1", code: "012345", orderNo: "ORDER-1" }) }),
+    );
+  });
+
+  it("keeps a safe server request id in operator-facing failure copy", () => {
+    expect(adminErrorText({ statusCode: 500, requestId: "123e4567-e89b-42d3-a456-426614174000" })).toContain(
+      "请求编号：123e4567-e89b-42d3-a456-426614174000",
+    );
+    expect(adminErrorText({ statusCode: 500, requestId: "raw-provider-payload" })).not.toContain("raw-provider-payload");
   });
 
   it("fails closed for malformed bearer role arrays while accepting the staff role enum", () => {

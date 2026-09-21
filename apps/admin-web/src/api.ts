@@ -556,7 +556,14 @@ function formatOperatorDetails(details: unknown): string | null {
     .filter((value): value is string => Boolean(value));
   return messages.length ? [...new Set(messages)].join("；") : null;
 }
-export function adminErrorText(error: unknown): string {
+const requestIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+export function appendAdminRequestId(error: unknown, text: string): string {
+  const value = error as { requestId?: unknown };
+  return typeof value?.requestId === "string" && requestIdPattern.test(value.requestId)
+    ? `${text}（请求编号：${value.requestId}）`
+    : text;
+}
+function adminErrorTextBase(error: unknown): string {
   const value = error as {
     message?: unknown;
     code?: unknown;
@@ -613,6 +620,9 @@ export function adminErrorText(error: unknown): string {
   if (statusCode >= 500) return "后台服务暂时不可用，请稍后重试";
   if (value?.code === "VALIDATION_ERROR") return "请检查标有提示的字段后重试";
   return "操作未完成，请检查填写内容后重试";
+}
+export function adminErrorText(error: unknown): string {
+  return appendAdminRequestId(error, adminErrorTextBase(error));
 }
 const TOKEN = "community-admin-token",
   ROLES = "community-admin-roles",
@@ -978,9 +988,11 @@ export const api = {
       `/api/v1/pickup/orders/lookup?deliveryPlanId=${encodeURIComponent(deliveryPlanId)}&orderNo=${encodeURIComponent(orderNo)}`,
     ),
   lookupPickupCode: (pickupPointId: string, code: string, orderNo?: string) =>
-    request<PickupLookup>(
-      `/api/v1/pickup/orders/lookup?${new URLSearchParams({ pickupPointId, code, ...(orderNo ? { orderNo } : {}) })}`,
-    ),
+    post<PickupLookup>("/api/v1/pickup/orders/lookup", {
+      pickupPointId,
+      code,
+      ...(orderNo ? { orderNo } : {}),
+    }),
   verifyPickup: (body: {
     orderId: string;
     deliveryPlanId: string;

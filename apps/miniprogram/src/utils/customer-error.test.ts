@@ -12,11 +12,12 @@ describe("consumer-safe request errors", () => {
         authMode: overrides.authMode ?? "demo",
         demoLoginEnabled: overrides.demoLoginEnabled ?? true,
         accessToken: null,
+        latestRequestId: "",
         subscriptionTemplates: [],
       },
     };
     vi.stubGlobal("getApp", () => app);
-    vi.stubGlobal("wx", { getStorageSync: vi.fn(), setStorageSync: vi.fn(), removeStorageSync: vi.fn() });
+    vi.stubGlobal("wx", { getStorageSync: vi.fn(), setStorageSync: vi.fn(), removeStorageSync: vi.fn(), setClipboardData: vi.fn(), showToast: vi.fn() });
     return { ...(await import("./api")), app };
   }
 
@@ -50,6 +51,22 @@ describe("consumer-safe request errors", () => {
     expect(customerErrorMessage(new Error("当前团期已截单"), "当前操作暂不可用，请刷新后重试")).toBe(
       "当前团期已截单",
     );
+  });
+
+  it("keeps only a validated server request id for support", async () => {
+    const { ConsumerApiError, customerErrorMessage } = await load({ authMode: "wechat", demoLoginEnabled: false });
+    const id = "123e4567-e89b-42d3-a456-426614174000";
+    expect(customerErrorMessage(new ConsumerApiError("暂时无法完成请求，请稍后重试", { requestId: id }))).toContain(`请求编号：${id}`);
+    expect(customerErrorMessage(new ConsumerApiError("暂时无法完成请求，请稍后重试", { requestId: "raw-secret" }))).not.toContain("raw-secret");
+  });
+
+  it("stores the latest safe id for the existing customer-support path and copies it explicitly", async () => {
+    const { ConsumerApiError, customerErrorMessage, copyLatestRequestId, app } = await load({ authMode: "wechat", demoLoginEnabled: false });
+    const id = "123e4567-e89b-42d3-a456-426614174000";
+    customerErrorMessage(new ConsumerApiError("暂时无法完成请求，请稍后重试", { requestId: id }));
+    copyLatestRequestId();
+    expect(app.globalData.latestRequestId).toBe(id);
+    expect(wx.setClipboardData).toHaveBeenCalledWith(expect.objectContaining({ data: id }));
   });
 
   it("does not expose internal status codes", async () => {

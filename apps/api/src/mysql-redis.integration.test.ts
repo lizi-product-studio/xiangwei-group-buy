@@ -1,6 +1,10 @@
+import { createHmac, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { moneyCents } from "@hometown/domain";
 import { MysqlStore } from "./modules/core/mysql-store.js";
 import { RedisCampaignScheduler } from "./modules/campaigns/campaign-scheduler.js";
+import { FulfillmentService } from "./modules/fulfillment/fulfillment-service.js";
+import { LedgerService } from "./modules/finance/ledger-service.js";
 import type { OrderNotification } from "./modules/core/types.js";
 import { Redis } from "ioredis";
 
@@ -109,6 +113,65 @@ describe.skipIf(!databaseUrl || !redisUrl)(
       ]);
       await expect(first.getUser(firstId)).resolves.toMatchObject({ id: firstId });
       await expect(first.getUser(secondId)).resolves.toMatchObject({ id: secondId });
+    });
+    it("serializes same-order pickup verification across MySQL pools for same and different request ids", async () => {
+      const suffix = `${Date.now()}-${randomUUID()}`;
+      const now = new Date().toISOString();
+      const future = new Date(Date.now() + 86_400_000).toISOString();
+      const secret = `pickup-integration-${suffix}`;
+      const areaId = `area-${suffix}`;
+      const pointId = `point-${suffix}`;
+      const campaignId = `campaign-${suffix}`;
+      const planId = `plan-${suffix}`;
+      const orderId = `order-${suffix}`;
+      const lineId = `line-${suffix}`;
+      const skuId = `sku-${suffix}`;
+      const managerId = `manager-${suffix}`;
+      const pickupCode = String(Number.parseInt(createHmac("sha256", secret).update(`pickup:${orderId}`).digest("hex").slice(0, 12), 16) % 1_000_000).padStart(6, "0");
+      await first.saveCampaign({
+        id: campaignId,
+        title: "integration pickup concurrency",
+        serviceAreaId: areaId,
+        cutoffAt: now,
+        dispatchAt: now,
+        estimatedArrivalStartAt: now,
+        estimatedArrivalEndAt: now,
+        minTotalQuantity: 1,
+        failureAction: "CANCEL_AND_REFUND",
+        items: [],
+        status: "FULFILLING",
+        version: 1,
+        createdAt: now,
+      });
+      await first.saveServiceArea({ id: areaId, regionCode: "110101", name: "integration", status: "ENABLED", orderEnabled: true, createdAt: now });
+      await first.savePickupPoint({ id: pointId, serviceAreaId: areaId, name: "integration", address: "integration", businessHours: "09:00-20:00", pickupInstructions: "integration", latitude: 39.9, longitude: 116.4, contactName: "integration", contactPhone: "13800000000", status: "ACTIVE", capacityPerDay: null, createdAt: now });
+      await first.saveDeliveryPlan({ id: planId, campaignId, serviceAreaId: areaId, pickupPointId: pointId, status: "ARRIVED", siteName: "integration", address: "integration", arrivalStartAt: now, arrivalEndAt: now, contactName: null, contactPhone: null, vehicleOrderNo: null, driverName: null, driverPhone: null, vehiclePlate: null, logisticsPlatform: null, estimatedArrivalAt: null, remark: null, confirmedAt: now, bookedAt: now, dispatchedAt: now, arrivedAt: now, createdAt: now, updatedAt: now });
+      await first.saveUser({ id: managerId, wechatOpenId: null, status: "ACTIVE", createdAt: now });
+      await first.saveInternalStaff({ userId: managerId, staffNo: `STF-${suffix}`, displayName: "integration", phone: "13800000000", role: "PICKUP_MANAGER", status: "ACTIVE", createdBy: null, activatedAt: now, suspendedAt: null, suspensionReason: null, createdAt: now, updatedAt: now });
+      await first.replaceStaffPickupPointAssignments(managerId, [{ staffUserId: managerId, pickupPointId: pointId, assignedBy: managerId, createdAt: now, updatedAt: now }]);
+      await first.saveOrder({ id: orderId, orderNo: `ORDER-${suffix}`, userId: `customer-${suffix}`, campaignId, serviceAreaId: areaId, pickupPointId: pointId, deliveryPlanId: planId, status: "READY_FOR_PICKUP", totalCents: moneyCents(3000), items: [{ orderLineId: lineId, skuId: skuId, productId: `product-${suffix}`, name: "integration", quantity: 3, unitPriceCents: moneyCents(1000), amountCents: moneyCents(3000), fulfilledQuantity: 3, pickedUpQuantity: 0, exceptionQuantity: 0, refundedQuantity: 0, refundedAmountCents: moneyCents(0) }], createdAt: now, expiresAt: future, paidAt: now, pickedUpAt: null });
+      await first.saveOrderLines(orderId, [{ id: lineId, catalogSkuId: skuId, productId: `product-${suffix}`, title: "integration", skuName: "one", quantity: 3, unitPriceCents: moneyCents(1000), amountCents: moneyCents(3000) }]);
+      const line = (await first.listOrderLinesByOrderForUpdate(orderId))[0]!;
+      line.fulfilledQuantity = 3;
+      await first.updateOrderLine(line);
+      await first.savePickupCredential({ orderId, codeHash: createHmac("sha256", secret).update(pickupCode).digest("hex"), status: "ACTIVE", expiresAt: future });
+      await first.saveCommunityPickupWindow({ orderId, deliveryPlanId: planId, arrivedAt: now, deadlineAt: future, status: "ACTIVE", extensionCount: 0, extendedBy: null, extendedAt: null, dispositionBy: null, dispositionAt: null, dispositionNote: null, refundExceptionId: null, lossExceptionId: null });
+
+      const firstService = new FulfillmentService(first, secret, new LedgerService());
+      const secondService = new FulfillmentService(second, secret, new LedgerService());
+      const command = (pickupRequestId: string) => ({ orderId, deliveryPlanId: planId, code: pickupCode, verifierId: managerId, requestedItems: [{ catalogSkuId: skuId, quantity: 1 }], pickupRequestId });
+      const sameRequest = await Promise.allSettled([firstService.verify(command("same-request")), secondService.verify(command("same-request"))]);
+      expect(sameRequest.filter((value) => value.status === "fulfilled")).toHaveLength(2);
+      const differentRequests = await Promise.allSettled([firstService.verify(command("different-request-a")), secondService.verify(command("different-request-b"))]);
+      expect(differentRequests.filter((value) => value.status === "fulfilled")).toHaveLength(2);
+      expect((await second.listOrderLinesByOrderForUpdate(orderId))[0]?.pickedUpQuantity).toBe(3);
+      expect((await second.getOrder(orderId))?.status).toBe("PICKED_UP");
+      expect(await second.listCommunityPickupReceiptsByOrder(orderId)).toHaveLength(3);
+      expect((await second.listLedgerTransactions(orderId)).filter((value) => value.eventType === "PICKUP_CONFIRMED")).toHaveLength(1);
+      await firstService.verify(command("same-request"));
+      await secondService.verify(command("different-request-a"));
+      expect(await second.listCommunityPickupReceiptsByOrder(orderId)).toHaveLength(3);
+      expect((await second.listLedgerTransactions(orderId)).filter((value) => value.eventType === "PICKUP_CONFIRMED")).toHaveLength(1);
     });
     it("uses MySQL UTC_TIMESTAMP(3) to reject an expired claim across pools", async () => {
       const id = `integration-notification-${Date.now()}`;

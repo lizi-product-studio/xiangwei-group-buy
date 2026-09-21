@@ -235,7 +235,39 @@ describe("community safety invariants", () => {
       pickupRequestId: "00000000-0000-4000-8000-000000000002",
     });
     expect((await store.getOrder("order"))?.status).toBe("PICKED_UP");
+    expect(await store.listCommunityPickupReceiptsByOrder("order")).toHaveLength(2);
+    expect((await store.listLedgerTransactions("order")).filter((value) => value.eventType === "PICKUP_CONFIRMED")).toHaveLength(1);
     vi.useRealTimers();
+  });
+  it("serializes concurrent different pickup requests and keeps one receipt and ledger fact per request/event", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-22T00:00:00.000Z"));
+    try {
+      const store = await pickupFixture();
+      const service = new FulfillmentService(store, pickupSecret, new LedgerService());
+      const command = (pickupRequestId: string) => ({
+        orderId: "order",
+        deliveryPlanId: "plan",
+        code: pickupCode("order"),
+        verifierId: "manager",
+        requestedItems: [{ catalogSkuId: "sku", quantity: 1 }],
+        pickupRequestId,
+      });
+      await expect(Promise.all([
+        service.verify(command("00000000-0000-4000-8000-000000000010")),
+        service.verify(command("00000000-0000-4000-8000-000000000011")),
+      ])).resolves.toHaveLength(2);
+      expect((await store.listOrderLinesByOrderForUpdate("order"))[0]?.pickedUpQuantity).toBe(2);
+      expect((await store.getOrder("order"))?.status).toBe("PICKED_UP");
+      expect(await store.listCommunityPickupReceiptsByOrder("order")).toHaveLength(2);
+      expect((await store.listLedgerTransactions("order")).filter((value) => value.eventType === "PICKUP_CONFIRMED")).toHaveLength(1);
+
+      await service.verify(command("00000000-0000-4000-8000-000000000010"));
+      expect(await store.listCommunityPickupReceiptsByOrder("order")).toHaveLength(2);
+      expect((await store.listLedgerTransactions("order")).filter((value) => value.eventType === "PICKUP_CONFIRMED")).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
   it("records an ambiguous subscription delivery as durable submission unknown", async () => {
     const store = await pickupFixture();

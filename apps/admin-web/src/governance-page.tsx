@@ -15,11 +15,11 @@ import {
   Typography,
 } from "antd";
 import {
-  adminErrorText,
   api,
   type Notification,
   type ServiceAreaInterest,
 } from "./api.ts";
+import { adminErrorNotice } from "./request-error.tsx";
 import { displayLabel } from "./labels.ts";
 
 const NotificationStatus = ({ value }: { value: string }) => (
@@ -109,7 +109,7 @@ export function GovernancePage({
       setNotificationAction(null);
       await refreshAfterMutation(reload, message, "通知已重新进入系统重试队列");
     } catch (caught) {
-      void message.error(adminErrorText(caught));
+      void message.error(adminErrorNotice(caught));
     } finally {
       setSubmitting(false);
     }
@@ -131,7 +131,7 @@ export function GovernancePage({
       setNotificationAction(null);
       await refreshAfterMutation(reload, message, "已记录人工处理结果");
     } catch (caught) {
-      void message.error(adminErrorText(caught));
+      void message.error(adminErrorNotice(caught));
     } finally {
       setSubmitting(false);
     }
@@ -148,7 +148,7 @@ export function GovernancePage({
       setInterestAction(null);
       await refreshAfterMutation(reload, message, "区域开通意向已更新");
     } catch (caught) {
-      void message.error(adminErrorText(caught));
+      void message.error(adminErrorNotice(caught));
     } finally {
       setSubmitting(false);
     }

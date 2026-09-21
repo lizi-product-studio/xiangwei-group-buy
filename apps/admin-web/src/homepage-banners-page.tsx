@@ -13,7 +13,8 @@ import {
 } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
-import { api, adminErrorText, type Campaign, type HomepageBanner, type ProductCategory, type ServiceArea } from "./api.ts";
+import { api, type Campaign, type HomepageBanner, type ProductCategory, type ServiceArea } from "./api.ts";
+import { adminErrorNotice } from "./request-error.tsx";
 import { ProductImageField, ProductPicture } from "./ProductImageField.tsx";
 
 type BannerDraft = {
@@ -161,7 +162,7 @@ export function HomepageBannersPage({ values, areas, campaigns, categories, relo
       setOpen(false);
       await refreshAfterMutation(reload, message, editing ? "轮播已更新" : "轮播已创建");
     } catch (error) {
-      message.error(adminErrorText(error));
+      message.error(adminErrorNotice(error));
     } finally {
       setSaving(false);
     }
@@ -186,7 +187,7 @@ export function HomepageBannersPage({ values, areas, campaigns, categories, relo
       });
       await refreshAfterMutation(reload, message, value.status === "ACTIVE" ? "轮播已停用" : "轮播已启用");
     } catch (error) {
-      message.error(adminErrorText(error));
+      message.error(adminErrorNotice(error));
     } finally {
       finishAction();
     }
@@ -206,7 +207,7 @@ export function HomepageBannersPage({ values, areas, campaigns, categories, relo
           await api.deleteHomepageBanner(value.id, value.version);
           await refreshAfterMutation(reload, message, "轮播已删除");
         } catch (error) {
-          message.error(adminErrorText(error));
+          message.error(adminErrorNotice(error));
         } finally {
           finishAction();
         }

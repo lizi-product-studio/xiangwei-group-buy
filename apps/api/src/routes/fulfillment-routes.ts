@@ -1,8 +1,9 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import {
   createDispatchBatchSchema,
   identifierSchema,
+  pickupOrderLookupBodySchema,
   pickupOrderLookupQuerySchema,
   verifyPickupSchema,
 } from "@hometown/api-contracts";
@@ -56,9 +57,9 @@ export function registerFulfillmentRoutes(
       ),
     };
   });
-  app.get("/api/v1/pickup/orders/lookup", async (request) => {
+  const lookupOrder = async (request: FastifyRequest, rawInput: unknown) => {
     const actor = requireActor(request, ["PICKUP_MANAGER"]);
-    const query = pickupOrderLookupQuerySchema.parse(request.query);
+    const query = pickupOrderLookupQuerySchema.parse(rawInput);
     let plan: DeliveryPlan | null;
     let order: Order | null = null;
     if (query.pickupPointId && query.code) {
@@ -120,7 +121,15 @@ export function registerFulfillmentRoutes(
         })),
       },
     };
-  });
+  };
+  // Keep the legacy GET route for already deployed workbenches. New clients
+  // must send the pickup code in a JSON body so it cannot enter URL logs.
+  app.get("/api/v1/pickup/orders/lookup", async (request) =>
+    lookupOrder(request, request.query),
+  );
+  app.post("/api/v1/pickup/orders/lookup", async (request) =>
+    lookupOrder(request, pickupOrderLookupBodySchema.parse(request.body)),
+  );
   app.post("/api/v1/pickup/verify", async (request) => {
     const actor = requireActor(request, ["PICKUP_MANAGER"]);
     const input = verifyPickupSchema.parse(request.body);

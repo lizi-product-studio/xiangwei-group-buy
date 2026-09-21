@@ -403,12 +403,13 @@ export const communityArrivalSchema = z
       .max(500),
   })
   .strict();
-export const pickupOrderLookupQuerySchema = z.object({
+const pickupOrderLookupFields = {
   deliveryPlanId: identifierSchema.optional(),
   orderNo: z.string().trim().min(1).max(64).optional(),
   pickupPointId: identifierSchema.optional(),
   code: z.string().regex(/^\d{6}$/).optional(),
-}).refine(
+} as const;
+const pickupOrderLookupSchema = z.object(pickupOrderLookupFields).refine(
   (value) =>
     Boolean(value.deliveryPlanId && value.orderNo) ||
     Boolean(value.pickupPointId && value.code),
@@ -417,6 +418,8 @@ export const pickupOrderLookupQuerySchema = z.object({
       "查询订单需要配送计划号和订单号，或自提点号和六位取货码",
   },
 );
+export const pickupOrderLookupQuerySchema = pickupOrderLookupSchema;
+export const pickupOrderLookupBodySchema = pickupOrderLookupSchema;
 export const verifyPickupSchema = z.object({
   orderId: identifierSchema,
   deliveryPlanId: identifierSchema,

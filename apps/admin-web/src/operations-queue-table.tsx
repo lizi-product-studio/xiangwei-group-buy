@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Select, Table, type TableProps } from "antd";
 import { adminErrorText, type QueuePage, type QueueQuery } from "./api.ts";
+import { adminErrorNoticeFromText } from "./request-error.tsx";
 import { displayLabel } from "./labels.ts";
 
 export function OperationsQueueTable<T extends object>({loadPage, refreshToken, statuses, fixedStatus, ...props}: Omit<TableProps<T>, "dataSource" | "pagination" | "onChange"> & {
@@ -40,7 +41,7 @@ export function OperationsQueueTable<T extends object>({loadPage, refreshToken, 
     {statuses && <Select aria-label="待办状态筛选" style={{minWidth: 180, marginBottom: 12}} value={query.status ?? ""}
       options={[{value: "", label: "全部可见状态"}, ...statuses.map(value => ({value, label: displayLabel(value)}))]}
       onChange={(status: string) => setQuery({page: 1, pageSize: query.pageSize, ...(status ? {status} : {})})} />}
-    {error && <Alert type="error" showIcon message="待办加载失败" description={error} action={<Button onClick={() => setRetry(value => value + 1)}>重试</Button>} />}
+    {error && <Alert type="error" showIcon message="待办加载失败" description={adminErrorNoticeFromText(error)} action={<Button onClick={() => setRetry(value => value + 1)}>重试</Button>} />}
     <Table<T> {...props} loading={loading} dataSource={result.data} pagination={{current: query.page, pageSize: query.pageSize, total: result.pagination.total, showSizeChanger: true, showTotal: total => `共 ${total} 条`, onChange: (page, pageSize) => setQuery(previous => ({...previous, page, pageSize}))}} />
   </div>;
 }

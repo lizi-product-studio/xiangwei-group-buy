@@ -1,5 +1,6 @@
 import { newestFirst, earliestFirst, refundHistory } from "./list-order.ts";
 import { OperationsQueueTable } from "./operations-queue-table.tsx";
+import { adminErrorNotice } from "./request-error.tsx";
 import { Consumers } from "./consumers-page.tsx";
 import { ProductImageField, ProductPicture } from "./ProductImageField.tsx";
 import { getEntryBranding } from "./entry-branding.ts";
@@ -54,6 +55,7 @@ import dayjs from "dayjs";
 import {
   api,
   auth,
+  appendAdminRequestId,
   adminErrorText,
   AdminApiError,
   hasValidAdminSession,
@@ -182,7 +184,7 @@ const mutationErrorText = (error: unknown): string => {
   };
   const details = value.details;
   const validationMessage = formatValidationDetails(details);
-  if (validationMessage) return validationMessage;
+  if (validationMessage) return appendAdminRequestId(error, validationMessage);
   const impact = details as {
     campaignCount?: number;
     unfinishedOrderCount?: number;
@@ -220,7 +222,7 @@ const mutationErrorText = (error: unknown): string => {
     /[\u3400-\u9fff]/u.test(error.message) &&
     !transportError
   ) {
-    return error.message;
+    return appendAdminRequestId(error, error.message);
   }
   return adminErrorText(error);
 };
@@ -919,7 +921,7 @@ function Products({
       form.resetFields();
       await refreshAfterMutation(reload, message, "商品已保存；历史订单快照不会改变");
     } catch (error) {
-      void message.error(mutationErrorText(error));
+      void message.error(adminErrorNotice(error, mutationErrorText(error)));
     } finally {
       setSaving(false);
     }
@@ -949,7 +951,7 @@ function Products({
           : "商品已重新启用",
       );
     } catch (error) {
-      void message.error(mutationErrorText(error));
+      void message.error(adminErrorNotice(error, mutationErrorText(error)));
     } finally {
       setSaving(false);
     }
@@ -978,7 +980,7 @@ function Products({
         value.status === "ACTIVE" ? "分类已停用" : "分类已启用",
       );
     } catch (error) {
-      message.error(mutationErrorText(error));
+      message.error(adminErrorNotice(error, mutationErrorText(error)));
     } finally {
       setSavingCategory(false);
     }
@@ -1009,7 +1011,7 @@ function Products({
           await api.deleteCategory(value.id);
           await refreshAfterMutation(reload, message, "分类已删除");
         } catch (error) {
-          message.error(mutationErrorText(error));
+          message.error(adminErrorNotice(error, mutationErrorText(error)));
         } finally {
           setSavingCategory(false);
         }
@@ -1222,7 +1224,7 @@ function Products({
                 editingCategory ? "分类名称已更新" : "分类已保存",
               );
             } catch (error) {
-              message.error(mutationErrorText(error));
+              message.error(adminErrorNotice(error, mutationErrorText(error)));
             } finally {
               setSavingCategory(false);
             }
@@ -1377,7 +1379,7 @@ function Campaigns({
       await api.deleteCampaign(deleteReview.id, deleteReview.version);
       setDeleteReview(null);
       await refreshAfterMutation(reload, message, "草稿团期已删除");
-    } catch(error) { void message.error(campaignError(error)); }
+    } catch(error) { void message.error(adminErrorNotice(error, campaignError(error))); }
     finally { setSubmitting(false); }
   };
   const create = async () => {
@@ -1405,7 +1407,7 @@ function Campaigns({
     } catch (error) {
       // Keep the draft/review open so the operator can fix the exact field
       // rejected by the API instead of losing all entered values.
-      void message.error(campaignError(error));
+      void message.error(adminErrorNotice(error, campaignError(error)));
     } finally {
       setSubmitting(false);
     }
@@ -1422,7 +1424,7 @@ function Campaigns({
         });
         setCancelReason("");
       } catch (error) {
-        void message.error(campaignError(error));
+        void message.error(adminErrorNotice(error, campaignError(error)));
       }
       return;
     }
@@ -1445,7 +1447,7 @@ function Campaigns({
       await refreshAfterMutation(reload, message, name === "open" ? "团期已开售" : "团期操作已完成");
       if (name === "open") setOpenReview(null);
     } catch (error) {
-      void message.error(campaignError(error));
+      void message.error(adminErrorNotice(error, campaignError(error)));
     } finally {
       setSubmitting(false);
     }
@@ -1468,7 +1470,7 @@ function Campaigns({
               : "团期截单结果已更新";
       await refreshAfterMutation(reload, message, successText);
     } catch (error) {
-      void message.error(campaignError(error));
+      void message.error(adminErrorNotice(error, campaignError(error)));
     } finally {
       setSubmitting(false);
     }
@@ -1483,7 +1485,7 @@ function Campaigns({
       setCancelReview(null);
       await refreshAfterMutation(reload, message, "团期已取消，待付款订单已释放，已付款订单已进入退款义务");
     } catch (error) {
-      void message.error(mutationErrorText(error));
+      void message.error(adminErrorNotice(error, mutationErrorText(error)));
     } finally {
       setSubmitting(false);
     }
@@ -1507,7 +1509,7 @@ function Campaigns({
       postponeForm.resetFields();
       await refreshAfterMutation(reload, message, "团期已顺延并重新进入开售；通知已进入既有队列");
     } catch (caught) {
-      void message.error(mutationErrorText(caught));
+      void message.error(adminErrorNotice(caught, mutationErrorText(caught)));
     } finally {
       setSubmitting(false);
     }
@@ -2360,7 +2362,7 @@ function Orders({
       if (!query.trim()) await reload();
       void message.success(query.trim() ? "订单搜索完成" : "订单列表已刷新");
     } catch (error) {
-      void message.error(mutationErrorText(error));
+      void message.error(adminErrorNotice(error, mutationErrorText(error)));
     } finally {
       setSearching(false);
     }
@@ -2879,7 +2881,7 @@ function Logistics({
       setVehicle(null);
       await refreshAfterMutation(reload, message, "运输信息已保存");
     } catch (error) {
-      void message.error(mutationErrorText(error));
+      void message.error(adminErrorNotice(error, mutationErrorText(error)));
     } finally {
       setVehicleSubmitting(false);
     }
@@ -2891,7 +2893,7 @@ function Logistics({
       await api.confirmAllocation(communityDeliveryId);
       await refreshAfterMutation(reload, message, "到货异常范围已确认");
     } catch (error) {
-      void message.error(mutationErrorText(error));
+      void message.error(adminErrorNotice(error, mutationErrorText(error)));
     } finally {
       setAllocationSubmitting(false);
     }
@@ -3371,7 +3373,7 @@ function Areas({
                           nextEnabled ? "区域已开启接单" : "区域已暂停接单",
                         );
                       } catch (error) {
-                        message.error(mutationErrorText(error));
+                        message.error(adminErrorNotice(error, mutationErrorText(error)));
                       } finally {
                         setSubmitting(false);
                       }
@@ -3471,7 +3473,7 @@ function Areas({
               setAreaOpen(false);
               await refreshAfterMutation(reload, message, "服务区域已开通");
             } catch (e) {
-              message.error(mutationErrorText(e));
+              message.error(adminErrorNotice(e, mutationErrorText(e)));
             } finally {
               setSubmitting(false);
             }
@@ -3649,7 +3651,7 @@ function Areas({
                   });
                   return;
                 }
-                message.error(mutationErrorText(error));
+                message.error(adminErrorNotice(error, mutationErrorText(error)));
               } finally {
                 setSubmitting(false);
               }
@@ -4046,7 +4048,7 @@ function PointWorkbench({
         }),
       );
     } catch (error) {
-      void message.error(mutationErrorText(error));
+      void message.error(adminErrorNotice(error, mutationErrorText(error)));
     }
   };
   const verify = async () => {
@@ -4076,7 +4078,7 @@ function PointWorkbench({
         clearPickupRequest(localStorage, pickupReview);
         setPickupReview(null);
       }
-      void message.error(mutationErrorText(error));
+      void message.error(adminErrorNotice(error, mutationErrorText(error)));
     } finally {
       setSubmittingPickup(false);
     }
@@ -4414,7 +4416,7 @@ function PickupWindowQueue({
       form.resetFields();
       await refreshAfterMutation(reload, message, "领取窗口已更新");
     } catch (caught) {
-      void message.error(mutationErrorText(caught));
+      void message.error(adminErrorNotice(caught, mutationErrorText(caught)));
     } finally {
       setSubmitting(false);
     }
@@ -4555,7 +4557,7 @@ function Service({
       setQualityAction(null);
       await refreshAfterMutation(reload, message, "品质售后已更新");
     } catch (caught) {
-      void message.error(mutationErrorText(caught));
+      void message.error(adminErrorNotice(caught, mutationErrorText(caught)));
     } finally {
       setSubmitting(false);
     }
@@ -4572,7 +4574,7 @@ function Service({
       setCancellationAction(null);
       await refreshAfterMutation(reload, message, "取消申请已更新");
     } catch (caught) {
-      void message.error(mutationErrorText(caught));
+      void message.error(adminErrorNotice(caught, mutationErrorText(caught)));
     } finally {
       setSubmitting(false);
     }
@@ -4844,7 +4846,7 @@ function Finance({
       setRefundTarget(null);
       await refreshAfterMutation(reload, message, "差异退款已提交，已刷新退款与账本状态");
     } catch (caught) {
-      void message.error(mutationErrorText(caught));
+      void message.error(adminErrorNotice(caught, mutationErrorText(caught)));
     } finally {
       setSubmitting(false);
     }
@@ -4857,7 +4859,7 @@ function Finance({
       setPickupRefundTarget(null);
       await refreshAfterMutation(reload, message, "逾期领取退款已提交，已刷新退款与账本状态");
     } catch (caught) {
-      void message.error(mutationErrorText(caught));
+      void message.error(adminErrorNotice(caught, mutationErrorText(caught)));
     } finally {
       setSubmitting(false);
     }
@@ -4880,7 +4882,7 @@ function Finance({
           : "品质退款已提交，系统正在同步退款与账本状态",
       );
     } catch (caught) {
-      void message.error(mutationErrorText(caught));
+      void message.error(adminErrorNotice(caught, mutationErrorText(caught)));
     } finally {
       setSubmitting(false);
     }
@@ -4902,7 +4904,7 @@ function Finance({
           : "取消退款已提交，系统正在同步退款与账本状态",
       );
     } catch (caught) {
-      void message.error(mutationErrorText(caught));
+      void message.error(adminErrorNotice(caught, mutationErrorText(caught)));
     } finally {
       setSubmitting(false);
     }
@@ -5186,7 +5188,7 @@ function Settings({
       setCredential(result.temporaryPassword);
       await refreshAfterMutation(reload, message, "员工已创建，临时密码仅显示一次");
     } catch (error) {
-      message.error(mutationErrorText(error));
+      message.error(adminErrorNotice(error, mutationErrorText(error)));
     } finally {
       setSubmitting(false);
     }
@@ -5234,7 +5236,7 @@ function Settings({
       setEditing(null);
       await refreshAfterMutation(reload, message, "员工权限已更新");
     } catch (error) {
-      message.error(mutationErrorText(error));
+      message.error(adminErrorNotice(error, mutationErrorText(error)));
     } finally {
       setSubmitting(false);
     }
@@ -5272,7 +5274,7 @@ function Settings({
             : "员工已恢复",
       );
     } catch (error) {
-      message.error(mutationErrorText(error));
+      message.error(adminErrorNotice(error, mutationErrorText(error)));
     } finally {
       setSubmitting(false);
     }

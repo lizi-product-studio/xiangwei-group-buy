@@ -1,4 +1,4 @@
-import { api, AuthExpiredError, customerAuth, customerErrorMessage } from "../../utils/api";
+import { api, AuthExpiredError, copyLatestRequestId, customerAuth, customerErrorMessage, getLatestRequestId } from "../../utils/api";
 import {
   loadServiceAreaContext,
   type ServiceAreaSelection,
@@ -33,6 +33,7 @@ Page({
     area: null as ServiceAreaSelection | null,
     pickupPoint: null as PickupPointSelection | null,
     areaError: "",
+    latestRequestId: "",
     orderTotal: 0,
     counts: { pending: 0, active: 0, ready: 0, afterSale: 0 } as OrderCounts,
   },
@@ -40,7 +41,7 @@ Page({
     loadCoordinator.show();
     areaCoordinator.show();
     actionCoordinator.activate();
-    this.setData({ area: null, pickupPoint: null, areaError: "" });
+    this.setData({ area: null, pickupPoint: null, areaError: "", latestRequestId: getLatestRequestId() ?? "" });
     void this.loadSummary();
     void this.loadArea();
   },
@@ -190,6 +191,9 @@ Page({
   },
   openMessages() {
     void wx.navigateTo({ url: "/pages/messages/index" });
+  },
+  copyLatestRequestId() {
+    copyLatestRequestId();
   },
   openPrivacy() {
     void wx.navigateTo({ url: "/pages/legal/index?document=privacy" });

@@ -3,13 +3,50 @@ import type { FastifyInstance } from "fastify";
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { MemoryStore } from "./modules/core/store.js";
+import { NoopCampaignScheduler } from "./modules/campaigns/campaign-scheduler.js";
 import type { Order, PickupPoint, ServiceArea } from "./modules/core/types.js";
 import type { ReverseLocationAdapter } from "./modules/service-areas/pickup-location-validation.js";
 
 const admin = { "x-demo-user-id": "admin", "x-demo-role": "SUPER_ADMIN" };
+class UnhealthyStore extends MemoryStore {
+  override async health(): Promise<"ok"> {
+    throw new Error("private datastore endpoint refused");
+  }
+}
+class UnhealthyScheduler extends NoopCampaignScheduler {
+  override async health(): Promise<"ok"> {
+    throw new Error("private queue endpoint refused");
+  }
+}
+class BrokenCampaignStore extends MemoryStore {
+  override async listCampaigns(): Promise<never> {
+    const error = new Error("provider timeout token=secret phoneNumber=13800138000");
+    error.name = "ProviderError";
+    throw error;
+  }
+}
 describe("single community application surface", () => {
   let app: FastifyInstance | undefined;
   afterEach(async () => app?.close());
+  it("returns a generated request id on normal and error responses", async () => {
+    const store = new MemoryStore(false);
+    app = await buildApp({ config: loadConfig({ NODE_ENV: "test" }), store });
+    const normal = await app.inject({ method: "GET", url: "/health/live", headers: { "x-request-id": "forged" } });
+    const failed = await app.inject({ method: "GET", url: "/api/v1/pickup/orders/lookup" });
+    expect(normal.headers["x-request-id"]).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(normal.headers["x-request-id"]).not.toBe("forged");
+    expect(failed.headers["x-request-id"]).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(failed.json()).toMatchObject({ requestId: failed.headers["x-request-id"] });
+  });
+  it.each([
+    ["dataStore", new UnhealthyStore(), undefined],
+    ["queue", new MemoryStore(false), new UnhealthyScheduler()],
+  ])("fails readiness closed when %s is unavailable", async (_name, store, scheduler) => {
+    app = await buildApp({ config: loadConfig({ NODE_ENV: "test" }), store, scheduler });
+    const response = await app.inject({ method: "GET", url: "/health/ready" });
+    expect(response.statusCode, response.body).toBe(503);
+    expect(response.json()).toMatchObject({ status: "degraded", dependencies: { [_name]: "degraded" } });
+  });
   it("rejects mismatched subscription IDs without reporting a false preference save", async () => {
     const store = new MemoryStore(false);
     app = await buildApp({ config: loadConfig({ NODE_ENV: 'test' }), store, subscriptionMessageProvider: { send: async () => undefined, templateIdFor: () => 'actual-account-template' } });
@@ -24,6 +61,22 @@ describe("single community application surface", () => {
     expect(accepted.json().data.templateIds).toEqual({ ARRIVED: 'actual-account-template' });
     await store.saveNotificationPreference({ userId: 'subscription-user', types: ['ARRIVED'], updatedAt: new Date().toISOString() });
     expect((await app.inject({ method: 'GET', url: '/api/v1/notifications/preferences', headers })).json().data.types).toEqual([]);
+  });
+  it("logs a sanitized exception name and stack frame for an unhandled request", async () => {
+    const lines: string[] = [];
+    app = await buildApp({
+      config: loadConfig({ NODE_ENV: "test" }),
+      store: new BrokenCampaignStore(false),
+      logger: { level: "error", stream: { write: (line: string) => { lines.push(line); } } },
+    });
+    const response = await app.inject({ method: "GET", url: "/api/v1/campaigns" });
+    expect(response.statusCode).toBe(500);
+    const log = lines.join("");
+    expect(log).toContain("unhandled request error");
+    expect(log).toContain("ProviderError");
+    expect(log).toContain("BrokenCampaignStore.listCampaigns");
+    expect(log).not.toContain("secret");
+    expect(log).not.toContain("13800138000");
   });
   it("exposes only community catalog and campaign creation", async () => {
     const store = new MemoryStore(false);

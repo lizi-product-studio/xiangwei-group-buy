@@ -4,6 +4,7 @@ interface IAppOption {
     authMode: "demo" | "wechat";
     demoLoginEnabled: boolean;
     accessToken: string | null;
+    latestRequestId?: string;
     subscriptionTemplates: Array<{
       type:
         | "SITE_CONFIRMED"
