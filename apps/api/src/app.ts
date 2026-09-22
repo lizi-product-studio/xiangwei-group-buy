@@ -805,7 +805,11 @@ export async function buildApp(
     readSnapshot: work => store.readSnapshot(work),
     campaigns,
     listServiceAreas: () => store.listServiceAreas(),
-    listPickupPoints: async (id) => (await listPickupPointManagerDirectory(id)).map(({ managerNames: _names, managerConflict: _conflict, ...point }) => point),
+    listPickupPoints: async (id) => (await listPickupPointManagerDirectory(id)).map((point) => {
+      Reflect.deleteProperty(point, "managerNames");
+      Reflect.deleteProperty(point, "managerConflict");
+      return point;
+    }),
     getDeliveryPlanByCampaign: (id) => store.getDeliveryPlanByCampaign(id),
     withCampaignItems: publicCampaignView,
     publicDeliveryPlan: publicPlan,
