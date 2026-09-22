@@ -31,3 +31,13 @@
 - 首候选 CI 35699214579：checks 与 API 镜像通过，真实 MySQL snapshot 14/14 通过（含锁下撤权）；后台镜像缺少新 workspace 依赖，已修 Dockerfile；browser 19/20，失败为上述财务读取断言。修复版本须重新 CI。
 - 浏览器证据：/tmp/xiangwei-rbac-repair-e2e、/tmp/xiangwei-rbac-repair-switch-e2e。GitHub 既有附件存储配额满，保留本地原始证据，不把附件失败冒充测试通过。
 - 用户提出 Luna 可能恢复；使用模型参数发送到固定审核任务被工具接受，但审核任务未能确认实际 Luna，仍不可声称已核实切换。此前 Sol 审核授权继续有效。
+
+## 发布收口
+
+- 独立只读复核已关闭 RBAC-001、RBAC-002、RBAC-003，无剩余代码阻塞。EVID-001 为非阻塞后续：补齐全部已注册 admin/pickup 路由和能力表的对应检查，防止未来漏登记导致功能不可达；未知路由仍默认拒绝，不构成放宽授权。
+- 交付本地提交 `15ffcaec9a51c23143d63da00b70a8526b76fc2e`，GitHub `dcdac25d1d02b6cbeba8de639a6815367090ddba`，同 tree `4c2ab24b5483a61e90e451cda0467178564155bf`。
+- 修复 CI [35703636445](https://github.com/lizi-product-studio/xiangwei-group-buy/actions/runs/35703636445) 全部 success；浏览器 20/20 PASS；checks、API/admin 镜像与 verify 均通过。附件仍受 GitHub 存储配额限制，原始浏览器日志另存发布证据目录。
+- 2026-09-22 16:29（北京时间）生产 API 与后台更新完成：API image `sha256:4221f97d3189fb4e11e16306dfabfe7ea724af5898bd86d4d1adad4e8601d21c`；后台 `/var/www/hometown-admin-15ffcae`。API 健康及全部依赖 OK，admin/saas 首页内容 SHA 与产物一致；只读核验线上两个有效员工的权限解析均通过，四个预置岗位有效。
+- 发布前完成数据库备份；原 API 镜像、后台路径、配置与恢复脚本保留。数据库/Redis 容器未替换，未变更环境凭据、真实业务记录或微信小程序版本。
+- 发布证据本机 `/tmp/xiangwei-rbac-release-20260922`，生产 `/root/xiangwei-rbac-release-20260922`：冻结源码及摘要、构建日志/凭据、CI 日志、独立审核结论、备份摘要、deployment-result.json。
+- 测试机两包串行限制单次 1 GiB/1 CPU、启动前要求 2 GiB 可用、低于512 MiB中止；构建后可用内存约2.6 GiB。临时本地浏览器配置与同步中间文件已清理；测试机本轮构建上下文和已传送镜像按精确任务路径清理，保留日志/构建凭据。
