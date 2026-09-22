@@ -51,6 +51,27 @@ const emptyDraft: BannerDraft = {
   status: "ACTIVE",
 };
 
+export function nextBannerSortOrder(values: Pick<HomepageBanner, "sortOrder">[]): number {
+  return values.length === 0 ? 0 : Math.max(...values.map((value) => value.sortOrder)) + 10;
+}
+
+export function carouselReadinessText(activeCount: number): string {
+  if (activeCount < 2) return `当前仅启用 ${activeCount} 张，不会自动轮播`;
+  return `当前已启用 ${activeCount} 张，可自动轮播`;
+}
+
+function nextBannerDraft(value: BannerDraft, sortOrder: number): BannerDraft {
+  return {
+    ...emptyDraft,
+    scope: value.scope,
+    serviceAreaId: value.scope === "SERVICE_AREA" ? value.serviceAreaId : null,
+    startsAt: value.startsAt ?? null,
+    endsAt: value.endsAt ?? null,
+    sortOrder,
+    status: value.status,
+  };
+}
+
 function toLocalDateTime(value: string | null): string | undefined {
   if (!value) return undefined;
   const date = new Date(value);
@@ -109,10 +130,12 @@ export function HomepageBannersPage({ values, areas, campaigns, categories, relo
   };
 
   const activeAreas = useMemo(() => areas.filter((area) => area.status === "ENABLED"), [areas]);
+  const activeCount = values.filter((value) => value.status === "ACTIVE").length;
+  const nextSortOrder = nextBannerSortOrder(values);
   const openNew = () => {
     setEditing(null);
     setImageUrl(null);
-    form.setFieldsValue({ ...emptyDraft, startsAt: null, endsAt: null });
+    form.setFieldsValue({ ...emptyDraft, startsAt: null, endsAt: null, sortOrder: nextSortOrder });
     setOpen(true);
   };
   const openEdit = (value: HomepageBanner) => {
@@ -132,7 +155,7 @@ export function HomepageBannersPage({ values, areas, campaigns, categories, relo
     });
     setOpen(true);
   };
-  const save = async (value: BannerDraft) => {
+  const save = async (value: BannerDraft, continueAdding = false) => {
     if (!imageUrl) {
       message.error("请先上传轮播图片");
       return;
@@ -157,10 +180,19 @@ export function HomepageBannersPage({ values, areas, campaigns, categories, relo
     }
     setSaving(true);
     try {
+      const wasEditing = Boolean(editing);
       if (editing) await api.updateHomepageBanner(editing.id, { ...body, version: editing.version });
       else await api.createHomepageBanner(body);
-      setOpen(false);
-      await refreshAfterMutation(reload, message, editing ? "轮播已更新" : "轮播已创建");
+      if (continueAdding) {
+        setEditing(null);
+        setImageUrl(null);
+        form.resetFields();
+        form.setFieldsValue(nextBannerDraft(value, Math.max(nextSortOrder, body.sortOrder + 10)));
+        await refreshAfterMutation(reload, message, "本张已保存，请继续添加下一张");
+      } else {
+        setOpen(false);
+        await refreshAfterMutation(reload, message, wasEditing ? "轮播已更新" : "轮播已创建");
+      }
     } catch (error) {
       message.error(adminErrorNotice(error));
     } finally {
@@ -222,11 +254,11 @@ export function HomepageBannersPage({ values, areas, campaigns, categories, relo
           <h1>首页轮播</h1>
           <p>管理小程序首页展示内容、投放范围和跳转去向。</p>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openNew}>新增轮播</Button>
+        <Button type="primary" icon={<PlusOutlined />} onClick={openNew}>添加轮播图</Button>
       </div>
       <div className="homepage-banners__intro">
-        <span>启用中的轮播会按排序值从小到大展示；设置投放时间后，未开始或已结束的内容不会展示。</span>
-        <Tag color="green">共 {values.filter((value) => value.status === "ACTIVE").length} 个启用</Tag>
+        <span>每一行代表一张轮播图；同一服务区至少有 2 张启用且展示时间重叠，首页才会自动切换。</span>
+        <Tag color={activeCount >= 2 ? "green" : "orange"}>{carouselReadinessText(activeCount)}</Tag>
       </div>
       <Table
         className="homepage-banners__table"
@@ -263,14 +295,14 @@ export function HomepageBannersPage({ values, areas, campaigns, categories, relo
       />
       <Modal
         open={open}
-        title={editing ? "编辑首页轮播" : "新增首页轮播"}
+        title={editing ? "编辑轮播图" : "添加轮播图"}
         footer={null}
         width={760}
         destroyOnClose
         onCancel={() => { if (!saving) setOpen(false); }}
       >
         <Form form={form} layout="vertical" onFinish={(value) => void save(value)}>
-          <Form.Item label="轮播图片" required>
+          <Form.Item label="本张轮播图片" required extra="每次保存一张；保存后可直接继续添加下一张。">
             <ProductImageField value={imageUrl} onChange={setImageUrl} onBusyChange={setImageBusy} disabled={saving} purpose="轮播图" required />
           </Form.Item>
           <div className="form-grid">
@@ -306,7 +338,14 @@ export function HomepageBannersPage({ values, areas, campaigns, categories, relo
             <Form.Item name="sortOrder" label="排序值" extra="数值越小越靠前"><InputNumber min={0} max={9999} precision={0} style={{ width: "100%" }} /></Form.Item>
             <Form.Item name="status" label="状态" rules={[{ required: true }]}><Select options={[{ value: "ACTIVE", label: "启用" }, { value: "INACTIVE", label: "停用" }]} /></Form.Item>
           </div>
-          <div className="homepage-banners__form-actions"><Button onClick={() => setOpen(false)} disabled={saving}>取消</Button><Button type="primary" htmlType="submit" loading={saving} disabled={imageBusy}>{editing ? "保存修改" : "创建轮播"}</Button></div>
+          <div className="homepage-banners__form-actions">
+            <Button onClick={() => setOpen(false)} disabled={saving}>取消</Button>
+            <Button
+              disabled={saving || imageBusy}
+              onClick={() => void form.validateFields().then((value) => save(value, true)).catch(() => undefined)}
+            >保存并添加下一张</Button>
+            <Button type="primary" htmlType="submit" loading={saving} disabled={imageBusy}>{editing ? "保存" : "保存完成"}</Button>
+          </div>
         </Form>
       </Modal>
     </>

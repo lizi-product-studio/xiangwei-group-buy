@@ -54,7 +54,7 @@ describe("profile page protected entry behavior", () => {
         : vi.fn(async () => ({ selected: null })),
     }));
     vi.doMock("../../utils/pickup-point", () => ({
-      readPickupPointSelection: vi.fn(() => null),
+      loadPickupPoints: vi.fn(async () => ({ points: [], selected: null })),
     }));
     await import("./index");
     if (!definition) throw new Error("profile page was not registered");

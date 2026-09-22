@@ -2,7 +2,7 @@
   <view class="ui-view home-header">
     <view class="ui-view location" bindtap="openPickup"><text class="ui-text location__label">当前固定自提点</text><text class="ui-text location__name">{{pickupPoint ? pickupPoint.name : '选择你的自提点'}} ›</text><text class="ui-text location__note">{{pickupPoint ? pickupPoint.address : '先看看附近有哪些好味道'}}</text></view>
   </view>
-  <swiper wx:if="{{banners.length}}" class="home-banner" autoplay circular indicator-dots interval="5000">
+  <swiper wx:if="{{banners.length}}" class="home-banner" autoplay="{{banners.length > 1}}" circular="{{banners.length > 1}}" indicator-dots="{{banners.length > 1}}" interval="5000">
     <swiper-item wx:for="{{banners}}" wx:key="id"><view class="home-banner__item" data-index="{{index}}" bindtap="openBanner"><image class="home-banner__image" src="{{item.imageUrl}}" mode="aspectFill"/><view class="home-banner__copy"><text class="ui-text home-banner__title">{{item.title}}</text><text wx:if="{{item.subtitle}}" class="ui-text home-banner__subtitle">{{item.subtitle}}</text></view></view></swiper-item>
   </swiper>
   <view wx:if="{{!banners.length}}" class="ui-view origin-story"><image class="ui-image origin-story__image" src="/assets/hero-sorghum-field.jpg" mode="aspectFill"/><view class="ui-view origin-story__cover"><text class="ui-text origin-story__title">时令之味

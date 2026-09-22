@@ -5,7 +5,7 @@ import { cartCount as readCartCount } from '../../utils/cart';
 import { addCartLine, readCart, type CartSnapshot } from '../../utils/cart';
 import { resolveProductImageUrl } from '../../utils/product-image';
 import { loadServiceAreaContext, type ServiceAreaSelection } from '../../utils/service-area';
-import { readPickupPointSelection, type PickupPointSelection } from '../../utils/pickup-point';
+import { loadPickupPoints, type PickupPointSelection } from '../../utils/pickup-point';
 
 interface CampaignView extends CampaignDto {
   renderKey: string;
@@ -60,11 +60,12 @@ Page({
     this.setData({ loading: true, error: '' });
     try {
       const areaContext = await loadServiceAreaContext();
-      const [allCampaigns, banners] = await Promise.all([
+      const [allCampaigns, banners, pointContext] = await Promise.all([
         api.listCampaigns(),
         typeof api.listHomepageBanners === "function" ? api.listHomepageBanners(areaContext.selected?.id).catch(() => [] as HomepageBannerDto[]) : Promise.resolve([] as HomepageBannerDto[]),
+        areaContext.selected ? loadPickupPoints(areaContext.selected.id) : Promise.resolve({ points: [], selected: null }),
       ]);
-      const selectedPoint=readPickupPointSelection();
+      const selectedPoint=pointContext.selected;
       const campaigns = allCampaigns
         .filter((campaign) => isCampaignPurchasable(campaign) && areaContext.selected && selectedPoint && campaign.serviceAreaId === areaContext.selected.id && campaign.deliveryPlan?.pickupPointId === selectedPoint.id)
         .flatMap((campaign) => campaign.items.map((product) => ({

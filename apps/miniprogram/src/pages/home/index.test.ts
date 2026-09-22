@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadServiceAreaContext } from '../../utils/service-area';
-import { readPickupPointSelection } from '../../utils/pickup-point';
+import { loadPickupPoints } from '../../utils/pickup-point';
 
 type HomePage = {
   data: Record<string, unknown>;
@@ -24,12 +24,9 @@ vi.mock('../../utils/service-area', () => ({
   })),
 }));
 vi.mock('../../utils/pickup-point', () => ({
-  readPickupPointSelection: vi.fn(() => ({
-    id: 'point-1',
-    serviceAreaId: 'area-1',
-    name: '示例自提点',
-    address: '示例地址',
-    status: 'ACTIVE',
+  loadPickupPoints: vi.fn(async () => ({
+    points: [{ id: 'point-1', serviceAreaId: 'area-1', name: '示例自提点', address: '示例地址', businessHours: '', pickupInstructions: '', latitude: 0, longitude: 0, contactName: '', contactPhone: '', status: 'ACTIVE', capacityPerDay: null }],
+    selected: { id: 'point-1', serviceAreaId: 'area-1', name: '示例自提点', address: '示例地址', businessHours: '', pickupInstructions: '', latitude: 0, longitude: 0, contactName: '', contactPhone: '', status: 'ACTIVE', capacityPerDay: null },
   })),
 }));
 vi.mock('../../utils/cart', () => ({
@@ -46,6 +43,10 @@ describe('home remote-service recovery', () => {
   beforeEach(() => {
     vi.resetModules();
     listCampaigns.mockReset();
+    vi.mocked(loadPickupPoints).mockReset().mockResolvedValue({
+      points: [{ id: 'point-1', serviceAreaId: 'area-1', name: '示例自提点', address: '示例地址', businessHours: '', pickupInstructions: '', latitude: 0, longitude: 0, contactName: '', contactPhone: '', status: 'ACTIVE', capacityPerDay: null }],
+      selected: { id: 'point-1', serviceAreaId: 'area-1', name: '示例自提点', address: '示例地址', businessHours: '', pickupInstructions: '', latitude: 0, longitude: 0, contactName: '', contactPhone: '', status: 'ACTIVE', capacityPerDay: null },
+    });
     vi.stubGlobal('wx', {
       getStorageSync: vi.fn(),
       setStorageSync: vi.fn(),
@@ -124,7 +125,6 @@ describe('home remote-service recovery', () => {
   it('distinguishes unavailable service from a selected point awaiting its next campaign', async () => {
     listCampaigns.mockResolvedValue([]);
     vi.mocked(loadServiceAreaContext).mockResolvedValueOnce({ areas: [], selected: null });
-    vi.mocked(readPickupPointSelection).mockReturnValueOnce(null);
     const page = await loadPage();
     await page.loadCampaigns.call(page);
     expect(page.data.availableAreaCount).toBe(0);
@@ -138,6 +138,19 @@ describe('home remote-service recovery', () => {
     expect(page.data.allProducts).toEqual([]);
     expect(page.data.deliveryText).toBe('本期好物正在筹备，开团后即可选购');
     expect(page.data.pickupPoint).toMatchObject({ id: 'point-1' });
+  });
+
+  it('shows the latest pickup-point name returned by the server', async () => {
+    listCampaigns.mockResolvedValueOnce([]);
+    vi.mocked(loadPickupPoints).mockResolvedValueOnce({
+      points: [{ id: 'point-1', serviceAreaId: 'area-1', name: '后台改名后的自提点', address: '最新地址', businessHours: '', pickupInstructions: '', latitude: 0, longitude: 0, contactName: '', contactPhone: '', status: 'ACTIVE', capacityPerDay: null }],
+      selected: { id: 'point-1', serviceAreaId: 'area-1', name: '后台改名后的自提点', address: '最新地址', businessHours: '', pickupInstructions: '', latitude: 0, longitude: 0, contactName: '', contactPhone: '', status: 'ACTIVE', capacityPerDay: null },
+    });
+    const page = await loadPage();
+
+    await page.loadCampaigns.call(page);
+
+    expect(page.data.pickupPoint).toMatchObject({ name: '后台改名后的自提点', address: '最新地址' });
   });
 
   it('refreshes image bindings when switching a filtered category back to all products', async () => {

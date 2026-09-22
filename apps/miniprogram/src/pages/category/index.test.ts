@@ -5,12 +5,12 @@ type CategoryPage = { data: Record<string, unknown>; setData?: (patch: Record<st
 const mocks = vi.hoisted(() => ({
   listCampaigns: vi.fn(),
   loadServiceAreaContext: vi.fn(),
-  readPickupPointSelection: vi.fn(),
+  loadPickupPoints: vi.fn(),
   isCampaignPurchasable: vi.fn(),
 }));
 vi.mock("../../utils/api", () => ({ api: { listCampaigns: mocks.listCampaigns }, customerErrorMessage: (_error: unknown, fallback: string) => fallback }));
 vi.mock("../../utils/service-area", () => ({ loadServiceAreaContext: mocks.loadServiceAreaContext }));
-vi.mock("../../utils/pickup-point", () => ({ readPickupPointSelection: mocks.readPickupPointSelection }));
+vi.mock("../../utils/pickup-point", () => ({ loadPickupPoints: mocks.loadPickupPoints }));
 vi.mock("../../utils/consumer-display", () => ({ isCampaignPurchasable: mocks.isCampaignPurchasable, formatChinaDateTime: vi.fn(() => "今晚 21:00"), estimatedArrivalText: vi.fn(() => "到货后通知") }));
 vi.mock("../../utils/cart", () => ({ addCartLine: vi.fn(), cartCount: vi.fn(() => 0), readCart: vi.fn() }));
 
@@ -46,7 +46,7 @@ describe("category page", () => {
   it("keeps a banner category intent until products finish loading on first entry", async () => {
     storage.set("categoryFilter", "工具");
     mocks.loadServiceAreaContext.mockResolvedValue({ selected: { id: "area-1", name: "服务区" } });
-    mocks.readPickupPointSelection.mockReturnValue({ id: "point-1", name: "自提点", address: "测试地址" });
+    mocks.loadPickupPoints.mockResolvedValue({ points: [{ id: "point-1", name: "自提点", address: "测试地址" }], selected: { id: "point-1", name: "自提点", address: "测试地址" } });
     mocks.isCampaignPurchasable.mockReturnValue(true);
     mocks.listCampaigns.mockResolvedValue([{ id: "campaign-1", title: "团期", serviceAreaId: "area-1", cutoffAt: "2099-01-01T00:00:00Z", dispatchAt: "2099-01-02T00:00:00Z", deliveryPlan: { pickupPointId: "point-1" }, items: [
       { skuId: "tool-1", title: "铅笔", skuName: "一支", category: "工具", origin: "定兴", imageUrl: null, unitPriceCents: 100, stock: 10, soldQuantity: 0 },

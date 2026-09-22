@@ -4,7 +4,7 @@ import {
   type ServiceAreaSelection,
 } from "../../utils/service-area";
 import {
-  readPickupPointSelection,
+  loadPickupPoints,
   type PickupPointSelection,
 } from "../../utils/pickup-point";
 import { navigateToCustomerLogin } from "../../utils/auth-navigation";
@@ -48,10 +48,13 @@ Page({
     const loadGuard = areaCoordinator.begin(customerAuth.captureSessionEpoch());
     try {
       const context = await loadServiceAreaContext();
+      const pointContext = context.selected
+        ? await loadPickupPoints(context.selected.id)
+        : { points: [], selected: null };
       if (!areaCoordinator.isCurrent(loadGuard, customerAuth.captureSessionEpoch())) return;
       this.setData({
         area: context.selected,
-        pickupPoint: readPickupPointSelection(),
+        pickupPoint: pointContext.selected,
         areaError: "",
       });
     } catch (error) {

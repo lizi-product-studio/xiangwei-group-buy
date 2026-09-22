@@ -12,5 +12,10 @@ export function readPickupPointSelection():PickupPointSelection|null{const value
 export function savePickupPointSelection(point:PickupPointSelection):void{wx.setStorageSync(KEY,point);}
 export function clearPickupPointSelection():void{wx.removeStorageSync(KEY);}
 export async function loadPickupPoints(serviceAreaId:string):Promise<{points:PickupPointSelection[];selected:PickupPointSelection|null}>{
-  const points=await api.listPickupPoints(serviceAreaId);const stored=readPickupPointSelection();const selected=points.find((item)=>item.id===stored?.id)??null;if(stored&&!selected)clearPickupPointSelection();return{points,selected};
+  const points=await api.listPickupPoints(serviceAreaId);
+  const stored=readPickupPointSelection();
+  const selected=points.find((item)=>item.id===stored?.id)??null;
+  if(stored&&!selected)clearPickupPointSelection();
+  else if(selected)savePickupPointSelection(selected);
+  return{points,selected};
 }

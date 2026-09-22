@@ -3,7 +3,7 @@ import { formatMoney } from "../../utils/format";
 import { estimatedArrivalText, formatChinaDateTime, isCampaignPurchasable } from "../../utils/consumer-display";
 import { addCartLine, cartCount as readCartCount, readCart, type CartSnapshot } from "../../utils/cart";
 import { loadServiceAreaContext, type ServiceAreaSelection } from "../../utils/service-area";
-import { readPickupPointSelection, type PickupPointSelection } from "../../utils/pickup-point";
+import { loadPickupPoints, type PickupPointSelection } from "../../utils/pickup-point";
 
 interface CategoryProduct extends CampaignDto {
   renderKey: string;
@@ -49,8 +49,12 @@ Page({
   async loadProducts() {
     this.setData({ loading: true, error: "" });
     try {
-      const [campaigns, context] = await Promise.all([api.listCampaigns(), loadServiceAreaContext()]);
-      const pickupPoint = readPickupPointSelection();
+      const context = await loadServiceAreaContext();
+      const [campaigns, pointContext] = await Promise.all([
+        api.listCampaigns(),
+        context.selected ? loadPickupPoints(context.selected.id) : Promise.resolve({ points: [], selected: null }),
+      ]);
+      const pickupPoint = pointContext.selected;
       const products = campaigns
         .filter((campaign) => isCampaignPurchasable(campaign) && context.selected && pickupPoint && campaign.serviceAreaId === context.selected.id && campaign.deliveryPlan?.pickupPointId === pickupPoint.id)
         .flatMap((campaign) => campaign.items.map((item) => ({
