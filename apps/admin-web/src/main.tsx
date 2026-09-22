@@ -38,7 +38,6 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           Menu: { itemSelectedBg: '#fff0eb', itemSelectedColor: '#c2412d', itemHoverBg: '#f4f4ec', itemColor: '#697269' },
           Button: { primaryShadow: 'none', defaultShadow: 'none', fontWeight: 500 },
           Form: { labelColor: '#354136', labelFontSize: 14, itemMarginBottom: 22 },
-          Drawer: { colorBgElevated: '#fffefa', paddingLG: 28 },
           Modal: { contentBg: '#fffefa', headerBg: '#fffefa', borderRadiusLG: 14 },
         },
       }}

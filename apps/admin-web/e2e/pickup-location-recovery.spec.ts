@@ -105,3 +105,62 @@ test("地图同地址重新检测可恢复，候选确认清除旧错误且保�
   await expect(dialog.getByText(/地点搜索暂时不可用/)).toHaveCount(0);
   await expect(dialog.getByRole("button", { name: /^保\s*存$/ })).toBeEnabled();
 });
+
+test("分类与点位操作精简，状态在编辑中修改且使用居中弹窗", async ({ page, request }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await activateMapAdmin(request, page);
+  const suffix = Date.now();
+  await page.getByRole("menuitem", { name: "分类管理", exact: true }).click();
+  const categoryName = `布局分类${suffix}`;
+  await page.getByLabel("分类名称", { exact: true }).fill(categoryName);
+  await page.getByRole("button", { name: "新增分类", exact: true }).click();
+  const categoryRow = page.getByRole("row").filter({ hasText: categoryName });
+  await expect(categoryRow.getByRole("button")).toHaveCount(2);
+  const actionCell = categoryRow.locator(".table-actions");
+  const cellBox = await actionCell.boundingBox();
+  expect(cellBox!.width).toBeLessThanOrEqual(200);
+  await page.screenshot({ animations: "disabled", path: testInfo.outputPath("categories.png") });
+  await categoryRow.getByRole("button", { name: /编\s*辑/ }).click();
+  await page.getByLabel("状态", { exact: true }).click();
+  await page.getByTitle("停用", { exact: true }).click();
+  await page.getByRole("button", { name: "保存修改" }).click();
+  const confirm = page.getByRole("dialog", { name: `停用分类“${categoryName}”` });
+  await confirm.getByRole("button", { name: "确认停用" }).click();
+  await expect(categoryRow.getByText("已停用", { exact: true })).toBeVisible();
+  await categoryRow.getByRole("button", { name: /删\s*除/ }).click();
+  await page.getByRole("dialog", { name: "删除分类", exact: true }).getByRole("button", { name: "确认删除" }).click();
+  await expect(categoryRow).toHaveCount(0);
+
+  const areaResponse = await request.post(`${apiBase}/api/v1/admin/service-areas`, { headers: demoHeaders, data: { regionCode: "110101" } });
+  expect(areaResponse.ok()).toBe(true);
+  const area = (await areaResponse.json()).data;
+  const pointName = `布局点位${suffix}`;
+  const pointResponse = await request.post(`${apiBase}/api/v1/admin/pickup-points`, { headers: demoHeaders, data: {
+    serviceAreaId: area.id, name: pointName, address: "东城区布局测试街 1 号", latitude: 39.94, longitude: 116.44,
+    businessHours: "每日 09:00–20:00", pickupInstructions: "出示取货码", contactName: "", contactPhone: "", capacityPerDay: null,
+  } });
+  expect(pointResponse.ok(), await pointResponse.text()).toBe(true);
+  await page.getByRole("menuitem", { name: "自提点管理", exact: true }).click();
+  const pointRow = page.getByRole("row").filter({ hasText: pointName });
+  await expect(pointRow.getByRole("button")).toHaveCount(2);
+  await page.screenshot({ animations: "disabled", path: testInfo.outputPath("pickup-list.png") });
+  await pointRow.getByRole("button", { name: /编\s*辑/ }).click();
+  const dialog = page.getByRole("dialog", { name: "编辑自提点" });
+  await expect(dialog).toBeVisible();
+  await expect(page.locator(".ant-drawer")).toHaveCount(0);
+  await expect.poll(async () => {
+    const bounds = await dialog.boundingBox();
+    return bounds ? Math.abs(bounds.x + bounds.width / 2 - 720) : Infinity;
+  }).toBeLessThan(2);
+  await dialog.getByRole("radio", { name: "停用", exact: true }).check();
+  await dialog.getByRole("button", { name: /^保\s*存$/ }).click();
+  await expect(dialog).toBeHidden();
+  await expect(pointRow.getByText("已停用", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "新增自提点", exact: true }).click();
+  const create = page.getByRole("dialog", { name: "新增自提点" });
+  await expect(create).toBeVisible();
+  await expect(create.getByRole("button", { name: /^保\s*存$/ })).toBeDisabled();
+  await page.screenshot({ animations: "disabled", path: testInfo.outputPath("pickup-modal.png") });
+  await create.getByRole("button", { name: /取\s*消/ }).click();
+  await expect(create).toBeHidden();
+});

@@ -67,7 +67,7 @@ nav { display: grid; gap: 16px; }
 .content > :not(.ant-alert) { width: 100%; max-width: 1680px; margin-inline: auto; }
 .content > * { min-width: 0; max-width: 100%; }
 .content .ant-table-wrapper { max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; }
-.content .ant-modal, .content .ant-drawer { max-width: calc(100vw - 24px); }
+.content .ant-modal { max-width: calc(100vw - 24px); }
 .audit-snapshot { max-width: min(100%, 760px); max-height: 360px; margin: 0; overflow: auto; padding: 12px; background: #f7f8fa; border-radius: 6px; white-space: pre-wrap; word-break: break-word; }
 .audit-table .ant-table { overflow: hidden; border: 1px solid var(--line); border-radius: 12px; }
 .audit-table .ant-table-thead > tr > th { color: #667180; background: #f7f8fa; font-size: 12px; font-weight: 700; }
@@ -442,19 +442,19 @@ nav { display: grid; gap: 16px; }
 .content .ant-empty-description { color: var(--muted); line-height: 1.8; }
 .content .ant-descriptions-view { background: var(--paper); border-color: var(--line); }
 .content .ant-descriptions-item-label { color: var(--muted); }
-.ant-modal .ant-form-item-label > label, .ant-drawer .ant-form-item-label > label { font-weight: 600; }
-.ant-modal .ant-form, .ant-drawer .ant-form { margin-top: 16px; }
-.ant-modal .ant-modal-title, .ant-drawer .ant-drawer-title { color: var(--ink); font-size: 19px; font-weight: 650; }
+.ant-modal .ant-form-item-label > label { font-weight: 600; }
+.ant-modal .ant-form { margin-top: 16px; }
+.ant-modal .ant-modal-title { color: var(--ink); font-size: 19px; font-weight: 650; }
 .ant-modal .ant-modal-footer { padding-top: 16px; border-top: 1px solid var(--line); }
-.ant-modal .ant-form-item-explain, .ant-drawer .ant-form-item-explain { font-size: 12px; line-height: 1.7; }
+.ant-modal .ant-form-item-explain { font-size: 12px; line-height: 1.7; }
 .modal-note { padding: 12px 14px; color: #6e785f; background: #f2f3e9; border-radius: 8px; font-size: 12px; line-height: 1.8; }
-.pickup-point-drawer .ant-drawer-header { padding: 24px 28px; border-color: var(--line); }
-.pickup-point-drawer .ant-drawer-body { padding: 24px 28px; }
-.pickup-point-drawer .ant-drawer-footer { padding: 18px 28px; border-color: var(--line); background: var(--paper); }
-.pickup-point-drawer__footer { display: flex; justify-content: space-between; gap: 12px; }
-.pickup-point-drawer__footer .ant-btn { min-width: 100px; }
-.pickup-point-drawer .ant-form-item-extra { padding-top: 7px; color: var(--muted); font-size: 12px; }
-.pickup-point-drawer .pickup-map { height: 260px; border-color: #dce0d2; background: #f0f1e9; }
+.content .table-actions { white-space: nowrap; }
+.content .table-actions .ant-space { flex-wrap: nowrap; justify-content: flex-end; }
+.pickup-point-modal .ant-modal-body { max-height: calc(100dvh - 220px); overflow-y: auto; padding-right: 8px; }
+.pickup-point-modal__footer { display: flex; justify-content: flex-end; gap: 12px; }
+.pickup-point-modal__footer .ant-btn { min-width: 88px; }
+.pickup-point-modal .ant-form-item-extra { padding-top: 7px; color: var(--muted); font-size: 12px; }
+.pickup-point-modal .pickup-map { height: 260px; border-color: #dce0d2; background: #f0f1e9; }
 .pickup-location { gap: 10px; }
 .pickup-location > .ant-typography { font-size: 12px; line-height: 1.8; }
 .pickup-location__option { padding-block: 5px; }
@@ -471,15 +471,13 @@ nav { display: grid; gap: 16px; }
   .section-header { gap: 16px; }
   .section-header h2.ant-typography { font-size: 23px; }
   .section-header > .ant-space { justify-content: flex-start; }
-  .pickup-point-drawer .ant-drawer-body { padding: 20px; }
-  .pickup-point-drawer .ant-drawer-header, .pickup-point-drawer .ant-drawer-footer { padding: 18px 20px; }
 }
 @media (max-width: 520px) {
   .section-header { display: flex; flex-direction: column; }
   .stats-grid { gap: 10px; }
   .stats-grid .ant-card-body { padding: 16px; }
   .stats-grid .ant-statistic-content { font-size: 27px; }
-  .pickup-point-drawer .form-grid { grid-template-columns: 1fr; }
+  .pickup-point-modal .form-grid { grid-template-columns: 1fr; }
 }
 .dashboard-campaign-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 17px 0; border-bottom: 1px solid var(--line); }
 .dashboard-campaign-row:last-child { border-bottom: 0; }

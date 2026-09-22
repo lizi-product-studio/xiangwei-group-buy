@@ -43,31 +43,29 @@ export function getAdminPageModule(page: AdminPage): AdminPage {
 
 const mainNavigation: readonly AdminNavigationGroup[] = [
   { key: "dashboard", label: "工作台", items: [{ key: "dashboard", label: "工作台", roles: ["OPERATOR"] }] },
-  { key: "products", label: "商品", items: [
+  { key: "products", label: "商品与团期", items: [
     { key: "products", label: "商品列表", roles: ["OPERATOR"] },
     { key: "categories", label: "分类管理", roles: ["OPERATOR"] },
-  ] },
-  { key: "merchandising", label: "页面运营", items: [
+    { key: "campaigns", label: "团期管理", roles: ["OPERATOR"] },
     { key: "homepage-banners", label: "首页轮播", roles: ["OPERATOR"] },
   ] },
-  { key: "campaigns", label: "团期", items: [{ key: "campaigns", label: "团期管理", roles: ["OPERATOR"] }] },
-  { key: "orders", label: "订单", items: [
+  { key: "orders", label: "订单与售后", items: [
     { key: "orders", label: "订单列表", roles: ["OPERATOR", "CUSTOMER_SERVICE", "FINANCE"] },
     { key: "cancellations", label: "取消申请", roles: ["OPERATOR", "CUSTOMER_SERVICE"] },
+    { key: "service", label: "售后与异常", roles: ["OPERATOR", "CUSTOMER_SERVICE"] },
   ] },
-  { key: "fulfillment", label: "履约管理", items: [
+  { key: "fulfillment", label: "发货管理", items: [
     { key: "logistics", label: "发货与运输", roles: ["OPERATOR"] },
     { key: "arrival-exceptions", label: "到货异常处理", roles: ["OPERATOR"] },
   ] },
-  { key: "sites", label: "区域与自提点", items: [
-    { key: "areas", label: "区域管理", roles: ["OPERATOR"] },
+  { key: "sites", label: "自提点与区域", items: [
     { key: "pickup-points", label: "自提点管理", roles: ["OPERATOR"] },
-  ] },
-  { key: "consumers", label: "用户", items: [{ key: "consumers", label: "用户管理", roles: ["CUSTOMER_SERVICE"] }] },
-  { key: "service", label: "售后", items: [{ key: "service", label: "售后与异常", roles: ["OPERATOR", "CUSTOMER_SERVICE"] }] },
-  { key: "governance", label: "运营治理", items: [
-    { key: "governance", label: "通知处理", roles: ["CUSTOMER_SERVICE"] },
+    { key: "areas", label: "区域管理", roles: ["OPERATOR"] },
     { key: "interests", label: "区域开通意向", roles: ["OPERATOR"] },
+  ] },
+  { key: "consumers", label: "用户与通知", items: [
+    { key: "consumers", label: "用户管理", roles: ["CUSTOMER_SERVICE"] },
+    { key: "governance", label: "通知处理", roles: ["CUSTOMER_SERVICE"] },
   ] },
   { key: "finance", label: "财务", items: [
     { key: "finance", label: "退款待办", roles: ["FINANCE"] },

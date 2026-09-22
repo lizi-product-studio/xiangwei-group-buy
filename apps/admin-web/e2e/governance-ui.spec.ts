@@ -625,12 +625,10 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
 
   await page.getByRole("menuitem", { name: "自提点管理" }).click();
   const idlePointRow = page.getByRole("row").filter({ hasText: `P1-C 空闲点 ${suffix}` });
-  await idlePointRow.getByRole("button", { name: /停\s*用/ }).click();
+  await idlePointRow.getByRole("button", { name: /编\s*辑/ }).click();
   const pointDialog = page.getByRole("dialog", { name: "编辑自提点" });
-  await pointDialog.getByLabel("点位状态").click();
-  await page.locator(".ant-select-item-option").filter({ hasText: "停用" }).last().click();
-  await page.keyboard.press("Escape");
-  await pointDialog.getByRole("button", { name: "保存修改" }).click();
+  await pointDialog.getByRole("radio", { name: "停用", exact: true }).check();
+  await pointDialog.getByRole("button", { name: /^保\s*存$/ }).click();
   await expect(idlePointRow.getByText("已停用", { exact: true })).toBeVisible();
   expect(failures).toEqual([]);
 });

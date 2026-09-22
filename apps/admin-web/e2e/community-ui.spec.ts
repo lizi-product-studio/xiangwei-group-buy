@@ -233,7 +233,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
     .click({ position: { x: 120, y: 100 } });
   await expect(page.getByText(/位置核验暂时不可用/)).toBeVisible();
   await expect(
-    page.locator('.pickup-point-drawer__footer button[type="submit"]'),
+    page.locator('.pickup-point-modal__footer button[type="submit"]'),
   ).toBeDisabled();
   expect(pickupPointWrites).toBe(0);
   await page.unroute(reverseRoutePattern);

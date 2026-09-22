@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 58986)
-Total output lines: 6088
-
 import { newestFirst, earliestFirst, refundHistory } from "./list-order.ts";
 import { OperationsQueueTable } from "./operations-queue-table.tsx";
 import { adminErrorNotice } from "./request-error.tsx";
@@ -25,7 +22,6 @@ import {
   DatePicker,
   Descriptions,
   Dropdown,
-  Drawer,
   Empty,
   Form,
   Input,
@@ -33,6 +29,7 @@ import {
   Layout,
   Menu,
   Modal,
+  Radio,
   Select,
   Space,
   Statistic,
@@ -977,40 +974,6 @@ function Products({
       status: value.status,
     });
   };
-  const changeCategoryStatus = async (value: ProductCategory) => {
-    if (savingCategory) return;
-    setSavingCategory(true);
-    try {
-      await api.saveCategory({
-        id: value.id,
-        name: value.name,
-        sortOrder: value.sortOrder,
-        status: value.status === "ACTIVE" ? "INACTIVE" : "ACTIVE",
-      });
-      await refreshAfterMutation(
-        reload,
-        message,
-        value.status === "ACTIVE" ? "分类已停用" : "分类已启用",
-      );
-    } catch (error) {
-      message.error(adminErrorNotice(error, mutationErrorText(error)));
-    } finally {
-      setSavingCategory(false);
-    }
-  };
-  const requestCategoryStatusChange = (value: ProductCategory) => {
-    if (value.status !== "ACTIVE") {
-      void changeCategoryStatus(value);
-      return;
-    }
-    Modal.confirm({
-      title: `停用分类“${value.name}”`,
-      content: "停用后，新建或编辑商品时不能再选择该分类；已有商品和历史数据仍会保留。",
-      okText: "确认停用",
-      cancelText: "取消",
-      onOk: () => changeCategoryStatus(value),
-    });
-  };
   const requestCategoryDelete = (value: ProductCategory) => {
     Modal.confirm({
       title: "删除分类",
@@ -1035,7 +998,7 @@ function Products({
     <>
       <PageTitle
         title={view === "categories" ? "分类管理" : "商品列表"}
-        subtitle="维护社区团购商品目录与默认可售量"
+        subtitle={view === "categories" ? "管理商品分类名称、排序和使用状态" : "维护商品、规格与可售数量"}
         action={view !== "categories" &&
           <Space>
           <Button onClick={() => { setEditingCategory(null); categoryForm.resetFields(); setCategoryOpen(true); }}>分类管理</Button>
@@ -1213,7 +1176,7 @@ function Products({
       </Modal>
       <PanelDialog inline={view === "categories"}
         open={categoryOpen}
-        title="分类管理"
+        title={view === "categories" ? undefined : "分类管理"}
         footer={null}
         onCancel={() => setCategoryOpen(false)}
       >
@@ -1223,6 +1186,19 @@ function Products({
           style={{ marginBottom: 24, rowGap: 12 }}
           onFinish={async (value) => {
             if (savingCategory) return;
+            if (editingCategory?.status === "ACTIVE" && value.status === "INACTIVE") {
+              const confirmed = await new Promise<boolean>((resolve) => {
+                Modal.confirm({
+                  title: `停用分类“${editingCategory.name}”`,
+                  content: "停用后，新建或编辑商品时不能再选择该分类；已有商品和历史数据仍会保留。",
+                  okText: "确认停用",
+                  cancelText: "取消",
+                  onOk: () => resolve(true),
+                  onCancel: () => resolve(false),
+                });
+              });
+              if (!confirmed) return;
+            }
             setSavingCategory(true);
             try {
               await api.saveCategory({
@@ -1234,7 +1210,7 @@ function Products({
               await refreshAfterMutation(
                 reload,
                 message,
-                editingCategory ? "分类名称已更新" : "分类已保存",
+                editingCategory ? "分类已更新" : "分类已保存",
               );
             } catch (error) {
               message.error(adminErrorNotice(error, mutationErrorText(error)));
@@ -1244,13 +1220,13 @@ function Products({
           }}
         >
           <Form.Item name="name" rules={[{ required: true, min: 2, message: "分类名称至少 2 个字" }]}>
-            <Input placeholder="例如：蔬菜" />
+            <Input aria-label="分类名称" placeholder="分类名称，例如：蔬菜" />
           </Form.Item>
-          <Form.Item name="sortOrder" initialValue={0}>
+          <Form.Item name="sortOrder" label="排序" initialValue={0}>
             <InputNumber min={0} max={1_000_000} aria-label="排序" />
           </Form.Item>
-          <Form.Item name="status" hidden initialValue="ACTIVE">
-            <Input />
+          <Form.Item name="status" label="状态" hidden={!editingCategory} initialValue="ACTIVE">
+            <Select style={{ width: 110 }} options={[{ value: "ACTIVE", label: "启用" }, { value: "INACTIVE", label: "停用" }]} />
           </Form.Item>
           <Button type="primary" htmlType="submit" loading={savingCategory}>
             {editingCategory ? "保存修改" : "新增分类"}
@@ -1268,34 +1244,17 @@ function Products({
           locale={{ emptyText: "暂无分类，请先新增分类" }}
           columns={[
             { title: "分类", dataIndex: "name" },
-            { title: "排序", dataIndex: "sortOrder" },
-            { title: "状态", render: (_, value) => <Status value={value.status} /> },
+            { title: "排序", dataIndex: "sortOrder", width: 100 },
+            { title: "状态", width: 120, render: (_, value) => <Status value={value.status} /> },
             {
               title: "操作",
+              width: 184,
+              align: "right",
+              className: "table-actions",
               render: (_, value) => (
-                <Space size="small">
+                <Space size="small" wrap={false}>
                   <Button onClick={() => editCategory(value)}>编辑</Button>
-                  <Dropdown
-                    trigger={["click"]}
-                    menu={{
-                      items: [
-                        {
-                          key: "status",
-                          label: value.status === "ACTIVE" ? "停用" : "启用",
-                        },
-                        { type: "divider" },
-                        { key: "delete", label: "删除", danger: true },
-                      ],
-                      onClick: ({ key }) => {
-                        if (key === "status") requestCategoryStatusChange(value);
-                        if (key === "delete") requestCategoryDelete(value);
-                      },
-                    }}
-                  >
-                    <Button loading={savingCategory}>
-                      更多 <DownOutlined />
-                    </Button>
-                  </Dropdown>
+                  <Button danger disabled={savingCategory} onClick={() => requestCategoryDelete(value)}>删除</Button>
                 </Space>
               ),
             },
@@ -2677,7 +2636,894 @@ function ArrivalConfirmationModal({
       onCancel={onClose}
       destroyOnHidden
     >
-      …8986 tokens truncated…位置。
+      {emergencyProxy && (
+        <Alert
+          type="warning"
+          showIcon
+          message="紧急代办将写入审计记录，请填写原因。"
+          style={{ marginBottom: 16 }}
+        />
+      )}
+      {error && (
+        <Alert
+          type="error"
+          showIcon
+          message={error}
+          style={{ marginBottom: 16 }}
+        />
+      )}
+      <Form form={form} layout="vertical" onFinish={(value) => void submit(value)}>
+        <Form.Item
+          name="receivedBy"
+          label="现场接收人"
+          rules={[{ required: true, min: 2, message: "请填写现场接收人" }]}
+        >
+          <Input disabled={submitting} />
+        </Form.Item>
+        {emergencyProxy && (
+          <Form.Item
+            name="emergencyReason"
+            label="紧急代办原因"
+            rules={[{ required: true, min: 2, message: "紧急代办必须填写原因" }]}
+          >
+            <Input disabled={submitting} />
+          </Form.Item>
+        )}
+        <Form.Item name="confirmationNote" label="现场备注">
+          <Input disabled={submitting} />
+        </Form.Item>
+        <Form.List name="items">
+          {(fields) =>
+            fields.map((field, index) => (
+              <Card key={field.key} size="small" style={{ marginBottom: 8 }}>
+                <b>
+                  {arrival?.expectedItems[index]?.title} · {arrival?.expectedItems[index]?.skuName}
+                </b>
+                <Form.Item name={[field.name, "catalogSkuId"]} hidden>
+                  <Input />
+                </Form.Item>
+                <Form.Item name={[field.name, "expectedQuantity"]} hidden>
+                  <InputNumber />
+                </Form.Item>
+                <Space wrap>
+                  <Form.Item name={[field.name, "receivedQuantity"]} label="实到" rules={[{ required: true }]}>
+                    <InputNumber min={0} disabled={submitting} />
+                  </Form.Item>
+                  <Form.Item name={[field.name, "rejectedQuantity"]} label="拒收" rules={[{ required: true }]}>
+                    <InputNumber min={0} disabled={submitting} />
+                  </Form.Item>
+                  <Form.Item name={[field.name, "shortQuantity"]} label="短少" rules={[{ required: true }]}>
+                    <InputNumber min={0} disabled={submitting} />
+                  </Form.Item>
+                  <Form.Item name={[field.name, "damagedQuantity"]} label="破损" rules={[{ required: true }]}>
+                    <InputNumber min={0} disabled={submitting} />
+                  </Form.Item>
+                  <Form.Item name={[field.name, "evidenceNote"]} label="差异说明">
+                    <Input disabled={submitting} />
+                  </Form.Item>
+                </Space>
+              </Card>
+            ))
+          }
+        </Form.List>
+        <Button type="primary" htmlType="submit" loading={submitting} disabled={!arrival?.dispatchBatchId}>
+          提交到货确认
+        </Button>
+      </Form>
+    </Modal>
+  );
+}
+
+function Logistics({
+  view,
+  plans,
+  deliveries,
+  batches,
+  campaigns,
+  roles,
+  loading,
+  error,
+  reload,
+  onNavigate,
+}: {
+  view: AdminPage;
+  plans: DeliveryPlan[];
+  deliveries: CommunityDelivery[];
+  batches: Array<{ id: string; campaignId: string; status: string }>;
+  campaigns: Campaign[];
+  orders: Order[];
+  roles: string[];
+  loading: boolean;
+  error: string | null;
+  reload: () => Promise<void>;
+  onNavigate: (page: AdminPage) => void;
+}) {
+  const { message } = AntApp.useApp();
+  const [vehicle, setVehicle] = useState<DeliveryPlan | null>(null);
+  const [transportType, setTransportType] = useState<"PLATFORM_SELF" | "THIRD_PARTY">("THIRD_PARTY");
+  const [vehicleEmergency, setVehicleEmergency] = useState(false);
+  const [vehicleForm] = Form.useForm();
+  const [arrival, setArrival] = useState<CommunityDelivery | null>(null);
+  const [allocationSubmitting, setAllocationSubmitting] = useState(false);
+  const [dispatchReview, setDispatchReview] = useState<DeliveryPlan | null>(
+    null,
+  );
+  const [dispatchLabels, setDispatchLabels] = useState<PackingLabel[] | null>(null);
+  const [dispatchLoadError, setDispatchLoadError] = useState<string | null>(null);
+  const [dispatchError, setDispatchError] = useState<string | null>(null);
+  const [reviewReload, setReviewReload] = useState(0);
+  const reviewCampaign = campaigns.find((value) => value.id === dispatchReview?.campaignId);
+  const reviewBatch = batches.find((value) => value.campaignId === dispatchReview?.campaignId);
+  const reviewBlock = dispatchReview ? dispatchBlockReason({
+    ...(reviewCampaign ? { campaignStatus: reviewCampaign.status } : {}),
+    planStatus: dispatchReview.status,
+    ...(reviewBatch ? { batchStatus: reviewBatch.status } : {}),
+  }) : null;
+  useEffect(() => {
+    let cancelled = false;
+    setDispatchLabels(null);
+    setDispatchLoadError(null);
+    setDispatchError(null);
+    if (dispatchReview && !reviewBlock) {
+      void api.packingLabels(dispatchReview.campaignId).then((values) => {
+        if (!cancelled) setDispatchLabels(values);
+      }).catch((error: unknown) => {
+        if (!cancelled) setDispatchLoadError(`无法核实本团待发货订单：${dispatchFailureText(error, mutationErrorText(error))}`);
+      });
+    }
+    return () => { cancelled = true; };
+  }, [dispatchReview, reviewBlock, reviewReload]);
+  const dispatchQuantity = dispatchLabels?.flatMap((value) => value.items).reduce((sum, item) => sum + item.quantity, 0) ?? 0;
+  const cannotDispatch = reviewBlock ?? dispatchLoadError ??
+    (dispatchLabels === null ? "正在核实本团已付款待发货订单，请稍候" :
+      dispatchLabels.length === 0 || dispatchQuantity === 0 ? "本团没有可发货的已付款订单，请先到订单管理核实付款与订单状态" : null);
+  const [dispatchSubmitting, setDispatchSubmitting] = useState(false);
+  const [vehicleSubmitting, setVehicleSubmitting] = useState(false);
+  const canOperate =
+    roles.includes("OPERATOR") || roles.includes("SUPER_ADMIN");
+  const emergencyProxy = roles.includes("SUPER_ADMIN");
+  const viewState = getLogisticsViewState({
+    loading,
+    error,
+    planCount: plans.length,
+  });
+  const openVehicle = (plan: DeliveryPlan, emergency = false) => {
+    setVehicleEmergency(emergency);
+    setVehicle(plan);
+    setTransportType(plan.logisticsPlatform === "平台自送" ? "PLATFORM_SELF" : "THIRD_PARTY");
+    vehicleForm.setFieldsValue({
+      logisticsPlatform: plan.logisticsPlatform ?? undefined,
+      vehicleOrderNo: plan.vehicleOrderNo ?? undefined,
+      driverName: plan.driverName ?? undefined,
+      driverPhone: plan.driverPhone ?? undefined,
+      vehiclePlate: plan.vehiclePlate ?? undefined,
+      reason: undefined,
+    });
+  };
+  const dispatch = async () => {
+    if (!dispatchReview || cannotDispatch || dispatchSubmitting) return;
+    const campaignId = dispatchReview.campaignId;
+    const existing = batches.find((value) => value.campaignId === campaignId);
+    setDispatchSubmitting(true);
+    setDispatchError(null);
+    let createdBatch = existing;
+    try {
+      const batch = existing ?? (await api.createBatch(campaignId));
+      createdBatch = batch;
+      if (batch.status !== "DRAFT") {
+        setDispatchError("该批次已不处于待发车状态，请刷新查看最新运输状态");
+        return;
+      }
+      await api.dispatch(batch.id);
+      setDispatchReview(null);
+      await refreshAfterMutation(reload, message, "批次已发车");
+    } catch (error) {
+      const reason = dispatchFailureText(error, mutationErrorText(error));
+      setDispatchError(createdBatch
+        ? `发车未完成：${reason}。已创建的批次保留，可在条件满足后重试发车。`
+        : `批次创建未确认：${reason}。请刷新核实后重试。`);
+    } finally {
+      setDispatchSubmitting(false);
+    }
+  };
+  const saveVehicle = async (value: {
+    logisticsPlatform: string;
+    vehicleOrderNo?: string;
+    driverName?: string;
+    driverPhone?: string;
+    vehiclePlate?: string;
+    reason?: string;
+  }) => {
+    if (!vehicle || vehicleSubmitting) return;
+    setVehicleSubmitting(true);
+    try {
+      const body = {
+        logisticsPlatform: transportType === "PLATFORM_SELF" ? "平台自送" : value.logisticsPlatform,
+        vehicleOrderNo:
+          transportType === "PLATFORM_SELF"
+            ? (vehicle.vehicleOrderNo ?? null)
+            : (value.vehicleOrderNo?.trim() || null),
+        driverName: value.driverName ?? null,
+        driverPhone: value.driverPhone ?? null,
+        vehiclePlate: value.vehiclePlate ?? null,
+        estimatedArrivalAt: vehicle.estimatedArrivalAt ?? null,
+      };
+      if (vehicleEmergency)
+        await api.correctVehicle(vehicle.id, {
+          ...body,
+          reason: value.reason?.trim() ?? "",
+        });
+      else await api.bookVehicle(vehicle.id, body);
+      setVehicle(null);
+      await refreshAfterMutation(reload, message, "运输信息已保存");
+    } catch (error) {
+      void message.error(adminErrorNotice(error, mutationErrorText(error)));
+    } finally {
+      setVehicleSubmitting(false);
+    }
+  };
+  const confirmAllocation = async (communityDeliveryId: string) => {
+    if (allocationSubmitting) return;
+    setAllocationSubmitting(true);
+    try {
+      await api.confirmAllocation(communityDeliveryId);
+      await refreshAfterMutation(reload, message, "到货异常范围已确认");
+    } catch (error) {
+      void message.error(adminErrorNotice(error, mutationErrorText(error)));
+    } finally {
+      setAllocationSubmitting(false);
+    }
+  };
+  return (
+    <>
+      <PageTitle
+        title={view === "arrival-exceptions" ? "到货异常处理" : "发货与运输"}
+        subtitle="管理已成团订单的运输信息和发车进度；发车后由对应自提点确认到货"
+      />
+      {view !== "arrival-exceptions" && <>
+      {viewState === "error" ? (
+        <Alert
+          type="error"
+          showIcon
+          message="发货数据加载失败"
+          description={error}
+          action={
+            <Button aria-label="重试" onClick={() => void reload().catch(() => undefined)}>
+              重试
+            </Button>
+          }
+        />
+      ) : viewState === "empty" ? (
+        <Card title="发货任务">
+          <Empty description="暂无可发货团期，请先创建商品和团期">
+            <Typography.Paragraph type="secondary">
+              创建团期并绑定自提点后，运营可在此登记运输信息；登记后仍可在发车前编辑。
+            </Typography.Paragraph>
+            <Button type="primary" onClick={() => onNavigate("campaigns")}>
+              去创建团期
+            </Button>
+          </Empty>
+        </Card>
+      ) : (
+        <Table
+          rowKey="id"
+          loading={loading}
+          dataSource={newestFirst(plans)}
+          columns={[
+          {
+            title: "团期与车辆",
+            render: (_, v) => (
+              <Space direction="vertical" size={2}>
+                <Typography.Text strong>
+                  {campaigns.find((c) => c.id === v.campaignId)?.title ?? v.campaignId}
+                </Typography.Text>
+                <Typography.Text type="secondary">
+                  {v.vehicleOrderNo ? `运输单 ${v.vehicleOrderNo}` : "运输信息未登记"}
+                </Typography.Text>
+              </Space>
+            ),
+          },
+          { title: "履约状态", render: (_, v) => <Status value={v.status} /> },
+          {
+            title: "下一步",
+            render: (_, v) => {
+              const batch = batches.find((value) => value.campaignId === v.campaignId);
+              return getDeliveryNextStep({
+                status: v.status,
+                ...(batch ? { batchStatus: batch.status } : {}),
+              });
+            },
+          },
+          { title: "送达自提点", dataIndex: "siteName" },
+          {
+            title: "操作",
+            render: (_, v) => {
+              const batch = batches.find(
+                (value) => value.campaignId === v.campaignId,
+              );
+              const actionLabels = getDeliveryActionLabels({
+                status: v.status,
+                canOperate,
+                emergencyProxy,
+                ...(batch ? { batchStatus: batch.status } : {}),
+              });
+              return (
+                <Space wrap>
+                  {actionLabels.includes("登记运输信息") && (
+                    <Button onClick={() => openVehicle(v)}>
+                      登记运输信息
+                    </Button>
+                  )}
+                  {actionLabels.includes("编辑运输信息") && (
+                    <>
+                      <Button onClick={() => openVehicle(v)}>
+                        编辑运输信息
+                      </Button>
+                      {actionLabels.includes("确认发车") ||
+                      actionLabels.includes("创建批次并发车") ? (
+                        <Button
+                          type="primary"
+                          onClick={() => setDispatchReview(v)}
+                        >
+                          {actionLabels.includes("确认发车")
+                            ? "确认发车"
+                            : "创建批次并发车"}
+                        </Button>
+                      ) : null}
+                    </>
+                  )}
+                  {actionLabels.includes("紧急纠正运输信息") && (
+                      <Button danger onClick={() => openVehicle(v, true)}>
+                        紧急纠正运输信息
+                      </Button>
+                  )}
+                  {batch?.status === "DRAFT" && !canOperate && (
+                    <Typography.Text type="secondary">
+                      批次已创建，等待运营确认发车
+                    </Typography.Text>
+                  )}
+                </Space>
+              );
+            },
+          },
+        ]}
+        />
+      )}
+      </>}
+      {view === "arrival-exceptions" && <>
+      {error && <Alert type="error" showIcon message="到货数据加载失败" description={error} action={<Button onClick={() => void reload().catch(() => undefined)}>重试</Button>} />}
+      <Typography.Title level={4}>到货与异常</Typography.Title>
+      {viewState === "error" ? null : deliveries.length === 0 && !loading ? (
+        <Card title="到货与异常">
+          <Empty description="暂无点位到货记录">
+            <Typography.Paragraph type="secondary">
+              团期发车后，由授权点位负责人逐商品确认到货；如有短少或破损，由运营确认受影响订单后交财务处理。
+            </Typography.Paragraph>
+          </Empty>
+        </Card>
+      ) : (
+        <Table
+          rowKey="id"
+          loading={loading}
+          dataSource={newestFirst(deliveries, value => value.arrivalConfirmedAt ?? value.createdAt)}
+          columns={[
+          { title: "团期", dataIndex: "campaignTitle" },
+          { title: "自提点", dataIndex: "siteName" },
+          { title: "到货状态", render: (_, v) => <Status value={v.status} /> },
+          {
+            title: "异常处理",
+            render: (_, v) =>
+              v.allocationDraftStatus
+                ? displayLabel(v.allocationDraftStatus)
+                : "—",
+          },
+          {
+            title: "操作",
+            render: (_, v) => (
+              <Space wrap>
+                {emergencyProxy && v.dispatchBatchId && !v.arrivalConfirmed && (
+                  <Button danger onClick={() => setArrival(v)}>
+                    紧急代办到货
+                  </Button>
+                )}
+                {canOperate &&
+                  v.communityDeliveryId &&
+                  v.allocationDraftStatus ===
+                    "PENDING_OPERATOR_CONFIRMATION" && (
+                    <Button
+                      type="primary"
+                      loading={allocationSubmitting}
+                      disabled={allocationSubmitting}
+                      onClick={() => void confirmAllocation(v.communityDeliveryId!)}
+                    >
+                      确认异常范围
+                    </Button>
+                  )}
+                {!v.arrivalConfirmed && !v.dispatchBatchId && (
+                  <Typography.Text type="secondary">
+                    等待运营发车
+                  </Typography.Text>
+                )}
+                {!v.arrivalConfirmed &&
+                  v.dispatchBatchId &&
+                  v.status === "IN_TRANSIT" &&
+                  !emergencyProxy && (
+                    <Typography.Text type="secondary">
+                      等待点位负责人确认到货
+                    </Typography.Text>
+                  )}
+                {v.arrivalConfirmed &&
+                  v.allocationDraftStatus ===
+                    "PENDING_OPERATOR_CONFIRMATION" && (
+                    <Typography.Text type="warning">
+                      待运营确认异常范围
+                    </Typography.Text>
+                  )}
+                {v.arrivalConfirmed &&
+                  v.allocationDraftStatus !==
+                    "PENDING_OPERATOR_CONFIRMATION" && (
+                    <Typography.Text type="secondary">
+                      到货已确认
+                    </Typography.Text>
+                  )}
+              </Space>
+            ),
+          },
+        ]}
+        />
+      )}
+      </>}
+      <Modal
+        open={!!vehicle}
+        title={
+          vehicleEmergency
+            ? "紧急纠正运输信息"
+            : vehicle?.status === "SITE_CONFIRMED"
+              ? "登记运输信息"
+              : "编辑运输信息"
+        }
+        footer={null}
+        onCancel={() => {
+          setVehicle(null);
+          setVehicleEmergency(false);
+          vehicleForm.resetFields();
+        }}
+      >
+        {vehicleEmergency && (
+          <Alert
+            type="warning"
+            showIcon
+            message="发车后普通编辑已锁定，仅超级管理员可紧急纠正；操作会写入审计。"
+            style={{ marginBottom: 16 }}
+          />
+        )}
+        <Form
+          form={vehicleForm}
+          layout="vertical"
+          onFinish={(v) => void saveVehicle(v)}
+        >
+          <Form.Item label="运输方式" required>
+            <Select
+              value={transportType}
+              onChange={(value: "PLATFORM_SELF" | "THIRD_PARTY") => {
+                setTransportType(value);
+                if (value === "PLATFORM_SELF") vehicleForm.setFieldValue("logisticsPlatform", "平台自送");
+                else if (vehicleForm.getFieldValue("logisticsPlatform") === "平台自送") vehicleForm.setFieldValue("logisticsPlatform", undefined);
+              }}
+              options={[{ value: "PLATFORM_SELF", label: "平台自送" }, { value: "THIRD_PARTY", label: "第三方承运" }]}
+              disabled={vehicleSubmitting}
+            />
+          </Form.Item>
+          {transportType === "THIRD_PARTY" && (
+            <>
+              <Form.Item
+                name="logisticsPlatform"
+                label="承运方"
+                rules={[{ required: true, message: "请填写第三方承运方" }]}
+              >
+                <Input placeholder="例如：第三方物流或合作车队" />
+              </Form.Item>
+              <Form.Item
+                name="vehicleOrderNo"
+                label="运单号（可选）"
+                extra="第三方承运提供的货物查询编号，没有可留空"
+              >
+                <Input placeholder="有运单号时填写" />
+              </Form.Item>
+            </>
+          )}
+          <div className="form-grid">
+            <Form.Item name="driverName" label="司机">
+              <Input />
+            </Form.Item>
+            <Form.Item name="driverPhone" label="电话">
+              <Input />
+            </Form.Item>
+          </div>
+          <Form.Item name="vehiclePlate" label="车牌">
+            <Input />
+          </Form.Item>
+          {vehicleEmergency && (
+            <Form.Item
+              name="reason"
+              label="紧急纠正原因"
+              rules={[{ required: true, min: 2, message: "请填写纠正原因" }]}
+            >
+              <Input.TextArea rows={3} />
+            </Form.Item>
+          )}
+          <Button
+            type="primary"
+            htmlType="submit"
+            loading={vehicleSubmitting}
+            disabled={vehicleSubmitting}
+          >
+            保存
+          </Button>
+        </Form>
+      </Modal>
+      <Modal
+        open={!!dispatchReview}
+        title="发车前复核"
+        confirmLoading={dispatchSubmitting}
+        okButtonProps={{ disabled: Boolean(cannotDispatch) }}
+        okText="确认发车"
+        cancelText="返回修改"
+        onCancel={() => setDispatchReview(null)}
+        onOk={() => void dispatch()}
+      >
+        {dispatchReview && (
+          <>
+          {cannotDispatch && <Alert type={dispatchLabels === null && !reviewBlock && !dispatchLoadError ? "info" : "warning"} showIcon message={cannotDispatch} style={{ marginBottom: 16 }}
+            action={dispatchLoadError ? <Button size="small" onClick={() => setReviewReload((value) => value + 1)}>重试核实</Button> : undefined} />}
+          {dispatchError && <Alert type="error" showIcon message={dispatchError} style={{ marginBottom: 16 }} />}
+          <Descriptions column={1} bordered size="small">
+            <Descriptions.Item label="团期">
+              {campaigns.find((value) => value.id === dispatchReview.campaignId)?.title ??
+                dispatchReview.campaignId}
+            </Descriptions.Item>
+            <Descriptions.Item label="团期状态">
+              {reviewCampaign ? <Status value={reviewCampaign.status} /> : "尚未加载"}
+            </Descriptions.Item>
+            <Descriptions.Item label="自提点">
+              {dispatchReview.siteName}
+            </Descriptions.Item>
+            <Descriptions.Item label="承运方">
+              {dispatchReview.logisticsPlatform ?? "—"}
+            </Descriptions.Item>
+            <Descriptions.Item label="运输单号">
+              {dispatchReview.vehicleOrderNo ?? "—"}
+            </Descriptions.Item>
+            <Descriptions.Item label="司机 / 车牌">
+              {[dispatchReview.driverName, dispatchReview.vehiclePlate]
+                .filter(Boolean)
+                .join(" / ") || "—"}
+            </Descriptions.Item>
+            <Descriptions.Item label="已付款发货订单 / 商品数量">
+              {dispatchLabels === null ? "待核实" : `${dispatchLabels.length} 单 / ${dispatchQuantity} 件`}
+            </Descriptions.Item>
+          </Descriptions>
+          </>
+        )}
+      </Modal>
+      <ArrivalConfirmationModal
+        arrival={arrival}
+        emergencyProxy={emergencyProxy}
+        onClose={() => setArrival(null)}
+        onConfirmed={reload}
+      />
+    </>
+  );
+}
+
+function Areas({
+  view,
+  areas,
+  points,
+  reload,
+}: {
+  view: AdminPage;
+  areas: ServiceArea[];
+  points: PickupPoint[];
+  reload: () => Promise<void>;
+}) {
+  const [areaQuery,setAreaQuery] = useState("");
+  const [areaStatus,setAreaStatus] = useState("ALL");
+  const [pointQuery,setPointQuery] = useState("");
+  const [pointStatus,setPointStatus] = useState("ALL");
+  const { message } = AntApp.useApp();
+  const [areaOpen, setAreaOpen] = useState(false);
+  const [pointOpen, setPointOpen] = useState(false);
+  const [editingPoint, setEditingPoint] = useState<PickupPoint | null>(null);
+  const [regions, setRegions] = useState<RegionDirectoryEntry[]>([]);
+  const [regionLoadError, setRegionLoadError] = useState<string | null>(null);
+  const [locationChangeRequired, setLocationChangeRequired] = useState(true);
+  const [locationVerification, setLocationVerification] =
+    useState<PickupLocationVerificationState>("UNCONFIRMED");
+  const [submitting, setSubmitting] = useState(false);
+  const [pointForm] = Form.useForm();
+  const pointLatitude = Form.useWatch("latitude", pointForm);
+  const pointLongitude = Form.useWatch("longitude", pointForm);
+  const selectedServiceAreaId = Form.useWatch("serviceAreaId", pointForm) as
+    | string
+    | undefined;
+  const selectedServiceArea = areas.find(
+    (area) => area.id === selectedServiceAreaId,
+  );
+  const selectedRegion = regions.find(
+    (region) => region.regionCode === selectedServiceArea?.regionCode,
+  );
+  useEffect(() => {
+    void api
+      .regions()
+      .then((value) => {
+        setRegions(value);
+        setRegionLoadError(null);
+      })
+      .catch(() => {
+        setRegions([]);
+        setRegionLoadError("行政目录暂时不可用，请重试后再配置位置");
+      });
+  }, []);
+  const startCreatePoint = () => {
+    setEditingPoint(null);
+    setLocationChangeRequired(true);
+    setLocationVerification("UNCONFIRMED");
+    pointForm.resetFields();
+    pointForm.setFieldsValue({
+      businessHours: "每日 09:00–20:00",
+      pickupInstructions: "到店出示领取码",
+    });
+    setPointOpen(true);
+  };
+  const editablePointFields = (point: PickupPoint) => ({
+    serviceAreaId: point.serviceAreaId,
+    name: point.name,
+    address: point.address,
+    businessHours: point.businessHours,
+    pickupInstructions: point.pickupInstructions,
+    latitude: point.latitude,
+    longitude: point.longitude,
+    capacityPerDay: point.capacityPerDay,
+    status: point.status,
+  });
+  const startEditPoint = (point: PickupPoint) => {
+    setEditingPoint(point);
+    setLocationChangeRequired(false);
+    setLocationVerification("CONFIRMED");
+    pointForm.setFieldsValue(editablePointFields(point));
+    setPointOpen(true);
+  };
+  return (
+    <>
+      <PageTitle
+        title={view === "areas" ? "区域管理" : "自提点管理"}
+        subtitle={view === "areas" ? "管理服务覆盖范围与区域接单状态" : "管理领取地址、营业时间和点位状态"}
+        action={
+          <Space>
+            {view === "areas"
+              ? <Button type="primary" onClick={() => setAreaOpen(true)}>开通服务区域</Button>
+              : <Button type="primary" onClick={startCreatePoint}>新增自提点</Button>}
+          </Space>
+        }
+      />
+      {view === "areas" && <>
+      <ListFilters label="区域" query={areaQuery} onQuery={setAreaQuery} status={areaStatus} onStatus={setAreaStatus} statuses={[{value:"ENABLED",label:"接单中"},{value:"DISABLED",label:"已暂停接单"}]} />
+      <Table
+        rowKey="id"
+        dataSource={areas.filter(v=>(areaStatus === "ALL" || (v.orderEnabled ? "ENABLED" : "DISABLED") === areaStatus) && matchesKeyword(areaQuery,v.name,v.regionCode))}
+        locale={{ emptyText: "暂无服务区域，请从行政目录开通" }}
+        columns={[
+          { title: "区域", dataIndex: "name" },
+          {
+            title: "行政目录",
+            render: (_, value) =>
+              regions.find((region) => region.regionCode === value.regionCode)?.path ??
+              value.name,
+          },
+          {
+            title: "接单",
+            render: (_, v) => (
+              <Button
+                loading={submitting}
+                disabled={submitting}
+                onClick={() => {
+                  const nextEnabled = !v.orderEnabled;
+                  Modal.confirm({
+                    title: nextEnabled ? "确认恢复接单？" : "确认暂停区域接单？",
+                    content: nextEnabled
+                      ? "恢复后新团期可以继续使用该区域。"
+                      : "暂停只影响后续新团期，进行中的团期和未完成订单不受影响；请确认已知晓影响范围。",
+                    okText: nextEnabled ? "确认开启" : "确认暂停",
+                    cancelText: "返回",
+                    onOk: async () => {
+                      if (submitting) return;
+                      setSubmitting(true);
+                      try {
+                        await api.setArea(v.id, nextEnabled);
+                        await refreshAfterMutation(
+                          reload,
+                          message,
+                          nextEnabled ? "区域已开启接单" : "区域已暂停接单",
+                        );
+                      } catch (error) {
+                        message.error(adminErrorNotice(error, mutationErrorText(error)));
+                      } finally {
+                        setSubmitting(false);
+                      }
+                    },
+                  });
+                }}
+              >
+                {v.orderEnabled ? "暂停" : "开启"}
+              </Button>
+            ),
+          },
+        ]}
+      />
+      </>}
+      {view !== "areas" && <>
+      <ListFilters label="自提点" query={pointQuery} onQuery={setPointQuery} status={pointStatus} onStatus={setPointStatus} statuses={[{value:"ACTIVE",label:"启用"},{value:"INACTIVE",label:"停用"},{value:"ARCHIVED",label:"已删除"}]} />
+      <Table
+        rowKey="id"
+        dataSource={points.filter(v=>(pointStatus === "ALL" || (v.archivedAt ? "ARCHIVED" : v.status) === pointStatus) && matchesKeyword(pointQuery,v.name,v.address,v.contactName,areas.find(area=>area.id===v.serviceAreaId)?.name))}
+        locale={{ emptyText: "暂无自提点，请先选择服务区域并新增" }}
+        columns={[
+          { title: "名称", dataIndex: "name" },
+          { title: "地址", dataIndex: "address" },
+          { title: "营业时间", dataIndex: "businessHours", width: 170 },
+          {
+            title: "负责人",
+            width: 150,
+            render: (_, v) =>
+              v.managerNames !== undefined
+                ? v.managerNames.length
+                  ? <>{v.managerNames.join("、")}{v.managerConflict ? <Tag color="red">关联冲突</Tag> : null}</>
+                  : "未关联负责人"
+                : v.contactName || v.contactPhone
+                  ? `${v.contactName} ${v.contactPhone}`.trim()
+                : "未关联负责人",
+          },
+          { title: "状态", width: 100, render: (_, v) => v.archivedAt ? <Tag color="default">已删除</Tag> : <Status value={v.status} /> },
+          {
+            title: "操作",
+            width: 184,
+            align: "right",
+            className: "table-actions",
+            render: (_, v) => v.archivedAt ? <Typography.Text type="secondary">历史保留</Typography.Text> : (
+              <Space wrap={false}>
+                <Button onClick={() => startEditPoint(v)}>编辑</Button>
+
+                <Button
+                  danger
+                  onClick={() => {
+                    Modal.confirm({
+                      title: "确认删除自提点？",
+                      content: "仅无进行中团期、待履约流程和未完成订单的自提点可以删除；已结束订单历史会保留。删除后关联负责人会解除该点位授权并需要重新登录。",
+                      okText: "确认删除",
+                      okButtonProps: { danger: true },
+                      cancelText: "取消",
+                      onOk: async () => {
+                        if (submitting) return;
+                        setSubmitting(true);
+                        try {
+                          await api.deletePoint(v.id);
+                          await refreshAfterMutation(reload, message, "自提点已删除，关联负责人授权已释放");
+                        } catch (error) {
+                          message.error(adminErrorNotice(error, mutationErrorText(error)));
+                          throw error;
+                        } finally {
+                          setSubmitting(false);
+                        }
+                      },
+                    });
+                  }}
+                >
+                  删除
+                </Button>
+              </Space>
+            ),
+          },
+        ]}
+      />
+      </>}
+      <Modal
+        open={areaOpen}
+        title="开通服务区域"
+        footer={null}
+        onCancel={() => setAreaOpen(false)}
+      >
+        {regionLoadError && (
+          <Alert
+            type="error"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message="行政目录加载失败"
+            description={regionLoadError}
+            action={
+              <Button
+                size="small"
+                onClick={() =>
+                  void api
+                    .regions()
+                    .then((value) => {
+                      setRegions(value);
+                      setRegionLoadError(null);
+                    })
+                    .catch(() =>
+                      setRegionLoadError("行政目录暂时不可用，请重试后再配置区域"),
+                    )
+                }
+              >
+                重试
+              </Button>
+            }
+          />
+        )}
+        <Form
+          layout="vertical"
+          onFinish={async (v) => {
+            if (submitting) return;
+            setSubmitting(true);
+            try {
+              await api.openArea(v.regionCode);
+              setAreaOpen(false);
+              await refreshAfterMutation(reload, message, "服务区域已开通");
+            } catch (e) {
+              message.error(adminErrorNotice(e, mutationErrorText(e)));
+            } finally {
+              setSubmitting(false);
+            }
+          }}
+        >
+          <Form.Item
+            name="regionCode"
+            label="服务区域"
+            rules={[{ required: true, message: "请选择行政目录中的服务区域" }]}
+          >
+            <Select
+              showSearch
+              optionFilterProp="label"
+              placeholder={regionLoadError ? "行政目录加载失败，请重试" : "从行政目录选择服务区域"}
+              loading={!regions.length && !regionLoadError}
+              options={regions.map((region) => ({
+                value: region.regionCode,
+                label: `${region.path}（${region.regionCode}）`,
+              }))}
+              notFoundContent={regionLoadError ? "行政目录暂时不可用" : "暂无可选区域"}
+            />
+          </Form.Item>
+          <Button type="primary" htmlType="submit" loading={submitting} disabled={submitting}>
+            开通
+          </Button>
+        </Form>
+      </Modal>
+      <Modal
+        centered
+        width={800}
+        className="pickup-point-modal"
+        open={pointOpen}
+        title={editingPoint ? "编辑自提点" : "新增自提点"}
+        footer={
+          <div className="pickup-point-modal__footer">
+            <Button onClick={() => setPointOpen(false)}>取消</Button>
+            <Button type="primary" htmlType="submit" form="pickup-point-form"
+              loading={submitting}
+              disabled={submitting || isPickupLocationSubmissionBlocked(locationChangeRequired, locationVerification)}>
+              保存
+            </Button>
+          </div>
+        }
+        destroyOnHidden
+        onCancel={() => {
+          setPointOpen(false);
+          setEditingPoint(null);
+          setLocationChangeRequired(true);
+          setLocationVerification("UNCONFIRMED");
+        }}
+      >
+        <Typography.Paragraph type="secondary" className="modal-note">
+            选择服务区域，搜索地址并确认实际位置。
         </Typography.Paragraph>
         {regionLoadError && (
           <Alert
@@ -2922,7 +3768,7 @@ function ArrivalConfirmationModal({
           )}
           {editingPoint && (
             <Form.Item name="status" label="点位状态" rules={[{ required: true }]}>
-              <Select
+              <Radio.Group
                 options={[
                   { value: "ACTIVE", label: "启用" },
                   { value: "INACTIVE", label: "停用" },
@@ -2931,7 +3777,7 @@ function ArrivalConfirmationModal({
             </Form.Item>
           )}
         </Form>
-      </Drawer>
+      </Modal>
     </>
   );
 }
@@ -4300,16 +5146,18 @@ function Finance({
         确认对订单 {cancellationRefundTarget?.orderNo ?? cancellationRefundTarget?.orderId} 执行运营已批准的取消退款？
         <Typography.Paragraph>退款金额：{cancellationRefundTarget ? refundAmountText(cancellationRefundTarget) : "金额待核查"}</Typography.Paragraph>
       </Modal>
-      <Drawer
+      <Modal
+        centered
         open={Boolean(financeDetail)}
         title={financeDetail?.title}
-        onClose={() => setFinanceDetail(null)}
-        width={560}
+        onCancel={() => setFinanceDetail(null)}
+        footer={<Button onClick={() => setFinanceDetail(null)}>关闭</Button>}
+        width={640}
       >
         <Descriptions bordered size="small" column={1}>
           {financeDetail?.rows.map((row) => <Descriptions.Item key={row.label} label={row.label}>{row.value}</Descriptions.Item>)}
         </Descriptions>
-      </Drawer>
+      </Modal>
     </>
   );
 }
