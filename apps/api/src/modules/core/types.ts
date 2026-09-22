@@ -242,6 +242,7 @@ export interface InternalStaff {
   suspendedAt: string | null;
   suspensionReason: string | null;
   authorizationVersion: number;
+  archivedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }

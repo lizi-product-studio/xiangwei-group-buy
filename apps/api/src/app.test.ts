@@ -62,6 +62,49 @@ describe("single community application surface", () => {
     await store.saveNotificationPreference({ userId: 'subscription-user', types: ['ARRIVED'], updatedAt: new Date().toISOString() });
     expect((await app.inject({ method: 'GET', url: '/api/v1/notifications/preferences', headers })).json().data.types).toEqual([]);
   });
+  it("derives pickup-point contact display from manager assignments and exposes legacy conflicts", async () => {
+    const store = new MemoryStore(false);
+    const now = new Date().toISOString();
+    for (const id of ["conflicted-point", "unassigned-point"]) {
+      await store.savePickupPoint({
+        id, serviceAreaId: "area-1", name: id, address: "测试地址",
+        businessHours: "09:00-20:00", pickupInstructions: "出示领取码",
+        latitude: 39.9, longitude: 116.4, contactName: "过期联系人",
+        contactPhone: "13800000099", status: "ACTIVE", capacityPerDay: null, createdAt: now,
+      });
+    }
+    for (const [userId, displayName, status] of [
+      ["manager-a", "负责人甲", "ACTIVE"],
+      ["manager-b", "负责人乙", "PASSWORD_SETUP_REQUIRED"],
+    ] as const) {
+      await store.saveInternalStaff({
+        userId, staffNo: userId, displayName, phone: userId === "manager-a" ? "13800000001" : "13800000002",
+        role: "PICKUP_MANAGER", status, createdBy: "admin", activatedAt: null,
+        suspendedAt: null, suspensionReason: null, authorizationVersion: 1, createdAt: now, updatedAt: now,
+      });
+      await store.replaceStaffPickupPointAssignments(userId, [{
+        staffUserId: userId, pickupPointId: "conflicted-point", assignedBy: "admin", createdAt: now, updatedAt: now,
+      }]);
+    }
+    app = await buildApp({ config: loadConfig({ NODE_ENV: "test" }), store });
+    const response = await app.inject({ method: "GET", url: "/api/v1/admin/pickup-points", headers: admin });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: "conflicted-point", managerNames: ["负责人甲", "负责人乙"], managerConflict: true,
+        contactName: "负责人甲、负责人乙（关联冲突）", contactPhone: "",
+      }),
+      expect.objectContaining({
+        id: "unassigned-point", managerNames: [], managerConflict: false,
+        contactName: "", contactPhone: "",
+      }),
+    ]));
+    const publicPoints = await app.inject({ method: "GET", url: "/api/v1/pickup-points" });
+    expect(publicPoints.json().data).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "conflicted-point", contactName: "负责人甲、负责人乙（关联冲突）", contactPhone: "" }),
+      expect.objectContaining({ id: "unassigned-point", contactName: "", contactPhone: "" }),
+    ]));
+  });
   it("logs a sanitized exception name and stack frame for an unhandled request", async () => {
     const lines: string[] = [];
     app = await buildApp({

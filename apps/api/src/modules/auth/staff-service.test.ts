@@ -198,6 +198,30 @@ describe("StaffService lifecycle and authorization revision", () => {
     ).resolves.toMatchObject({ authorizationVersion: active.authorizationVersion });
   });
 
+  it("allows profile edits on suspended staff without replacing the suspension record", async () => {
+    const store = new MemoryStore();
+    await createBootstrap(store);
+    const staff = new StaffService(store);
+    const created = await staff.create({
+      displayName: "停用员工甲", username: "suspended.profile", phone: "13800138021",
+      role: "FINANCE", status: "ACTIVE", pickupPointIds: [],
+    }, bootstrapActor, "create-suspended-profile");
+    await staff.update(created.staff.userId, { status: "SUSPENDED", reason: "岗位交接" }, bootstrapActor, "suspend-profile");
+    const suspended = await staff.get(created.staff.userId);
+
+    const updated = await staff.update(created.staff.userId, {
+      displayName: "停用员工甲（调整）", phone: "13800138022",
+    }, bootstrapActor, "edit-suspended-profile");
+
+    expect(updated).toMatchObject({
+      status: "SUSPENDED",
+      displayName: "停用员工甲（调整）",
+      phone: "13800138022",
+      suspendedAt: suspended.suspendedAt,
+      suspensionReason: "岗位交接",
+    });
+  });
+
   it("keeps credential and staff versions aligned across suspension and restoration", async () => {
     const store = new MemoryStore();
     await createBootstrap(store);
@@ -387,6 +411,21 @@ describe("StaffService lifecycle and authorization revision", () => {
       capacityPerDay: null,
       createdAt: now,
     });
+    await store.savePickupPoint({
+      id: "point-west",
+      serviceAreaId: "area-1",
+      name: "西门点",
+      address: "西门服务站 2 号",
+      businessHours: "09:00-20:00",
+      pickupInstructions: "出示领取码",
+      latitude: 39.9042,
+      longitude: 116.4074,
+      contactName: "",
+      contactPhone: "",
+      status: "ACTIVE",
+      capacityPerDay: null,
+      createdAt: now,
+    });
     const staff = new StaffService(store);
     await staff.create(
       {
@@ -395,7 +434,7 @@ describe("StaffService lifecycle and authorization revision", () => {
         phone: "13800138008",
         role: "PICKUP_MANAGER",
         status: "ACTIVE",
-        pickupPointIds: ["point-east"],
+        pickupPointIds: ["point-east", "point-west"],
       },
       bootstrapActor,
       "create-manager",
@@ -403,6 +442,11 @@ describe("StaffService lifecycle and authorization revision", () => {
     expect(await store.listPickupPoints()).toMatchObject([
       {
         id: "point-east",
+        contactName: "核销小周",
+        contactPhone: "13800138008",
+      },
+      {
+        id: "point-west",
         contactName: "核销小周",
         contactPhone: "13800138008",
       },
@@ -423,6 +467,73 @@ describe("StaffService lifecycle and authorization revision", () => {
         contactName: "核销小周改",
         contactPhone: "13900139008",
       },
+      {
+        id: "point-west",
+        contactName: "核销小周改",
+        contactPhone: "13900139008",
+      },
     ]);
+  });
+
+  it("blocks new duplicate bindings, allows legacy-conflict cleanup, and archives suspended staff safely", async () => {
+    const store = new MemoryStore();
+    await createBootstrap(store);
+    const now = new Date().toISOString();
+    for (const [id, name] of [["point-shared", "共享点"], ["point-other", "其他点"]]) {
+      await store.savePickupPoint({
+        id, serviceAreaId: "area-1", name, address: `${name}地址`,
+        businessHours: "09:00-20:00", pickupInstructions: "出示领取码",
+        latitude: 39.9042, longitude: 116.4074, contactName: "旧联系人",
+        contactPhone: "13800000099", status: "ACTIVE", capacityPerDay: null, createdAt: now,
+      });
+    }
+    const staff = new StaffService(store);
+    const first = await staff.create({
+      displayName: "负责人甲", username: "manager.first", phone: "13800138101",
+      role: "PICKUP_MANAGER", status: "ACTIVE", pickupPointIds: ["point-shared"],
+    }, bootstrapActor, "manager-first");
+    expect(first.staff.status).toBe("PASSWORD_SETUP_REQUIRED");
+    await expect(staff.create({
+      displayName: "负责人重复", username: "manager.duplicate", phone: "13800138102",
+      role: "PICKUP_MANAGER", status: "ACTIVE", pickupPointIds: ["point-shared"],
+    }, bootstrapActor, "manager-duplicate")).rejects.toMatchObject({ code: "RESOURCE_IN_USE" });
+
+    const second = await staff.create({
+      displayName: "历史负责人乙", username: "manager.second", phone: "13800138103",
+      role: "PICKUP_MANAGER", status: "ACTIVE", pickupPointIds: ["point-other"],
+    }, bootstrapActor, "manager-second");
+    const createdAt = new Date().toISOString();
+    await store.replaceStaffPickupPointAssignments(second.staff.userId, [{
+      staffUserId: second.staff.userId, pickupPointId: "point-shared", assignedBy: bootstrapActor.userId,
+      createdAt, updatedAt: createdAt,
+    }]);
+    await staff.update(second.staff.userId, { status: "SUSPENDED", reason: "历史重复待清理" }, bootstrapActor, "suspend-conflict");
+    expect(await store.listPickupPoints()).toMatchObject([
+      { id: "point-shared", contactName: "负责人甲、历史负责人乙（关联冲突）", contactPhone: "" },
+      { id: "point-other", contactName: "", contactPhone: "" },
+    ]);
+    await expect(staff.update(second.staff.userId, { status: "ACTIVE", reason: "尝试恢复" }, bootstrapActor, "restore-conflict"))
+      .rejects.toMatchObject({ code: "RESOURCE_IN_USE" });
+    await staff.update(second.staff.userId, { pickupPointIds: [], reason: "解除历史重复关联" }, bootstrapActor, "clear-conflict");
+    expect((await store.listPickupPoints()).find((point) => point.id === "point-shared"))
+      .toMatchObject({ contactName: "负责人甲", contactPhone: "13800138101" });
+    await expect(staff.update(second.staff.userId, { pickupPointIds: ["point-shared"], reason: "不应重新占用" }, bootstrapActor, "suspended-duplicate-binding"))
+      .rejects.toMatchObject({ code: "RESOURCE_IN_USE" });
+
+    const third = await staff.create({
+      displayName: "待归档负责人", username: "manager.third", phone: "13800138104",
+      role: "PICKUP_MANAGER", status: "ACTIVE", pickupPointIds: ["point-other"],
+    }, bootstrapActor, "manager-third");
+    await staff.update(third.staff.userId, { status: "SUSPENDED", reason: "离岗" }, bootstrapActor, "suspend-third");
+    await expect(staff.archiveSuspended(third.staff.userId, "归档资料", bootstrapActor, "archive-third"))
+      .resolves.toEqual({ archived: true });
+    expect(await staff.list()).not.toContainEqual(expect.objectContaining({ userId: third.staff.userId }));
+    expect(await store.listStaffPickupPointAssignments(third.staff.userId)).toEqual([]);
+    expect((await store.listPickupPoints()).find((point) => point.id === "point-other"))
+      .toMatchObject({ contactName: "", contactPhone: "" });
+    expect(await store.findAdminCredentialByUserId(third.staff.userId)).toMatchObject({ legacyDisabled: true, roles: [] });
+    await expect(staff.get(third.staff.userId)).rejects.toMatchObject({ code: "RESOURCE_NOT_FOUND" });
+    await expect(staff.resetCredential(third.staff.userId, "归档后不得重置", bootstrapActor, "reset-archived"))
+      .rejects.toMatchObject({ code: "RESOURCE_NOT_FOUND" });
   });
 });

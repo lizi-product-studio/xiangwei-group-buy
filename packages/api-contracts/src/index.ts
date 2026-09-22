@@ -72,6 +72,9 @@ export const updateInternalStaffSchema = z
 export const resetInternalStaffCredentialSchema = z.object({
   reason: z.string().trim().min(2).max(500),
 });
+export const archiveInternalStaffSchema = z.object({
+  reason: z.string().trim().min(2).max(500),
+});
 export const internalStaffDirectoryQuerySchema = z.object({
   query: z.string().trim().max(80).optional(),
 });

@@ -24,6 +24,8 @@ export interface PickupPoint {
   longitude: number;
   contactName: string;
   contactPhone: string;
+  managerNames?: string[];
+  managerConflict?: boolean;
   status: "ACTIVE" | "INACTIVE";
   archivedAt?: string | null;
   capacityPerDay: number | null;
@@ -241,6 +243,7 @@ export interface InternalStaff {
   status: "PASSWORD_SETUP_REQUIRED" | "ACTIVE" | "SUSPENDED";
   pickupPointIds: string[];
   createdAt: string;
+  archivedAt?: string | null;
 }
 export interface CommunityDelivery {
   id: string;
@@ -1070,6 +1073,11 @@ export const api = {
       `/api/v1/admin/staff/${id}/reset-password`,
       { reason },
     ),
+  archiveStaff: (id: string, reason: string) =>
+    request<{ archived: boolean }>(`/api/v1/admin/staff/${id}`, {
+      method: "DELETE",
+      body: JSON.stringify({ reason }),
+    }),
   quality: () => request<QualityCase[]>("/api/v1/admin/quality-cases"),
   acceptQuality: (id: string, note: string) =>
     post(`/api/v1/admin/quality-cases/${id}/accept`, { note }),

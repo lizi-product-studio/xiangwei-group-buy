@@ -232,7 +232,7 @@ test("超管从网页创建员工，临时密码改密与撤权后的默认页�
     .filter({ hasText: "财务" })
     .click();
   await editor.getByLabel("变更原因").fill("岗位调整为财务");
-  await editor.getByRole("button", { name: "保存并使旧会话失效" }).click();
+  await editor.getByRole("button", { name: "保存", exact: true }).click();
   await expect(editor).toHaveCount(0);
   invalidated = true;
   await managerPage.reload();
@@ -249,13 +249,24 @@ test("超管从网页创建员工，临时密码改密与撤权后的默认页�
   confirm = page.getByRole("dialog", { name: "确认恢复员工" });
   await confirm.getByLabel("操作原因").fill("完成交接后恢复");
   await confirm.getByRole("button", { name: "确认执行" }).click();
-  await staffRow.getByRole("button", { name: "重置密码" }).click();
+  await staffRow.getByRole("button", { name: "编辑" }).click();
+  const resetEditor = page.getByRole("dialog", { name: "编辑员工权限" });
+  await resetEditor.getByRole("button", { name: "重置密码" }).click();
   confirm = page.getByRole("dialog", { name: "重置密码" });
   await confirm.getByLabel("操作原因").fill("密码轮换");
   await confirm.getByRole("button", { name: "确认执行" }).click();
   const resetCredentialDialog = page.getByRole("dialog", { name: /临时密码/ });
   await expect(resetCredentialDialog).toBeVisible();
   await resetCredentialDialog.getByRole("button", { name: "我已安全交付给员工" }).click();
+  await staffRow.getByRole("button", { name: "停用" }).click();
+  confirm = page.getByRole("dialog", { name: "确认停用员工" });
+  await confirm.getByLabel("操作原因").fill("离岗归档");
+  await confirm.getByRole("button", { name: "确认执行" }).click();
+  await staffRow.getByRole("button", { name: "删除" }).click();
+  confirm = page.getByRole("dialog", { name: "删除员工" });
+  await confirm.getByLabel("操作原因").fill("人员资料归档");
+  await confirm.getByRole("button", { name: "确认执行" }).click();
+  await expect(staffRow).toHaveCount(0);
 
   for (const width of [375, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });

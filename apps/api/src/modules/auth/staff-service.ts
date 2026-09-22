@@ -51,6 +51,23 @@ export class StaffService {
     return ids;
   }
 
+  private async assertPointBindingsAvailable(store:CommerceStore,pickupPointIds:string[],exceptUserId?:string):Promise<void>{
+    const assignments=await store.listStaffPickupPointAssignments();
+    const staff=await store.listInternalStaff();
+    const byId=new Map(staff.map((item)=>[item.userId,item]));
+    for(const pointId of pickupPointIds){
+      const conflict=assignments.find((assignment)=>{
+        if(assignment.pickupPointId!==pointId||assignment.staffUserId===exceptUserId)return false;
+        const holder=byId.get(assignment.staffUserId);
+        return holder?.role==='PICKUP_MANAGER'&&!holder.archivedAt;
+      });
+      if(conflict){
+        const holder=byId.get(conflict.staffUserId);
+        throw new BusinessError('RESOURCE_IN_USE',`自提点已关联负责人${holder?`“${holder.displayName}”`:''}，请先解除原关联`,409);
+      }
+    }
+  }
+
   /** Re-check the initiating administrator inside the write transaction. */
   private async assertCurrentSuperAdmin(store:CommerceStore,actor:Actor):Promise<void>{
     // Header actors exist only when AUTH_PROVIDER=demo, which is the isolated
@@ -86,13 +103,28 @@ export class StaffService {
     await store.replaceStaffPickupPointAssignments(staffUserId,assignments);
   }
 
-  private async syncAssignedPointContacts(store:CommerceStore,role:InternalStaffRole,pickupPointIds:string[],displayName:string,phone:string):Promise<void>{
-    if(role!=='PICKUP_MANAGER'||!pickupPointIds.length)return;
-    const points=await store.listPickupPoints();
-    for(const id of pickupPointIds){
-      const point=points.find((item)=>item.id===id);
-      if(!point)continue;
-      await store.savePickupPoint({...point,contactName:displayName,contactPhone:phone});
+  private async syncPointContacts(store:CommerceStore,pickupPointIds?:string[]):Promise<void>{
+    const allPoints=await store.listPickupPoints();
+    const targetIds=pickupPointIds?.length?new Set(uniqueIds(pickupPointIds)):null;
+    const points=targetIds?allPoints.filter((item)=>targetIds.has(item.id)):allPoints;
+    if(!points.length)return;
+    const [assignments,staff]=await Promise.all([store.listStaffPickupPointAssignments(),store.listInternalStaff()]);
+    const staffById=new Map(staff.map((item)=>[item.userId,item]));
+    const managersByPoint=new Map<string,InternalStaff[]>();
+    for(const assignment of assignments){
+      const manager=staffById.get(assignment.staffUserId);
+      if(!manager||manager.role!=='PICKUP_MANAGER'||manager.archivedAt)continue;
+      const managers=managersByPoint.get(assignment.pickupPointId)??[];
+      if(!managers.some((item)=>item.userId===manager.userId))managers.push(manager);
+      managersByPoint.set(assignment.pickupPointId,managers);
+    }
+    for(const point of points){
+      const managers=(managersByPoint.get(point.id)??[]).sort((left,right)=>left.displayName.localeCompare(right.displayName,'zh-CN'));
+      await store.savePickupPoint({
+        ...point,
+        contactName:managers.length?`${managers.map((item)=>item.displayName).join('、')}${managers.length>1?'（关联冲突）':''}`:'',
+        contactPhone:managers.length===1?managers[0]!.phone:'',
+      });
     }
   }
 
@@ -102,6 +134,7 @@ export class StaffService {
       if(await store.findAdminCredential(input.username))throw new BusinessError('RESOURCE_IN_USE','账号名已被使用',409);
       if((await store.listInternalStaff()).some((item)=>item.phone===input.phone))throw new BusinessError('RESOURCE_IN_USE','手机号已被内部员工使用',409);
       const pointIds=await this.validatePointScope(store,input.role,input.pickupPointIds);
+      if(input.role==='PICKUP_MANAGER')await this.assertPointBindingsAvailable(store,pointIds);
       const now=new Date().toISOString();
       const userId=randomUUID();
       const credential=temporaryPassword();
@@ -115,7 +148,7 @@ export class StaffService {
       await store.replaceUserRoles(userId,[input.role]);
       await store.saveAdminCredential(await createAdminCredential(input.username,userId,credential,[input.role],true,1));
       await this.replacePointScope(store,userId,pointIds,actor.userId,now);
-      await this.syncAssignedPointContacts(store,input.role,pointIds,staff.displayName,staff.phone);
+      if(input.role==='PICKUP_MANAGER')await this.syncPointContacts(store);
       const record=await this.record(store,staff);
       await store.saveAuditLog({id:randomUUID(),actorId:actor.userId,action:'STAFF_CREATED',resourceType:'INTERNAL_STAFF',resourceId:userId,requestId,beforeData:null,afterData:record,createdAt:now});
       return {staff:record,temporaryPassword:credential};
@@ -125,12 +158,12 @@ export class StaffService {
   public async list(query?:string):Promise<StaffRecord[]>{
     const [staff,assignments]=await Promise.all([this.store.listInternalStaff(query),this.store.listStaffPickupPointAssignments()]);
     const pointsByStaff=new Map<string,string[]>();for(const assignment of assignments){const values=pointsByStaff.get(assignment.staffUserId)??[];values.push(assignment.pickupPointId);pointsByStaff.set(assignment.staffUserId,values);}
-    return staff.map((item)=>({...item,pickupPointIds:pointsByStaff.get(item.userId)??[]}));
+    return staff.filter((item)=>!item.archivedAt).map((item)=>({...item,pickupPointIds:pointsByStaff.get(item.userId)??[]}));
   }
 
   public async get(userId:string):Promise<StaffRecord>{
     const staff=await this.store.getInternalStaff(userId);
-    if(!staff)throw new BusinessError('RESOURCE_NOT_FOUND','员工不存在',404);
+    if(!staff||staff.archivedAt)throw new BusinessError('RESOURCE_NOT_FOUND','员工不存在',404);
     return this.record(this.store,staff);
   }
 
@@ -138,7 +171,7 @@ export class StaffService {
     return this.store.transaction(async(store)=>{
       await this.assertCurrentSuperAdmin(store,actor);
       const before=await store.getInternalStaff(userId);
-      if(!before)throw new BusinessError('RESOURCE_NOT_FOUND','员工不存在',404);
+      if(!before||before.archivedAt)throw new BusinessError('RESOURCE_NOT_FOUND','员工不存在',404);
       const currentPointIds=(await store.listStaffPickupPointAssignments(userId)).map((item)=>item.pickupPointId);
       const nextRole=input.role??before.role;
       const requestedStatus=input.status??before.status;
@@ -151,23 +184,27 @@ export class StaffService {
       const roleChanged=nextRole!==before.role;
       const statusChanged=requestedStatus!==before.status;
       const scopeChanged=!sameIds(pointIds,currentPointIds);
+      const reactivating=before.status!=='ACTIVE'&&requestedStatus==='ACTIVE';
+      const addedPointIds=pointIds.filter((id)=>!currentPointIds.includes(id));
+      if(nextRole==='PICKUP_MANAGER'&&(addedPointIds.length||reactivating))
+        await this.assertPointBindingsAvailable(store,reactivating?pointIds:addedPointIds,userId);
       const authorizationChanged=roleChanged||statusChanged||scopeChanged;
       if(userId===actor.userId&&authorizationChanged)
         throw new BusinessError('INVALID_STATE_TRANSITION','不能修改自己的角色、账号状态或自提点授权，请由其他超级管理员操作',409);
       const isLastActiveSuperAdmin=before.role==='SUPER_ADMIN'&&before.status==='ACTIVE'&&
-        (await store.listInternalStaff()).filter((item)=>item.role==='SUPER_ADMIN'&&item.status==='ACTIVE').length===1;
+        (await store.listInternalStaff()).filter((item)=>item.role==='SUPER_ADMIN'&&item.status==='ACTIVE'&&!item.archivedAt).length===1;
       if(isLastActiveSuperAdmin&&(nextRole!=='SUPER_ADMIN'||requestedStatus==='SUSPENDED'))
         throw new BusinessError('INVALID_STATE_TRANSITION','系统至少需要保留一名启用中的超级管理员',409);
       this.requireSensitiveReason(authorizationChanged,input);
       const now=new Date().toISOString();
       const nextAuthorizationVersion=authorizationChanged?Math.max(before.authorizationVersion,credential.authorizationVersion)+1:before.authorizationVersion;
       const nextStatus=requestedStatus==='ACTIVE'&&credential.mustChangePassword?'PASSWORD_SETUP_REQUIRED':requestedStatus;
-      const after:InternalStaff={...before,displayName:input.displayName??before.displayName,phone:input.phone??before.phone,role:nextRole,status:nextStatus,activatedAt:nextStatus==='ACTIVE'?(before.activatedAt??now):before.activatedAt,suspendedAt:nextStatus==='SUSPENDED'?now:null,suspensionReason:nextStatus==='SUSPENDED'?input.reason!.trim():null,authorizationVersion:nextAuthorizationVersion,updatedAt:now};
+      const after:InternalStaff={...before,displayName:input.displayName??before.displayName,phone:input.phone??before.phone,role:nextRole,status:nextStatus,activatedAt:nextStatus==='ACTIVE'?(before.activatedAt??now):before.activatedAt,suspendedAt:nextStatus==='SUSPENDED'?(statusChanged?now:before.suspendedAt):null,suspensionReason:nextStatus==='SUSPENDED'?(statusChanged?input.reason!.trim():before.suspensionReason):null,authorizationVersion:nextAuthorizationVersion,updatedAt:now};
       if(after.phone!==before.phone&&(await store.listInternalStaff()).some((item)=>item.userId!==userId&&item.phone===after.phone))throw new BusinessError('RESOURCE_IN_USE','手机号已被内部员工使用',409);
       await store.saveInternalStaff(after);
       await store.replaceUserRoles(userId,[nextRole],authorizationChanged?nextAuthorizationVersion:undefined);
       if(scopeChanged)await this.replacePointScope(store,userId,pointIds,actor.userId,now);
-      if(nextRole==='PICKUP_MANAGER')await this.syncAssignedPointContacts(store,nextRole,pointIds,after.displayName,after.phone);
+      if(before.role==='PICKUP_MANAGER'||nextRole==='PICKUP_MANAGER')await this.syncPointContacts(store);
       if(authorizationChanged)await store.deleteAuthSessionsByUser(userId);
       const record=await this.record(store,after);
       const action=nextStatus==='SUSPENDED'&&statusChanged?'STAFF_SUSPENDED':requestedStatus==='ACTIVE'&&before.status==='SUSPENDED'?'STAFF_REACTIVATED':roleChanged?'STAFF_ROLE_CHANGED':scopeChanged?'STAFF_PICKUP_SCOPE_CHANGED':'STAFF_UPDATED';
@@ -183,7 +220,7 @@ export class StaffService {
       if(userId===actor.userId)
         throw new BusinessError('INVALID_STATE_TRANSITION','不能向自己的账号发放临时密码，请使用“修改我的密码”',409);
       const before=await store.getInternalStaff(userId);
-      if(!before)throw new BusinessError('RESOURCE_NOT_FOUND','员工不存在',404);
+      if(!before||before.archivedAt)throw new BusinessError('RESOURCE_NOT_FOUND','员工不存在',404);
       const credential=await store.findAdminCredentialByUserId(userId);
       if(!credential)throw new BusinessError('RESOURCE_NOT_FOUND','员工登录凭据不存在',404);
       const now=new Date().toISOString();
@@ -196,6 +233,33 @@ export class StaffService {
       const record=await this.record(store,after);
       await store.saveAuditLog({id:randomUUID(),actorId:actor.userId,action:'STAFF_CREDENTIAL_RESET',resourceType:'INTERNAL_STAFF',resourceId:userId,requestId,beforeData:before,afterData:{...record,reason},createdAt:now});
       return {staff:record,temporaryPassword:tempPassword};
+    });
+  }
+
+  public async archiveSuspended(userId:string,reason:string,actor:Actor,requestId:string):Promise<{archived:boolean}>{
+    return this.store.transaction(async(store)=>{
+      await this.assertCurrentSuperAdmin(store,actor);
+      if(!reason.trim())throw new BusinessError('VALIDATION_ERROR','归档员工必须填写原因',400);
+      if(userId===actor.userId)throw new BusinessError('INVALID_STATE_TRANSITION','不能归档自己的账号',409);
+      const before=await store.getInternalStaff(userId);
+      if(!before||before.archivedAt)throw new BusinessError('RESOURCE_NOT_FOUND','员工不存在',404);
+      if(before.status!=='SUSPENDED')throw new BusinessError('INVALID_STATE_TRANSITION','只能归档已停用的员工',409);
+      // This operation accepts suspended staff only, so archiving cannot reduce
+      // the active-super-admin count; update() protects it before suspension.
+      const credential=await store.findAdminCredentialByUserId(userId);
+      if(!credential)throw new BusinessError('RESOURCE_NOT_FOUND','员工登录凭据不存在',404);
+      const now=new Date().toISOString();
+      const nextVersion=Math.max(before.authorizationVersion,credential.authorizationVersion)+1;
+      const pointIds=(await store.listStaffPickupPointAssignments(userId)).map((item)=>item.pickupPointId);
+      const after:InternalStaff={...before,archivedAt:now,authorizationVersion:nextVersion,updatedAt:now};
+      await store.saveInternalStaff(after);
+      await store.saveAdminCredential({...credential,legacyDisabled:true,roles:[],authorizationVersion:nextVersion});
+      await store.replaceUserRoles(userId,[],nextVersion);
+      await store.replaceStaffPickupPointAssignments(userId,[]);
+      await store.deleteAuthSessionsByUser(userId);
+      if(before.role==='PICKUP_MANAGER')await this.syncPointContacts(store);
+      await store.saveAuditLog({id:randomUUID(),actorId:actor.userId,action:'STAFF_ARCHIVED',resourceType:'INTERNAL_STAFF',resourceId:userId,requestId,beforeData:{...before,pickupPointIds:pointIds},afterData:{...after,pickupPointIds:[],reason:reason.trim()},createdAt:now});
+      return {archived:true};
     });
   }
 

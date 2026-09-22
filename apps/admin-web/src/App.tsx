@@ -3412,8 +3412,12 @@ function Areas({
           {
             title: "联系人",
             render: (_, v) =>
-              v.contactName || v.contactPhone
-                ? `${v.contactName} ${v.contactPhone}`.trim()
+              v.managerNames !== undefined
+                ? v.managerNames.length
+                  ? <>{v.managerNames.join("、")}{v.managerConflict ? <Tag color="red">关联冲突</Tag> : null}</>
+                  : "未关联负责人"
+                : v.contactName || v.contactPhone
+                  ? `${v.contactName} ${v.contactPhone}`.trim()
                 : "未关联负责人",
           },
           { title: "状态", render: (_, v) => v.archivedAt ? <Tag color="default">已删除</Tag> : <Status value={v.status} /> },
@@ -5217,7 +5221,7 @@ function Settings({
   const [editing, setEditing] = useState<InternalStaff | null>(null);
   const [sensitive, setSensitive] = useState<{
     staff: InternalStaff;
-    kind: "suspend" | "restore" | "reset";
+    kind: "suspend" | "restore" | "reset" | "archive";
   } | null>(null);
   const [credential, setCredential] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -5312,6 +5316,10 @@ function Settings({
           value.reason,
         );
         setCredential(result.temporaryPassword);
+        setEditing(null);
+      } else if (sensitive.kind === "archive") {
+        await api.archiveStaff(sensitive.staff.userId, value.reason);
+        if (editing?.userId === sensitive.staff.userId) setEditing(null);
       } else {
         await api.updateStaff(sensitive.staff.userId, {
           status: sensitive.kind === "suspend" ? "SUSPENDED" : "ACTIVE",
@@ -5324,6 +5332,8 @@ function Settings({
         message,
         sensitive.kind === "reset"
           ? "临时密码已重置"
+          : sensitive.kind === "archive"
+            ? "员工已删除，点位已释放"
           : sensitive.kind === "suspend"
             ? "员工已停用"
             : "员工已恢复",
@@ -5336,10 +5346,10 @@ function Settings({
   };
   const pointOptions = points
     .filter((v) => v.status === "ACTIVE")
-    .map((v) => ({ value: v.id, label: v.name }));
+    .map((v) => ({ value: v.id, label: v.managerNames?.length ? `${v.name}（已关联：${v.managerNames.join("、")}）` : v.name, disabled: Boolean(v.managerNames?.length) }));
   const editingPointOptions = editing
     ? [
-        ...pointOptions,
+        ...pointOptions.map((option) => editing.pickupPointIds.includes(option.value) ? { ...option, disabled: false } : option),
         ...editing.pickupPointIds
           .filter((id) => !pointOptions.some((option) => option.value === id))
           .map((id) => ({ value: id, label: `已失效点位（${id}，请选择移除）` })),
@@ -5349,7 +5359,7 @@ function Settings({
     <>
       <PageTitle
         title="人员与权限"
-        subtitle="管理员工账号、角色与点位权限；停用或变更后会话立即失效"
+        subtitle="管理员工账号、岗位和点位分配"
         action={
           <Button type="primary" onClick={() => setOpen(true)}>
             新增员工
@@ -5401,14 +5411,7 @@ function Settings({
                     停用
                   </Button>
                 ) : null}
-                {value.userId !== currentUserId && (
-                  <Button
-                    type="link"
-                    onClick={() => setSensitive({ staff: value, kind: "reset" })}
-                  >
-                    重置密码
-                  </Button>
-                )}
+                {value.status === "SUSPENDED" && value.userId !== currentUserId ? <Button danger type="link" onClick={() => setSensitive({ staff: value, kind: "archive" })}>删除</Button> : null}
               </Space>
             ),
           },
@@ -5482,9 +5485,9 @@ function Settings({
         <Alert
           type="warning"
           showIcon
-          message="角色或授权点位变更会立即使该员工旧会话失效"
-          description="涉及角色、点位的变更必须填写原因；新的权限在员工重新登录后生效。"
+          message="角色或点位调整需要填写原因，保存后生效。"
         />
+        {editing && editing.userId !== currentUserId ? <Button style={{ marginTop: 12, marginBottom: 8 }} onClick={() => setSensitive({ staff: editing, kind: "reset" })}>重置密码</Button> : null}
         <Form
           layout="vertical"
           initialValues={editing ? { ...editing, phone: "" } : {}}
@@ -5507,7 +5510,7 @@ function Settings({
               <Form.Item
                 name="pickupPointIds"
                 label="授权自提点"
-                extra="授权后，该负责人的姓名和手机号会作为自提点联系方式，供消费者拨打"
+                  extra="一个点位只能关联一名负责人；停用后关联保留，归档后释放。"
                 rules={!editing ? [{ required: true, message: "请选择至少一个启用自提点" }] : []}
               >
                 <Select
@@ -5537,12 +5540,15 @@ function Settings({
               );
             }}
           </Form.Item>
-          <Button type="primary" htmlType="submit" loading={submitting}>保存并使旧会话失效</Button>
+          <Space style={{ display: "flex", justifyContent: "flex-end" }}>
+            <Button onClick={() => setEditing(null)}>取消</Button>
+            <Button type="primary" htmlType="submit" loading={submitting}>保存</Button>
+          </Space>
         </Form>
       </Modal>
       <Modal
         open={Boolean(sensitive)}
-        title={sensitive?.kind === "reset" ? "重置密码" : sensitive?.kind === "suspend" ? "确认停用员工" : "确认恢复员工"}
+        title={sensitive?.kind === "reset" ? "重置密码" : sensitive?.kind === "suspend" ? "确认停用员工" : sensitive?.kind === "archive" ? "删除员工" : "确认恢复员工"}
         footer={null}
         onCancel={() => setSensitive(null)}
         destroyOnHidden
@@ -5553,13 +5559,15 @@ function Settings({
           message="这是敏感操作"
           description={sensitive?.kind === "reset"
             ? `目标：${sensitive.staff.displayName}（${sensitive.staff.phone}）。旧密码和旧会话将立即失效，员工下次登录必须修改密码。请填写原因后确认。`
-            : "请填写原因后确认。操作执行时将再次核验当前管理员权限，并立即撤销目标员工的旧会话。"}
+            : sensitive?.kind === "archive"
+              ? `将删除已停用员工“${sensitive.staff.displayName}”，其登录凭据会失效，已关联点位将释放，历史记录保留。`
+              : "请填写原因后确认。操作执行时将再次核验当前管理员权限，并立即撤销目标员工的旧会话。"}
         />
         <Form layout="vertical" onFinish={(value) => void runSensitive(value)}>
           <Form.Item name="reason" label="操作原因" rules={[{ required: true, min: 2 }]}>
             <Input.TextArea rows={3} />
           </Form.Item>
-          <Button danger={sensitive?.kind === "suspend"} type="primary" htmlType="submit" loading={submitting}>
+          <Button danger={sensitive?.kind === "suspend" || sensitive?.kind === "archive"} type="primary" htmlType="submit" loading={submitting}>
             确认执行
           </Button>
         </Form>

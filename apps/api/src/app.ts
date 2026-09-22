@@ -27,6 +27,7 @@ import {
   communityQualityCaseSchema,
   communityQualityDecisionSchema,
   createInternalStaffSchema,
+  archiveInternalStaffSchema,
   createPickupPointSchema,
   createServiceAreaInterestSchema,
   emergencyVehicleCorrectionSchema,
@@ -780,11 +781,31 @@ export async function buildApp(
     loginRateLimiter,
     privacyNoticeVersion: config.PRIVACY_NOTICE_VERSION,
   });
+  const listPickupPointManagerDirectory = async (serviceAreaId?: string) => {
+    const [points, assignments, staff] = await Promise.all([
+      store.listPickupPoints(serviceAreaId),
+      store.listStaffPickupPointAssignments(),
+      store.listInternalStaff(),
+    ]);
+    return points.map((point) => {
+      const managerIds = new Set(assignments.filter((value) => value.pickupPointId === point.id).map((value) => value.staffUserId));
+      const managers = staff.filter((value) => managerIds.has(value.userId) && value.role === "PICKUP_MANAGER" && !value.archivedAt)
+        .sort((left, right) => left.displayName.localeCompare(right.displayName, "zh-CN"));
+      const managerNames = managers.map((value) => value.displayName);
+      return {
+        ...point,
+        contactName: managerNames.length ? `${managerNames.join("、")}${managers.length > 1 ? "（关联冲突）" : ""}` : "",
+        contactPhone: managers.length === 1 ? managers[0]!.phone : "",
+        managerNames,
+        managerConflict: managers.length > 1,
+      };
+    });
+  };
   registerPublicCatalogRoutes(app, {
     readSnapshot: work => store.readSnapshot(work),
     campaigns,
     listServiceAreas: () => store.listServiceAreas(),
-    listPickupPoints: (id) => store.listPickupPoints(id),
+    listPickupPoints: async (id) => (await listPickupPointManagerDirectory(id)).map(({ managerNames: _names, managerConflict: _conflict, ...point }) => point),
     getDeliveryPlanByCampaign: (id) => store.getDeliveryPlanByCampaign(id),
     withCampaignItems: publicCampaignView,
     publicDeliveryPlan: publicPlan,
@@ -992,7 +1013,7 @@ export async function buildApp(
   });
   app.get("/api/v1/admin/pickup-points", async (request) => {
     requireActor(request, ["OPERATOR", "SUPER_ADMIN"]);
-    return { data: await store.listPickupPoints() };
+    return { data: await listPickupPointManagerDirectory() };
   });
   const buildPickupPoint = async (pointStore: CommerceStore, input: {
     serviceAreaId: string;
@@ -1824,6 +1845,16 @@ export async function buildApp(
         temporaryPassword: value.temporaryPassword,
       },
     };
+  });
+  app.delete("/api/v1/admin/staff/:id", async (request) => {
+    const actor = requireActor(request, ["SUPER_ADMIN"]);
+    const { reason } = archiveInternalStaffSchema.parse(request.body);
+    return { data: await staffService.archiveSuspended(
+      identifierSchema.parse((request.params as { id: string }).id),
+      reason,
+      actor,
+      request.id,
+    ) };
   });
 
   app.post("/api/v1/orders/:id/pay", async (request) => {
