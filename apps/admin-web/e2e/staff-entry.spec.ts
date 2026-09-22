@@ -106,7 +106,8 @@ test("超管从网页创建员工，临时密码改密与撤权后的默认页�
   request,
 }) => {
   const failures = watchBrowser(page);
-  const suffix = Date.now().toString();
+  const suffix = `${Date.now()}${Math.floor(Math.random() * 10_000)}`;
+  const managerDisplayName = `P1-A 点位负责人 ${suffix}`;
   const area = await post<{ id: string }>(request, "/api/v1/admin/service-areas", {
     regionCode: "110101",
   });
@@ -178,7 +179,7 @@ test("超管从网页创建员工，临时密码改密与撤权后的默认页�
 
   await page.getByRole("menuitem", { name: "员工与权限" }).click();
   await page.getByRole("button", { name: "新增员工" }).click();
-  await page.getByLabel("姓名").fill("P1-A 点位负责人");
+  await page.getByLabel("姓名").fill(managerDisplayName);
   await page.getByLabel("登录账号").fill(`p1a.manager.${suffix}`);
   await page.getByLabel("手机号").fill(`136${suffix.slice(-8)}`);
   await page.getByLabel("角色").click();
@@ -222,7 +223,7 @@ test("超管从网页创建员工，临时密码改密与撤权后的默认页�
   await expect(managerPage.getByText("商品列表", { exact: true })).toHaveCount(0);
   await expect(managerPage.getByText(`P1-A 授权点 ${suffix}`, { exact: true })).toHaveCount(0);
 
-  const staffRow = await findStaffRow(page, "P1-A 点位负责人");
+  const staffRow = await findStaffRow(page, managerDisplayName);
   await staffRow.getByRole("button", { name: "编辑" }).click();
   const editor = page.getByRole("dialog", { name: "编辑员工权限" });
   await expect(editor).toBeVisible();
@@ -232,7 +233,7 @@ test("超管从网页创建员工，临时密码改密与撤权后的默认页�
     .filter({ hasText: "财务" })
     .click();
   await editor.getByLabel("变更原因").fill("岗位调整为财务");
-  await editor.getByRole("button", { name: "保存", exact: true }).click();
+  await editor.getByRole("button", { name: /^保\s*存$/ }).click();
   await expect(editor).toHaveCount(0);
   invalidated = true;
   await managerPage.reload();

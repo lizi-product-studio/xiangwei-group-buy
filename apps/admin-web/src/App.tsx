@@ -5563,7 +5563,7 @@ function Settings({
               ? `将删除已停用员工“${sensitive.staff.displayName}”，其登录凭据会失效，已关联点位将释放，历史记录保留。`
               : "请填写原因后确认。操作执行时将再次核验当前管理员权限，并立即撤销目标员工的旧会话。"}
         />
-        <Form layout="vertical" onFinish={(value) => void runSensitive(value)}>
+        <Form name="staff-sensitive" layout="vertical" onFinish={(value) => void runSensitive(value)}>
           <Form.Item name="reason" label="操作原因" rules={[{ required: true, min: 2 }]}>
             <Input.TextArea rows={3} />
           </Form.Item>
