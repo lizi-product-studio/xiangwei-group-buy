@@ -19,7 +19,7 @@
   </view>
   <view wx:for="{{orders}}" wx:key="id" class="ui-view order-item" data-id="{{item.id}}" bindtap="openOrder">
     <view class="ui-view order-item__head"><text class="ui-text">{{item.orderNo}}</text><text class="ui-text order-status-label tone-{{item.statusTone}}">{{item.statusText}}</text></view>
-    <view class="ui-view order-item__body"><view class="ui-image order-item__image"><product-image src="{{item.imageUrl}}" /></view><view class="ui-view"><text class="ui-text">{{item.itemSummary}}</text><text class="ui-text">{{item.deliveryName}}</text><text class="ui-text" wx:if="{{item.deliveryAddress}}">{{item.deliveryAddress}}</text></view><text class="ui-text money">{{item.total}}</text></view>
+    <view class="ui-view order-item__body"><view class="ui-image order-item__image"><product-image src="{{item.imageUrl || ''}}" /></view><view class="ui-view"><text class="ui-text">{{item.itemSummary}}</text><text class="ui-text">{{item.deliveryName}}</text><text class="ui-text" wx:if="{{item.deliveryAddress}}">{{item.deliveryAddress}}</text></view><text class="ui-text money">{{item.total}}</text></view>
     <view class="ui-view order-item__foot"><text class="ui-text">{{item.createdText}}</text><navigator class="ui-navigator" wx:if="{{item.canPickup}}" url="/pages/pickup-code/index?orderId={{item.id}}">查看取货码</navigator><text class="ui-text" wx:else>{{item.statusText}}</text></view>
   </view>
 </view>

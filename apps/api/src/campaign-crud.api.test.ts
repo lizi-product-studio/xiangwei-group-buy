@@ -47,6 +47,33 @@ describe('draft campaign CRUD and private consumer directory', () => {
     return response.json().data as {id:string;version:number;deliveryPlan:{id:string}};
   };
   const state = async (id:string) => ({campaign:await store.getCampaign(id),plans:await store.listDeliveryPlans(),orders:await store.listOrdersByCampaign(id),batches:await store.listDispatchBatches(),ledger:await store.listLedgerTransactions(),audit:await store.listAuditLogs(1000)});
+  it('uses current catalog images in open campaign list and detail without rewriting snapshots', async () => {
+    const campaign = await create();
+    expect((await call('POST', `/api/v1/admin/campaigns/${campaign.id}/open`)).statusCode).toBe(200);
+    const frozen = await state(campaign.id);
+    const sku = (await store.getCatalogSku(input.items[0]!.catalogSkuId))!;
+    const assertImage = async (imageUrl: string | null) => {
+      const list = await app.inject({method: 'GET', url: '/api/v1/campaigns'});
+      const detail = await app.inject({method: 'GET', url: `/api/v1/campaigns/${campaign.id}`});
+      expect(list.statusCode).toBe(200);
+      expect(detail.statusCode).toBe(200);
+      const listed = list.json().data.find((item: {id: string}) => item.id === campaign.id);
+      for (const projection of [listed, detail.json().data]) {
+        expect(projection.items[0]).toMatchObject({imageUrl, title: '测试蔬菜', unitPriceCents: 1000, stock: 10});
+      }
+      expect(await state(campaign.id)).toEqual(frozen);
+    };
+    await assertImage(null);
+    // Cover an image added after opening, replacement, and explicit removal.
+    for (const imageUrl of ['/api/v1/product-images/first.webp', '/api/v1/product-images/replaced.webp', null]) {
+      await store.saveCatalogSku({...sku, product: {...sku.product, title: '新的目录名称', imageUrl}, retailPriceCents: moneyCents(2000)});
+      await assertImage(imageUrl);
+    }
+    await store.saveCatalogSku({...sku, status: 'INACTIVE'});
+    const hidden = await app.inject({method: 'GET', url: `/api/v1/campaigns/${campaign.id}`});
+    expect(hidden.json().data.items).toEqual([]);
+    expect(await state(campaign.id)).toEqual(frozen);
+  });
   it('repairs expired draft through PATCH then opens with preserved identity and updated snapshot',async()=>{
     const campaign = await create({...input,cutoffAt:new Date(Date.now()-1000).toISOString()});
     const failed = await call('POST',`/api/v1/admin/campaigns/${campaign.id}/open`);

@@ -578,16 +578,19 @@ export async function buildApp(
       campaignView(campaign),
       store.listCatalogSkus(),
     ]);
-    const activeSkuIds = new Set(
+    const activeSkus = new Map(
       catalog
         .filter((sku) => sku.status === "ACTIVE")
-        .map((sku) => sku.id),
+        .map((sku) => [sku.id, sku]),
     );
     return {
       ...view,
-      // Campaign and order snapshots remain immutable. This only removes a
-      // deactivated SKU from the consumer directory.
-      items: view.items.filter((item) => activeSkuIds.has(item.skuId)),
+      // Only the consumer image follows the current catalog. Campaign prices,
+      // product descriptions and persisted campaign/order snapshots stay frozen.
+      items: view.items.flatMap((item) => {
+        const sku = activeSkus.get(item.skuId);
+        return sku ? [{ ...item, imageUrl: sku.product.imageUrl }] : [];
+      }),
     };
   };
 
