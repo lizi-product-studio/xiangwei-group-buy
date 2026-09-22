@@ -83,7 +83,7 @@ test("五个内部角色仅加载其默认页与可见菜单，USER 被后台拒
     );
     await expect(session.page.getByRole("menuitem", { name: menu })).toBeVisible();
     if (role !== "SUPER_ADMIN")
-      await expect(session.page.getByText("员工与权限", { exact: true })).toHaveCount(0);
+      await expect(session.page.getByText("员工管理", { exact: true })).toHaveCount(0);
     if (role === "PICKUP_MANAGER")
       await expect(session.page.getByText("商品列表", { exact: true })).toHaveCount(0);
     expect(session.failures).toEqual([]);
@@ -104,7 +104,7 @@ test("后台框架提供高对比账号入口、可展开分组和运营可读�
   const menu = session.page.locator(".app-sider > .ant-layout-sider-children > .ant-menu");
   await expect(menu).toHaveCSS("overflow-y", "auto");
   await expect(menu).toHaveCSS("overflow-x", "hidden");
-  const permissionItem = session.page.getByRole("menuitem", { name: "员工与权限" });
+  const permissionItem = session.page.getByRole("menuitem", { name: "员工管理" });
   const menuBox = await menu.boundingBox();
   const accountBounds = await accountPanel.boundingBox();
   expect(menuBox).not.toBeNull();
@@ -124,7 +124,7 @@ test("后台框架提供高对比账号入口、可展开分组和运营可读�
 
   const accessGroup = session.page.getByRole("menuitem", { name: "系统" });
   await expect(accessGroup).toHaveAttribute("aria-expanded", "true");
-  await expect(session.page.getByRole("menuitem", { name: "员工与权限" })).toBeVisible();
+  await expect(session.page.getByRole("menuitem", { name: "员工管理" })).toBeVisible();
   await session.page.getByRole("menuitem", { name: "操作日志" }).click();
   await expect(session.page.getByLabel("当前位置")).toContainText("系统");
   await expect(session.page.getByLabel("当前位置")).toContainText("操作日志");

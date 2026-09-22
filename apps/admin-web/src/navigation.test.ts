@@ -104,3 +104,16 @@ describe("split task permissions", () => {
     expect(isAllowedAdminPage(["PICKUP_MANAGER"], "orders")).toBe(false);
   });
 });
+
+
+describe("configured capabilities", () => {
+  it("uses configured menus without inheriting the underlying legacy role", () => {
+    expect(isAllowedAdminPage(["OPERATOR"], "products", ["products.view"])).toBe(true);
+    expect(isAllowedAdminPage(["OPERATOR"], "campaigns", ["products.view"])).toBe(false);
+    expect(isAllowedAdminPage(["OPERATOR"], "finance-ledger", ["finance-ledger.view"])).toBe(true);
+    expect(isAllowedAdminPage(["OPERATOR"], "roles", ["roles.view"])).toBe(false);
+    expect(getDefaultAdminPage(["OPERATOR"], [])).toBeNull();
+    expect(getDefaultAdminPage(["PICKUP_MANAGER"], ["pickup-records.view"])).toBe("pickup-records");
+    expect(isAllowedAdminPage(["PICKUP_MANAGER"], "products", ["products.view"])).toBe(false);
+  });
+});

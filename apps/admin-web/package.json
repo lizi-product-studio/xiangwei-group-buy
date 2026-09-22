@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@ant-design/icons": "6.1.0",
+    "@hometown/api-contracts": "workspace:*",
     "@tanstack/react-query": "5.90.7",
     "antd": "6.0.0",
     "dayjs": "1.11.19",

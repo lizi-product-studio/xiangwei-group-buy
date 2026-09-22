@@ -552,7 +552,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   ).toBeVisible();
   await expect(page.getByText("商品列表", { exact: true })).toHaveCount(0);
   await expect(page.getByText("退款待办", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("人员与权限", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("员工管理", { exact: true })).toHaveCount(0);
   await page.setViewportSize({ width: 768, height: 900 });
   await expect
     .poll(() =>

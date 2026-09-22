@@ -1,7 +1,7 @@
+import { PermissionButton as Button } from "./access-context.tsx";
 import { useMemo, useRef, useState } from "react";
 import {
   App as AntApp,
-  Button,
   Form,
   Input,
   InputNumber,
@@ -254,7 +254,7 @@ export function HomepageBannersPage({ values, areas, campaigns, categories, relo
           <h1>首页轮播</h1>
           <p>管理小程序首页展示内容、投放范围和跳转去向。</p>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openNew}>添加轮播图</Button>
+        <Button permission="homepage-banners.manage" type="primary" icon={<PlusOutlined />} onClick={openNew}>添加轮播图</Button>
       </div>
       <div className="homepage-banners__intro">
         <span>每一行代表一张轮播图；同一服务区至少有 2 张启用且展示时间重叠，首页才会自动切换。</span>
@@ -285,9 +285,9 @@ export function HomepageBannersPage({ values, areas, campaigns, categories, relo
             width: 230,
             render: (_: unknown, value: HomepageBanner) => (
               <Space wrap size={[4, 4]}>
-                <Button type="link" disabled={actionBusy !== null} onClick={() => openEdit(value)}>编辑</Button>
-                <Button type="link" disabled={actionBusy !== null} loading={actionBusy === `toggle:${value.id}`} onClick={() => void toggleStatus(value)}>{value.status === "ACTIVE" ? "停用" : "启用"}</Button>
-                <Button type="link" danger disabled={actionBusy !== null} onClick={() => remove(value)}>删除</Button>
+                <Button permission="homepage-banners.manage" type="link" disabled={actionBusy !== null} onClick={() => openEdit(value)}>编辑</Button>
+                <Button permission="homepage-banners.manage" type="link" disabled={actionBusy !== null} loading={actionBusy === `toggle:${value.id}`} onClick={() => void toggleStatus(value)}>{value.status === "ACTIVE" ? "停用" : "启用"}</Button>
+                <Button permission="homepage-banners.delete" type="link" danger disabled={actionBusy !== null} onClick={() => remove(value)}>删除</Button>
               </Space>
             ),
           },

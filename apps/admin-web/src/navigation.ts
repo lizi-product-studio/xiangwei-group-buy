@@ -15,7 +15,7 @@ export type AdminPage =
   | "categories" | "areas" | "cancellations" | "arrival-exceptions"
   | "finance-records" | "finance-ledger" | "interests" | "point-pickup"
   | "pickup-records"
-  | "homepage-banners";
+  | "homepage-banners" | "roles" | "permissions";
 
 export type AdminNavigationItem = {
   key: AdminPage;
@@ -73,7 +73,9 @@ const mainNavigation: readonly AdminNavigationGroup[] = [
     { key: "finance-ledger", label: "账务流水", roles: ["FINANCE"] },
   ] },
   { key: "access-audit", label: "系统", items: [
-    { key: "settings", label: "员工与权限", roles: ["SUPER_ADMIN"] },
+    { key: "settings", label: "员工管理", roles: ["SUPER_ADMIN"] },
+    { key: "roles", label: "角色管理", roles: ["SUPER_ADMIN"] },
+    { key: "permissions", label: "权限管理", roles: ["SUPER_ADMIN"] },
     { key: "audit", label: "操作日志", roles: ["SUPER_ADMIN"] },
   ] },
 ];
@@ -86,7 +88,7 @@ export function isPointWorkbenchUser(roles: readonly string[]): boolean {
 }
 
 export function getAdminNavigation(
-  roles: readonly string[],
+  roles: readonly string[], permissions?: readonly string[],
 ): AdminNavigationGroup[] {
   if (isPointWorkbenchUser(roles)) {
     return [
@@ -103,7 +105,7 @@ export function getAdminNavigation(
           { key: "pickup-records", label: "提货记录", roles: ["PICKUP_MANAGER"] },
         ],
       },
-    ];
+    ].map(group => ({...group, items: group.items.filter(item => permissions === undefined || !["settings", "roles", "permissions"].includes(item.key) && permissions.includes(`${item.key}.view`))})) .filter(group => group.items.length > 0) as AdminNavigationGroup[];
   }
   const isSuperAdmin = roles.includes("SUPER_ADMIN");
   return mainNavigation
@@ -113,13 +115,17 @@ export function getAdminNavigation(
       items: group.items
         .filter(
           (item) =>
-            isSuperAdmin || item.roles.some((role) => roles.includes(role)),
+            isSuperAdmin || (permissions === undefined ? item.roles.some((role) => roles.includes(role)) : !["settings", "roles", "permissions"].includes(item.key) && permissions.includes(`${item.key}.view`)),
         ),
     }))
     .filter((group) => group.items.length > 0);
 }
 
-export function getDefaultAdminPage(roles: readonly string[]): AdminPage | null {
+export function getDefaultAdminPage(roles: readonly string[], permissions?: readonly string[]): AdminPage | null {
+  if (permissions !== undefined) {
+    const preferred = getDefaultAdminPage(roles);
+    return preferred && isAllowedAdminPage(roles, preferred, permissions) ? preferred : getAdminNavigation(roles, permissions)[0]?.items[0]?.key ?? null;
+  }
   if (roles.includes("SUPER_ADMIN")) return "dashboard";
   if (roles.includes("OPERATOR")) return "dashboard";
   if (roles.includes("CUSTOMER_SERVICE")) return "service";
@@ -130,18 +136,18 @@ export function getDefaultAdminPage(roles: readonly string[]): AdminPage | null 
 
 export function isAllowedAdminPage(
   roles: readonly string[],
-  page: AdminPage,
+  page: AdminPage, permissions?: readonly string[],
 ): boolean {
-  return getAdminNavigation(roles).some((group) =>
+  return getAdminNavigation(roles, permissions).some((group) =>
     group.items.some((item) => item.key === page),
   );
 }
 
 export function getAdminNavigationPath(
   roles: readonly string[],
-  page: AdminPage,
+  page: AdminPage, permissions?: readonly string[],
 ): { groupKey: string; groupLabel: string; pageLabel: string } | null {
-  for (const group of getAdminNavigation(roles)) {
+  for (const group of getAdminNavigation(roles, permissions)) {
     const item = group.items.find((candidate) => candidate.key === page);
     if (item) {
       return {

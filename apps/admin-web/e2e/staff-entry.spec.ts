@@ -177,7 +177,7 @@ test("超管从网页创建员工，临时密码改密与撤权后的默认页�
   );
   expect(newPasswordLogin.status(), await newPasswordLogin.text()).toBe(200);
 
-  await page.getByRole("menuitem", { name: "员工与权限" }).click();
+  await page.getByRole("menuitem", { name: "员工管理" }).click();
   await page.getByRole("button", { name: "新增员工" }).click();
   await page.getByLabel("姓名").fill(managerDisplayName);
   await page.getByLabel("登录账号").fill(`p1a.manager.${suffix}`);
@@ -227,7 +227,7 @@ test("超管从网页创建员工，临时密码改密与撤权后的默认页�
   await staffRow.getByRole("button", { name: "编辑" }).click();
   const editor = page.getByRole("dialog", { name: "编辑员工权限" });
   await expect(editor).toBeVisible();
-  await editor.locator("#role").click();
+  await editor.locator("#accessRoleId").click();
   await editor
     .locator(".ant-select-item-option")
     .filter({ hasText: "财务" })

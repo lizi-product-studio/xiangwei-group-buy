@@ -236,6 +236,7 @@ export interface InternalStaff {
   displayName: string;
   phone: string;
   role: InternalStaffRole;
+  accessRoleId?: string;
   status: InternalStaffStatus;
   createdBy: string | null;
   activatedAt: string | null;

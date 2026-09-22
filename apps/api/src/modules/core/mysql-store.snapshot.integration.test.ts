@@ -1,3 +1,6 @@
+import { RoleService } from "../auth/role-service.js";
+import { createAdminCredential, AdminAuthService } from "../auth/admin-auth.js";
+import { attachAccess } from "../auth/access-control.js";
 import { randomUUID } from "node:crypto";
 import mysql, { type Pool, type PoolConnection, type RowDataPacket } from "mysql2/promise";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -50,6 +53,31 @@ describe.skipIf(!databaseUrl)("MysqlStore real isolated aggregate scopes", () =>
     const [rows] = await control.query<RowDataPacket[]>("SELECT CAST(payload AS CHAR) AS payload, CAST(updated_at AS CHAR) AS updatedAt FROM community_product_state WHERE id=1");
     return rows[0];
   }
+
+  it("rechecks revoked custom permissions after acquiring the cross-connection write lock", async () => {
+    const id = randomUUID(); const now = new Date().toISOString();
+    const superActor = {userId: "integration-rbac-root", roles: ["SUPER_ADMIN"] as ["SUPER_ADMIN"]};
+    const input = {name: `岗位${id}`, description:"",scope:"PLATFORM",permissions:["products.edit"],status:"ACTIVE"};
+    const role = await new RoleService(first).save(null,input,superActor,"create-role");
+    await first.saveUser(user(id));
+    await first.saveInternalStaff({userId:id,staffNo:id,displayName:id,phone:"13800138000",role:"OPERATOR",accessRoleId:role.id,status:"ACTIVE",authorizationVersion:1,createdBy:null,activatedAt:now,suspendedAt:null,suspensionReason:null,createdAt:now,updatedAt:now});
+    await first.replaceUserRoles(id,["OPERATOR"],1);
+    await first.saveAdminCredential(await createAdminCredential(id,id,"rbac-integration-only-password",["OPERATOR"],false,1));
+    const login=await new AdminAuthService(first,3600).login(id,"rbac-integration-only-password");
+    if(login.nextAction!=="LOGIN")throw new Error("Expected normal login");
+    const actor=await attachAccess(second,await new AdminAuthService(second,3600).authenticate(`Bearer ${login.accessToken}`));
+    if(!actor)throw new Error("Expected staff actor");
+    actor.requiredPermissions=["products.edit"];
+    const locked=gate(); const finish=gate();
+    const revoke=first.transaction(async store=>{locked.release();await finish.promise;await new RoleService(store).save(role.id,{...input,permissions:[],version:role.version},superActor,"revoke-role");});
+    await locked.promise;
+    let wrote=false;
+    const staleWrite=runWithInternalWriteActor(actor,()=>second.transaction(async()=>{wrote=true;}));
+    const rejected=expect(staleWrite).rejects.toMatchObject({code:"FORBIDDEN"});
+    finish.release();await revoke;await rejected;expect(wrote).toBe(false);
+    expect((await second.getAccessRole(role.id))?.permissions).toEqual([]);
+    expect(await new AdminAuthService(second,3600).authenticate(`Bearer ${login.accessToken}`)).toBeNull();
+  });
 
   it("loads one plain SELECT for repeated/nested reads and never persists", async () => {
     const value = { ...user(), wechatOpenId: `snapshot-${randomUUID()}` };

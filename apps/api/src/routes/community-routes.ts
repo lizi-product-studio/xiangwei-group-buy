@@ -1,3 +1,4 @@
+import { actorCan } from "../modules/auth/access-control.js";
 import { operationsPageSchema } from "./operations-pagination.js";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import {
@@ -58,7 +59,7 @@ export function registerCommunityRoutes(
       batches.map((batch) => [batch.campaignId, batch]),
     );
     const allowed =
-      actor.roles.includes("SUPER_ADMIN") || actor.roles.includes("OPERATOR");
+      actor.roles.includes("SUPER_ADMIN") || (actor.permissions ? actorCan(actor,"logistics.view") || actorCan(actor,"arrival-exceptions.view") : actor.roles.includes("OPERATOR"));
     const filtered = [];
     for (const plan of plans) {
       const campaign = campaignById.get(plan.campaignId);
@@ -230,7 +231,7 @@ export function registerCommunityRoutes(
       "CUSTOMER_SERVICE",
       "SUPER_ADMIN",
     ]);
-    const visibleStatuses = actor.roles.includes("SUPER_ADMIN") || actor.roles.includes("OPERATOR") || actor.roles.includes("CUSTOMER_SERVICE")
+    const visibleStatuses = actor.permissions ? (actorCan(actor, "cancellations.view") ? undefined : ["APPROVED_WAITING_FINANCE", "REFUNDING", "REFUNDED"]) : actor.roles.includes("SUPER_ADMIN") || actor.roles.includes("OPERATOR") || actor.roles.includes("CUSTOMER_SERVICE")
       ? undefined : ["APPROVED_WAITING_FINANCE", "REFUNDING", "REFUNDED"];
     const page = await store.listOperationsQueue("cancellations", {
       ...operationsPageSchema.parse(request.query),

@@ -1,3 +1,4 @@
+import { BUILTIN_ACCESS_ROLES, type AccessRole } from "@hometown/api-contracts";
 import type {
   AdminCredential,
   AuditLog,
@@ -47,6 +48,8 @@ export const STORE_READ_METHODS: ReadonlySet<string> = new Set([
   "getPrivacyConsent",
   "findAdminCredential",
   "findAdminCredentialByUserId",
+  "getAccessRole",
+  "listAccessRoles",
   "getInternalStaff",
   "listInternalStaff",
   "listStaffPickupPointAssignments",
@@ -202,6 +205,10 @@ export interface CommerceStore {
     roles: Role[],
     authorizationVersion?: number,
   ): Promise<void>;
+  getAccessRole(id: string): Promise<AccessRole | null>;
+  listAccessRoles(): Promise<AccessRole[]>;
+  saveAccessRole(value: AccessRole): Promise<void>;
+  deleteAccessRole(id: string): Promise<void>;
   getInternalStaff(userId: string): Promise<InternalStaff | null>;
   listInternalStaff(query?: string): Promise<InternalStaff[]>;
   saveInternalStaff(value: InternalStaff): Promise<void>;
@@ -540,6 +547,7 @@ interface MemoryState {
   passwordChangeTokens: Map<string, PasswordChangeToken>;
   credentials: Map<string, AdminCredential>;
   roles: Map<string, Role[]>;
+  accessRoles: Map<string, AccessRole>;
   staff: Map<string, InternalStaff>;
   staffPoints: Map<string, StaffPickupPointAssignment>;
   areas: Map<string, ServiceArea>;
@@ -580,6 +588,7 @@ const emptyState = (): MemoryState => ({
   passwordChangeTokens: new Map(),
   credentials: new Map(),
   roles: new Map(),
+  accessRoles: new Map(),
   staff: new Map(),
   staffPoints: new Map(),
   areas: new Map(),
@@ -793,6 +802,13 @@ export class MemoryStore implements CommerceStore {
             403,
           );
       }
+      if (actor?.accessRoleId) {
+        const policy = await this.getAccessRole(actor.accessRoleId);
+        const currentStaff = await this.getInternalStaff(actor.userId);
+        if ((currentStaff?.accessRoleId ?? currentStaff?.role) !== actor.accessRoleId || !policy || policy.status !== "ACTIVE" || policy.version !== actor.accessRoleVersion ||
+          (actor.requiredPermissions?.length && !actor.requiredPermissions.some(code => policy.permissions.includes(code))))
+          throw new BusinessError("FORBIDDEN", "角色权限已变化，请重新登录后再试", 403);
+      }
       return await work(this);
     } catch (error) {
       this.data = snapshot;
@@ -916,6 +932,16 @@ export class MemoryStore implements CommerceStore {
       await this.saveAdminCredential(credential);
     }
   }
+  public async getAccessRole(id: string): Promise<AccessRole | null> {
+    return clone(this.data.accessRoles.get(id) ?? BUILTIN_ACCESS_ROLES.find(role => role.id === id) ?? null);
+  }
+  public async listAccessRoles(): Promise<AccessRole[]> {
+    const roles = new Map(BUILTIN_ACCESS_ROLES.map(role => [role.id, role]));
+    for (const [id, role] of this.data.accessRoles) roles.set(id, role);
+    return clone([...roles.values()]);
+  }
+  public async saveAccessRole(value: AccessRole): Promise<void> { this.data.accessRoles.set(value.id, clone(value)); }
+  public async deleteAccessRole(id: string): Promise<void> { this.data.accessRoles.delete(id); }
   public async getInternalStaff(id: string) {
     return clone(this.data.staff.get(id) ?? null);
   }

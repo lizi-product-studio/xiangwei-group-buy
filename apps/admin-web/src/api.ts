@@ -1,3 +1,5 @@
+import type { AccessRole, PermissionDefinition } from "@hometown/api-contracts";
+export interface AccessSnapshot { permissions: string[]; roleId: string; roleName: string; scope: "PLATFORM" | "PICKUP"; isSuperAdmin: boolean }
 import type { ConsumerSummary, ConsumerDetail } from "./consumers-page.tsx";
 export type StaffRole =
   | "SUPER_ADMIN"
@@ -240,6 +242,7 @@ export interface InternalStaff {
   displayName: string;
   phone: string;
   role: StaffRole;
+  accessRoleId?: string;
   status: "PASSWORD_SETUP_REQUIRED" | "ACTIVE" | "SUSPENDED";
   pickupPointIds: string[];
   createdAt: string;
@@ -1043,12 +1046,18 @@ export const api = {
       {},
       true,
     ),
+  access: () => request<AccessSnapshot>("/api/v1/admin/me/access"),
+  accessRoles: () => request<Array<AccessRole & {staffCount: number}>>("/api/v1/admin/access/roles"),
+  permissionCatalog: () => request<PermissionDefinition[]>("/api/v1/admin/access/permissions"),
+  saveAccessRole: (id: string | null, body: {name: string; description: string; scope: string; permissions: string[]; status: string; version?: number}) => request<AccessRole>(`/api/v1/admin/access/roles${id ? `/${id}` : ""}`, {method: id ? "PATCH" : "POST", body: JSON.stringify(body)}),
+  deleteAccessRole: (id: string) => request<{deleted: boolean}>(`/api/v1/admin/access/roles/${id}`, {method: "DELETE"}),
   staff: () => request<InternalStaff[]>("/api/v1/admin/staff"),
   createStaff: (body: {
     displayName: string;
     username: string;
     phone: string;
     role: StaffRole;
+  accessRoleId?: string;
     pickupPointIds: string[];
   }) =>
     post<{ staff: InternalStaff; temporaryPassword: string }>(
@@ -1060,7 +1069,7 @@ export const api = {
     body: Partial<
       Pick<
         InternalStaff,
-        "displayName" | "phone" | "role" | "status" | "pickupPointIds"
+        "displayName" | "phone" | "role" | "accessRoleId" | "status" | "pickupPointIds"
       >
     > & { reason?: string },
   ) =>

@@ -1,3 +1,6 @@
+import { AccessContext, PermissionButton as Button, useCan } from "./access-context.tsx";
+import { AccessManagement, StaffRoleField } from "./access-management.tsx";
+import type { AccessSnapshot } from "./api.ts";
 import { newestFirst, earliestFirst, refundHistory } from "./list-order.ts";
 import { OperationsQueueTable } from "./operations-queue-table.tsx";
 import { adminErrorNotice } from "./request-error.tsx";
@@ -17,7 +20,6 @@ import {
   App as AntApp,
   Avatar,
   Breadcrumb,
-  Button,
   Card,
   DatePicker,
   Descriptions,
@@ -111,7 +113,7 @@ import {
   PickupLocationPicker,
   type PickupLocationVerificationState,
 } from "./pickup-location-picker.tsx";
-import { displayLabel, STAFF_ROLE_OPTIONS } from "./labels.ts";
+import { displayLabel } from "./labels.ts";
 import {
   adminLoadErrorText,
   getDeliveryActionLabels,
@@ -1001,8 +1003,8 @@ function Products({
         subtitle={view === "categories" ? "管理商品分类名称、排序和使用状态" : "维护商品、规格与可售数量"}
         action={view !== "categories" &&
           <Space>
-          <Button onClick={() => { setEditingCategory(null); categoryForm.resetFields(); setCategoryOpen(true); }}>分类管理</Button>
-          <Button
+          <Button permission="categories.manage" onClick={() => { setEditingCategory(null); categoryForm.resetFields(); setCategoryOpen(true); }}>分类管理</Button>
+          <Button permission="products.create"
             type="primary"
             icon={<PlusOutlined />}
             onClick={() => {
@@ -1043,7 +1045,7 @@ function Products({
             title: "操作",
             render: (_, value: CatalogSku) => (
               <Space>
-                <Button
+                <Button permission="products.edit"
                   onClick={() => {
                     setEditing(value);
                     updateImage(value.product.imageUrl);
@@ -1063,7 +1065,7 @@ function Products({
                 >
                   编辑
                 </Button>
-                <Button
+                <Button permission="products.edit"
                   danger={value.status === "ACTIVE"}
                   loading={saving}
                   disabled={saving}
@@ -1228,11 +1230,11 @@ function Products({
           <Form.Item name="status" label="状态" hidden={!editingCategory} initialValue="ACTIVE">
             <Select style={{ width: 110 }} options={[{ value: "ACTIVE", label: "启用" }, { value: "INACTIVE", label: "停用" }]} />
           </Form.Item>
-          <Button type="primary" htmlType="submit" loading={savingCategory}>
+          <Button permission="categories.manage" type="primary" htmlType="submit" loading={savingCategory}>
             {editingCategory ? "保存修改" : "新增分类"}
           </Button>
           {editingCategory && (
-            <Button onClick={() => { setEditingCategory(null); categoryForm.resetFields(); }}>
+            <Button permission="categories.manage" onClick={() => { setEditingCategory(null); categoryForm.resetFields(); }}>
               取消编辑
             </Button>
           )}
@@ -1253,8 +1255,8 @@ function Products({
               className: "table-actions",
               render: (_, value) => (
                 <Space size="small" wrap={false}>
-                  <Button onClick={() => editCategory(value)}>编辑</Button>
-                  <Button danger disabled={savingCategory} onClick={() => requestCategoryDelete(value)}>删除</Button>
+                  <Button permission="categories.manage" onClick={() => editCategory(value)}>编辑</Button>
+                  <Button permission="categories.delete" danger disabled={savingCategory} onClick={() => requestCategoryDelete(value)}>删除</Button>
                 </Space>
               ),
             },
@@ -1282,6 +1284,7 @@ function Campaigns({
 }) {
   const [query,setQuery] = useState("");
   const [filterStatus,setFilterStatus] = useState("ALL");
+  const can = useCan();
   const { message } = AntApp.useApp();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Campaign | null>(null);
@@ -1544,7 +1547,7 @@ function Campaigns({
         title="团期管理"
         subtitle="一团一固定自提点；商品、价格、可售量与时间均由后台配置"
         action={
-          <Button
+          <Button permission="campaigns.create"
             type="primary"
             icon={<PlusOutlined />}
             onClick={() => {
@@ -1618,17 +1621,17 @@ function Campaigns({
             render: (_, v) => (
               <Space size="small" wrap={false}>
                 {v.status === "DRAFT" && (
-                  <Button type="primary" loading={submitting} disabled={submitting} onClick={() => setOpenReview(v)}>
+                  <Button permission="campaigns.open" type="primary" loading={submitting} disabled={submitting} onClick={() => setOpenReview(v)}>
                     开售
                   </Button>
                 )}
                 {v.status === "OPEN" && (
-                  <Button type="primary" loading={submitting} disabled={submitting} onClick={() => void action(v.id, "close")}>
+                  <Button permission="campaigns.close" type="primary" loading={submitting} disabled={submitting} onClick={() => void action(v.id, "close")}>
                     截单
                   </Button>
                 )}
                 {v.status === "POSTPONED" && (
-                  <Button
+                  <Button permission="campaigns.edit"
                     type="primary"
                     disabled={submitting}
                     onClick={() => {
@@ -1644,14 +1647,13 @@ function Campaigns({
                     调整团期
                   </Button>
                 )}
-                {v.status === "DRAFT" && (
+                {v.status === "DRAFT" && (can("campaigns.edit") || can("campaigns.delete")) && (
                   <Dropdown
                     trigger={["click"]}
                     menu={{
                       items: [
-                        { key: "edit", label: "编辑草稿" },
-                        { type: "divider" },
-                        { key: "delete", label: "删除草稿", danger: true },
+                        ...(can("campaigns.edit") ? [{ key: "edit", label: "编辑草稿" }] : []),
+                        ...(can("campaigns.delete") ? [{ key: "delete", label: "删除草稿", danger: true }] : []),
                       ],
                       onClick: ({ key }) => {
                         if (key === "edit") editDraft(v);
@@ -1662,7 +1664,7 @@ function Campaigns({
                     <Button disabled={submitting}>更多 <DownOutlined /></Button>
                   </Dropdown>
                 )}
-                {["OPEN", "POSTPONED"].includes(v.status) && (
+                {["OPEN", "POSTPONED"].includes(v.status) && can("campaigns.cancel") && (
                   <Dropdown
                     trigger={["click"]}
                     menu={{
@@ -1676,7 +1678,7 @@ function Campaigns({
                   </Dropdown>
                 )}
                 {["LOCKED", "FULFILLING", "COMPLETED"].includes(v.status) && (
-                  <Button onClick={() => void openLabels(v)}>
+                  <Button permission="campaigns.labels" onClick={() => void openLabels(v)}>
                     生成装袋标签
                   </Button>
                 )}
@@ -2779,8 +2781,8 @@ function Logistics({
       dispatchLabels.length === 0 || dispatchQuantity === 0 ? "本团没有可发货的已付款订单，请先到订单管理核实付款与订单状态" : null);
   const [dispatchSubmitting, setDispatchSubmitting] = useState(false);
   const [vehicleSubmitting, setVehicleSubmitting] = useState(false);
-  const canOperate =
-    roles.includes("OPERATOR") || roles.includes("SUPER_ADMIN");
+  const can = useCan();
+  const canOperate = can("logistics.edit") || can("logistics.dispatch") || can("arrival-exceptions.confirm");
   const emergencyProxy = roles.includes("SUPER_ADMIN");
   const viewState = getLogisticsViewState({
     loading,
@@ -2950,18 +2952,18 @@ function Logistics({
               return (
                 <Space wrap>
                   {actionLabels.includes("登记运输信息") && (
-                    <Button onClick={() => openVehicle(v)}>
+                    <Button permission="logistics.edit" onClick={() => openVehicle(v)}>
                       登记运输信息
                     </Button>
                   )}
                   {actionLabels.includes("编辑运输信息") && (
                     <>
-                      <Button onClick={() => openVehicle(v)}>
+                      <Button permission="logistics.edit" onClick={() => openVehicle(v)}>
                         编辑运输信息
                       </Button>
                       {actionLabels.includes("确认发车") ||
                       actionLabels.includes("创建批次并发车") ? (
-                        <Button
+                        <Button permission="logistics.dispatch"
                           type="primary"
                           onClick={() => setDispatchReview(v)}
                         >
@@ -3030,7 +3032,7 @@ function Logistics({
                   v.communityDeliveryId &&
                   v.allocationDraftStatus ===
                     "PENDING_OPERATOR_CONFIRMATION" && (
-                    <Button
+                    <Button permission="arrival-exceptions.confirm"
                       type="primary"
                       loading={allocationSubmitting}
                       disabled={allocationSubmitting}
@@ -3302,8 +3304,8 @@ function Areas({
         action={
           <Space>
             {view === "areas"
-              ? <Button type="primary" onClick={() => setAreaOpen(true)}>开通服务区域</Button>
-              : <Button type="primary" onClick={startCreatePoint}>新增自提点</Button>}
+              ? <Button permission="areas.manage" type="primary" onClick={() => setAreaOpen(true)}>开通服务区域</Button>
+              : <Button permission="pickup-points.create" type="primary" onClick={startCreatePoint}>新增自提点</Button>}
           </Space>
         }
       />
@@ -3324,7 +3326,7 @@ function Areas({
           {
             title: "接单",
             render: (_, v) => (
-              <Button
+              <Button permission="areas.manage"
                 loading={submitting}
                 disabled={submitting}
                 onClick={() => {
@@ -3392,9 +3394,9 @@ function Areas({
             className: "table-actions",
             render: (_, v) => v.archivedAt ? <Typography.Text type="secondary">历史保留</Typography.Text> : (
               <Space wrap={false}>
-                <Button onClick={() => startEditPoint(v)}>编辑</Button>
+                <Button permission="pickup-points.edit" onClick={() => startEditPoint(v)}>编辑</Button>
 
-                <Button
+                <Button permission="pickup-points.delete"
                   danger
                   onClick={() => {
                     Modal.confirm({
@@ -4132,7 +4134,7 @@ function PointWorkbench({
               {
                 title: "操作",
                 render: (_, delivery) => (
-                  <Button
+                  <Button permission="point-workbench.confirm"
                     type="primary"
                     disabled={!delivery.dispatchBatchId}
                     onClick={() => setArrival(delivery)}
@@ -4322,7 +4324,7 @@ function PointWorkbench({
             >
               清空数量
             </Button>
-            <Button
+            <Button permission="point-pickup.verify"
               size="middle"
               type="primary"
               disabled={!/^\d{6}$/.test(code) || submittingPickup || !order.items.some(item => item.remainingPickupQuantity > 0)}
@@ -4375,7 +4377,6 @@ function PointWorkbench({
 
 function PickupWindowQueue({
   values,
-  roles,
   reload,
 }: {
   values: PickupWindow[];
@@ -4392,7 +4393,7 @@ function PickupWindowQueue({
     deadlineAt?: dayjs.Dayjs;
     note: string;
   }>();
-  const canOperate = roles.includes("OPERATOR") || roles.includes("SUPER_ADMIN");
+  const canOperate = useCan()("service.pickup");
   if (!canOperate) return null;
   const submit = async (value: { deadlineAt?: dayjs.Dayjs; note: string }) => {
     if (!action) return;
@@ -4523,12 +4524,10 @@ function Service({
   error: string | null;
 }) {
   const { message } = AntApp.useApp();
-  const canAcceptQuality =
-    roles.includes("CUSTOMER_SERVICE") || roles.includes("SUPER_ADMIN");
-  const canDecideQuality =
-    roles.includes("OPERATOR") || roles.includes("SUPER_ADMIN");
-  const canReviewCancellation =
-    roles.includes("OPERATOR") || roles.includes("SUPER_ADMIN");
+  const can = useCan();
+  const canAcceptQuality = can("service.accept");
+  const canDecideQuality = can("service.decision");
+  const canReviewCancellation = can("cancellations.review");
   const [qualityAction, setQualityAction] = useState<{
     value: Awaited<ReturnType<typeof api.quality>>[number];
     type: "accept" | "approve" | "reject";
@@ -4781,7 +4780,6 @@ function Finance({
   cancellations,
   exceptions,
   pickupWindows,
-  roles,
   reload,
   onQualityRefunded,
   onCancellationRefunded,
@@ -4813,8 +4811,7 @@ function Finance({
   error: string | null;
 }) {
   const { message } = AntApp.useApp();
-  const canExecuteRefund =
-    roles.includes("FINANCE") || roles.includes("SUPER_ADMIN");
+  const canExecuteRefund = useCan()("finance.refund");
   const [refundTarget, setRefundTarget] = useState<FulfillmentException | null>(null);
   const [refundDraft, setRefundDraft] = useState<{
     exception: FulfillmentException;
@@ -5173,6 +5170,8 @@ function Settings({
   reload: () => Promise<void>;
   currentUserId: string | null;
 }) {
+  const [accessRoles,setAccessRoles] = useState<Awaited<ReturnType<typeof api.accessRoles>>>([]);
+  useEffect(()=>{void api.accessRoles().then(setAccessRoles).catch(error=>message.error(adminErrorText(error)));},[]);
   const [query,setQuery] = useState("");
   const [filterStatus,setFilterStatus] = useState("ALL");
   const { message } = AntApp.useApp();
@@ -5189,6 +5188,7 @@ function Settings({
     username: string;
     phone: string;
     role: InternalStaff["role"];
+    accessRoleId?: string;
     pickupPointIds?: string[];
   }) => {
     if (submitting) return;
@@ -5211,6 +5211,7 @@ function Settings({
     displayName: string;
     phone?: string;
     role: InternalStaff["role"];
+    accessRoleId?: string;
     pickupPointIds?: string[];
     reason?: string;
   }) => {
@@ -5226,6 +5227,7 @@ function Settings({
       displayName?: string;
       phone?: string;
       role?: InternalStaff["role"];
+      accessRoleId?: string;
       pickupPointIds?: string[];
       reason?: string;
     } = {};
@@ -5235,13 +5237,14 @@ function Settings({
     if (value.phone?.trim() && value.phone.trim() !== editing.phone) {
       patch.phone = value.phone.trim();
     }
+    if (value.accessRoleId && value.accessRoleId !== (editing.accessRoleId ?? editing.role)) patch.accessRoleId = value.accessRoleId;
     if (value.role !== editing.role) patch.role = value.role;
     if (scopeChanged) patch.pickupPointIds = nextPointIds;
-    if ((patch.role || patch.pickupPointIds) && !value.reason?.trim()) {
+    if ((patch.role || patch.accessRoleId || patch.pickupPointIds) && !value.reason?.trim()) {
       message.error("角色或授权点位变更必须填写原因");
       return;
     }
-    if ((patch.role || patch.pickupPointIds) && value.reason?.trim()) {
+    if ((patch.role || patch.accessRoleId || patch.pickupPointIds) && value.reason?.trim()) {
       patch.reason = value.reason.trim();
     }
     if (!Object.keys(patch).length) {
@@ -5317,7 +5320,7 @@ function Settings({
   return (
     <>
       <PageTitle
-        title="人员与权限"
+        title="员工管理"
         subtitle="管理员工账号、岗位和点位分配"
         action={
           <Button type="primary" onClick={() => setOpen(true)}>
@@ -5341,7 +5344,7 @@ function Settings({
             ),
           },
           { title: "电话", dataIndex: "phone" },
-          { title: "角色", render: (_, v) => displayLabel(v.role) },
+          { title: "角色", render: (_, v) => accessRoles.find(role => role.id === (v.accessRoleId ?? v.role))?.name ?? displayLabel(v.role) },
           {
             title: "管理自提点",
             render: (_, v) => v.role === "SUPER_ADMIN" ? "全部" : v.role === "PICKUP_MANAGER" ? v.pickupPointIds.length ? `${v.pickupPointIds.length}个` : "未分配自提点" : "不适用",
@@ -5404,12 +5407,7 @@ function Settings({
           >
             <Input />
           </Form.Item>
-          <Form.Item name="role" label="角色" rules={[{ required: true }]}>
-            <Select
-              getPopupContainer={(node) => node.parentElement ?? document.body}
-              options={[...STAFF_ROLE_OPTIONS]}
-            />
-          </Form.Item>
+          <StaffRoleField roles={accessRoles} />
           <Form.Item noStyle shouldUpdate>
             {({ getFieldValue }) =>
               getFieldValue("role") === "PICKUP_MANAGER" ? (
@@ -5449,7 +5447,7 @@ function Settings({
         {editing && editing.userId !== currentUserId ? <Button style={{ marginTop: 12, marginBottom: 8 }} onClick={() => setSensitive({ staff: editing, kind: "reset" })}>重置密码</Button> : null}
         <Form
           layout="vertical"
-          initialValues={editing ? { ...editing, phone: "" } : {}}
+          initialValues={editing ? { ...editing, accessRoleId: editing.accessRoleId ?? editing.role, phone: "" } : {}}
           onFinish={(value) => void update(value)}
         >
           <Form.Item name="displayName" label="姓名" rules={[{ required: true }]}>
@@ -5458,12 +5456,7 @@ function Settings({
           <Form.Item name="phone" label="更新手机号（留空不变）" rules={[{ pattern: /^$|^1[3-9]\d{9}$/ }]}>
             <Input placeholder="输入新的大陆手机号" />
           </Form.Item>
-          <Form.Item name="role" label="角色" rules={[{ required: true }]}>
-            <Select
-              getPopupContainer={(node) => node.parentElement ?? document.body}
-              options={[...STAFF_ROLE_OPTIONS]}
-            />
-          </Form.Item>
+          <StaffRoleField roles={accessRoles} />
           <Form.Item noStyle shouldUpdate>
             {({ getFieldValue }) => getFieldValue("role") === "PICKUP_MANAGER" ? (
               <Form.Item
@@ -5483,7 +5476,7 @@ function Settings({
           </Form.Item>
           <Form.Item noStyle shouldUpdate>
             {({ getFieldValue }) => {
-              const roleChanged = getFieldValue("role") !== editing?.role;
+              const roleChanged = getFieldValue("accessRoleId") !== (editing?.accessRoleId ?? editing?.role);
               const nextPointIds = [...(getFieldValue("pickupPointIds") ?? [])].sort();
               const currentPointIds = [...(editing?.pickupPointIds ?? [])].sort();
               const scopeChanged = JSON.stringify(nextPointIds) !== JSON.stringify(currentPointIds);
@@ -5578,7 +5571,13 @@ export function App() {
     : storedRoles.length
       ? storedRoles
       : ["SUPER_ADMIN"];
-  const defaultPage = getDefaultAdminPage(roles);
+  const [access,setAccess] = useState<AccessSnapshot|null>(null);
+  const [accessError,setAccessError] = useState("");
+  const permissions = access?.permissions ?? (requiresLogin ? [] : undefined);
+  const hasAccess = !requiresLogin || access !== null;
+  const defaultPage = getDefaultAdminPage(roles, permissions);
+  const canAccess = (code:string) => !requiresLogin || Boolean(access?.isSuperAdmin || access?.permissions.includes(code));
+  useEffect(()=>{if(!authenticated)return; let active=true; setAccessError(""); void api.access().then(value=>{if(active)setAccess(value);}).catch(error=>{if(active)setAccessError(adminErrorText(error));});return()=>{active=false;};},[authenticated,auth.token()]);
   const [page, setPage] = useState<AdminPage>(
     () => defaultPage ?? "settings",
   );
@@ -5626,10 +5625,10 @@ export function App() {
       [],
     );
   const navigation = useMemo(
-    () => getAdminNavigation(roles),
-    [roles.join(",")],
+    () => getAdminNavigation(roles, permissions),
+    [roles.join(","), access],
   );
-  const currentView: AdminPage = isAllowedAdminPage(roles, page)
+  const currentView: AdminPage = isAllowedAdminPage(roles, page, permissions)
     ? page
     : defaultPage ?? "settings";
   const currentPage = getAdminPageModule(currentView);
@@ -5649,6 +5648,8 @@ export function App() {
   const clearWorkspace = useCallback((nextPage: AdminPage = "settings") => {
     identityEpoch.current += 1;
     reloadGeneration.current += 1;
+    setAccess(null);
+    setAccessError("");
     setAreas([]);
     setPoints([]);
     setSkus([]);
@@ -5741,7 +5742,7 @@ export function App() {
         );
       if (currentPage === "pickup-points")
         work.push(api.areas().then(commit(setAreas)), api.points().then(commit(setPoints)));
-      if (currentPage === "point-workbench")
+      if (currentPage === "point-workbench" && currentView !== "pickup-records")
         work.push(api.deliveries().then(commit(setDeliveries)));
       if (currentPage === "settings")
         work.push(api.staff().then(commit(setStaff)), api.points().then(commit(setPoints)));
@@ -5758,20 +5759,14 @@ export function App() {
       }
       if (currentView === "interests")
         work.push(api.serviceAreaInterests().then(commit(setInterests)));
-      if (currentPage === "finance")
-        work.push(
-          Promise.allSettled([api.finance(), api.ledger()]).then(([nextRefunds, nextLedger]) => {
-            if (nextRefunds.status === "fulfilled") commit(setRefunds)(nextRefunds.value);
-            if (nextLedger.status === "fulfilled") commit(setLedger)(nextLedger.value);
-            const failed = [nextRefunds, nextLedger].find((result): result is PromiseRejectedResult => result.status === "rejected");
-            if (failed) throw failed.reason;
-          }),
-        );
-      if (currentPage === "audit")
-        work.push(
-          api.audits().then(commit(setAudits)),
-          api.staff().then(commit(setStaff)),
-        );
+      if (currentPage === "finance") {
+        if (currentView !== "finance-ledger") work.push(api.finance().then(commit(setRefunds)));
+        if (currentView === "finance-ledger") work.push(api.ledger().then(commit(setLedger)));
+      }
+      if (currentPage === "audit") {
+        work.push(api.audits().then(commit(setAudits)));
+        if (roles.includes("SUPER_ADMIN")) work.push(api.staff().then(commit(setStaff)));
+      }
       await Promise.all(work);
     } catch (caught) {
       if (isCurrentReload()) setLoadError(adminLoadErrorText(caught));
@@ -5789,25 +5784,23 @@ export function App() {
     };
     window.addEventListener("admin-auth-expired", expired);
     if (!authenticated) return () => window.removeEventListener("admin-auth-expired", expired);
-    if (!defaultPage) {
-      auth.clear();
-      clearWorkspace();
-      setAuthenticated(false);
+    if (!hasAccess || !defaultPage) {
       return () => window.removeEventListener("admin-auth-expired", expired);
     }
-    if (!isAllowedAdminPage(roles, page)) {
+    if (!isAllowedAdminPage(roles, page, permissions)) {
       setPage(defaultPage);
       return () => window.removeEventListener("admin-auth-expired", expired);
     }
     void reload(true).catch(() => undefined);
     return () => window.removeEventListener("admin-auth-expired", expired);
-  }, [authenticated, page, roles.join(","), clearWorkspace]);
+  }, [authenticated, page, roles.join(","), clearWorkspace, access]);
   if (!authenticated)
     return (
       <AntApp>
         <Login done={establishSession} notice={loginNotice} />
       </AntApp>
     );
+  if (!hasAccess || !defaultPage) return <AntApp><div style={{padding:48}}><Alert type={accessError?"error":"info"} message={accessError || (!hasAccess ? "正在读取岗位权限…" : "当前角色尚未分配可用功能，请联系管理员")} /><Space style={{marginTop:16}}><Button onClick={()=>{setAccessError("");void api.access().then(setAccess).catch(error=>setAccessError(adminErrorText(error)));}}>重新加载</Button><Button onClick={()=>{auth.clear();clearWorkspace();setAuthenticated(false);}}>退出登录</Button></Space></div></AntApp>;
   const mainPageLoadFailed =
     Boolean(loadError) &&
     ["dashboard", "products", "homepage-banners", "campaigns", "orders", "pickup-points", "settings"].includes(
@@ -5889,9 +5882,9 @@ export function App() {
           error: loadError,
           reload,
           canHandleNotifications:
-            currentView === "governance" && (roles.includes("CUSTOMER_SERVICE") || roles.includes("SUPER_ADMIN")),
+            currentView === "governance" && canAccess("governance.manage"),
           canHandleInterests:
-            currentView === "interests" && (roles.includes("OPERATOR") || roles.includes("SUPER_ADMIN")),
+            currentView === "interests" && canAccess("interests.manage"),
         }}
       />
     ) : currentPage === "finance" ? (
@@ -5931,6 +5924,8 @@ export function App() {
       />
     ) : currentPage === "audit" ? (
       <AuditPage audits={audits} staff={staff} loading={loading} error={loadError} reload={reload} />
+    ) : currentPage === "roles" || currentPage === "permissions" ? (
+      <AccessManagement key={currentView} view={currentPage} />
     ) : (
       <Settings {...{ staff, points, reload }} currentUserId={auth.userId()} />
     );
@@ -5947,7 +5942,7 @@ export function App() {
       {pageContent}
     </>
   );
-  const navigationPath = getAdminNavigationPath(roles, currentView);
+  const navigationPath = getAdminNavigationPath(roles, currentView, permissions);
   return (
     <AntApp>
       <Layout className="app-shell">
@@ -5985,7 +5980,7 @@ export function App() {
               <AccountMenu
                 displayName={staff.find((value) => value.userId === auth.userId())?.displayName}
                 username={auth.username()}
-                role={roles[0]}
+                role={access?.roleName ?? roles[0]}
                 onLogout={() =>
                   void api.logout().finally(() => {
                     auth.clear();
@@ -6022,7 +6017,7 @@ export function App() {
                   <AccountMenu
                     displayName={staff.find((value) => value.userId === auth.userId())?.displayName}
                     username={auth.username()}
-                    role={roles[0]}
+                    role={access?.roleName ?? roles[0]}
                     onLogout={() =>
                       void api.logout().finally(() => {
                         auth.clear();
@@ -6035,7 +6030,7 @@ export function App() {
               )}
             </Space>
           </Header>
-          <Content className="content" data-page={currentPage} data-view={currentView}>{content}</Content>
+          <Content className="content" data-page={currentPage} data-view={currentView}><AccessContext.Provider value={access}>{content}</AccessContext.Provider></Content>
         </Layout>
       </Layout>
     </AntApp>

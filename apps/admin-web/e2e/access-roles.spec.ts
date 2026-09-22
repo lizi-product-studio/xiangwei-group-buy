@@ -1,0 +1,23 @@
+import {test,expect} from "@playwright/test";
+const base=process.env.E2E_API_BASE_URL??"http://127.0.0.1:3101";
+const headers={"x-demo-user-id":"rbac-admin","x-demo-role":"SUPER_ADMIN"};
+test("自定义角色配置、员工分配、只读菜单与撤权形成闭环",async({page,request,browser},testInfo)=>{
+  const suffix=`${Date.now()}${Math.floor(Math.random()*10000)}`;
+  const create=await request.post(`${base}/api/v1/admin/staff`,{headers,data:{displayName:"权限配置管理员",username:`rbac.admin.${suffix}`,phone:`136${suffix.slice(-8)}`,role:"SUPER_ADMIN",pickupPointIds:[]}});
+  expect(create.status()).toBe(201);const root=(await create.json()).data;
+  await page.goto("/");await page.getByLabel("账号").fill(`rbac.admin.${suffix}`);await page.getByLabel("密码").fill(root.temporaryPassword);await page.getByRole("button",{name:/登\s*录/}).click();
+  await page.getByLabel("新密码",{exact:true}).fill("RBAC-admin-Password123!");await page.getByLabel("确认新密码").fill("RBAC-admin-Password123!");await page.getByRole("button",{name:"保存新密码"}).click();
+  await expect(page.getByRole("heading",{name:"运营工作台"})).toBeVisible();
+  await page.getByRole("menuitem",{name:"角色管理",exact:true}).click();await page.getByRole("button",{name:"新增角色",exact:true}).click();
+  const modal=page.getByRole("dialog",{name:"新增角色"});await modal.getByLabel("角色名称").fill(`只读商品${suffix}`);await modal.getByRole("checkbox",{name:"查看商品列表",exact:true}).check();await modal.getByRole("button",{name:/^保\s*存$/}).click();await expect(modal).not.toBeVisible();
+  const row=page.getByRole("row").filter({hasText:`只读商品${suffix}`});await expect(row).toBeVisible();
+  await page.screenshot({path:testInfo.outputPath("roles.png"),fullPage:true});
+  await page.getByRole("menuitem",{name:"员工管理",exact:true}).click();await page.getByRole("button",{name:"新增员工",exact:true}).click();
+  const staffModal=page.getByRole("dialog",{name:"新增内部员工"});await staffModal.getByLabel("姓名",{exact:true}).fill(`只读员工${suffix}`);await staffModal.getByLabel("登录账号").fill(`rbac.viewer.${suffix}`);await staffModal.getByLabel("手机号").fill(`137${suffix.slice(-8)}`);await staffModal.getByLabel("角色",{exact:true}).click();await staffModal.getByText(`只读商品${suffix}`,{exact:true}).click();
+  const created=page.waitForResponse(r=>r.url().endsWith("/api/v1/admin/staff")&&r.request().method()==="POST");await staffModal.getByRole("button",{name:"创建账号"}).click();const response=await created;expect(response.status()).toBe(201);const employee=(await response.json()).data;
+  const context=await browser.newContext();const viewer=await context.newPage();await viewer.goto(page.url());await viewer.getByLabel("账号").fill(`rbac.viewer.${suffix}`);await viewer.getByLabel("密码").fill(employee.temporaryPassword);await viewer.getByRole("button",{name:/登\s*录/}).click();await viewer.getByLabel("新密码",{exact:true}).fill("RBAC-viewer-Password123!");await viewer.getByLabel("确认新密码").fill("RBAC-viewer-Password123!");await viewer.getByRole("button",{name:"保存新密码"}).click();
+  await expect(viewer.getByRole("heading",{name:"商品列表",exact:true})).toBeVisible();await expect(viewer.getByRole("button",{name:"新增商品",exact:true})).toHaveCount(0);await expect(viewer.getByRole("menuitem",{name:"财务",exact:true})).toHaveCount(0);await expect(viewer.getByRole("menuitem",{name:"角色管理",exact:true})).toHaveCount(0);
+  await viewer.screenshot({path:testInfo.outputPath("readonly.png"),fullPage:true});
+  const policies=await request.get(`${base}/api/v1/admin/access/roles`,{headers});const role=(await policies.json()).data.find((r:{name:string})=>r.name===`只读商品${suffix}`);
+  const revoked=await request.patch(`${base}/api/v1/admin/access/roles/${role.id}`,{headers,data:{...role,permissions:[]}});expect(revoked.status()).toBe(200);await viewer.reload();await expect(viewer.getByLabel("账号")).toBeVisible();await context.close();
+});

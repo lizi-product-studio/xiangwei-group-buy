@@ -10,6 +10,7 @@ export interface StaffCreateInput {
   username:string;
   phone:string;
   role:InternalStaffRole;
+  accessRoleId?:string|undefined;
   status:'ACTIVE'|'SUSPENDED';
   pickupPointIds:string[];
 }
@@ -18,6 +19,7 @@ export interface StaffUpdateInput {
   displayName?:string|undefined;
   phone?:string|undefined;
   role?:InternalStaffRole|undefined;
+  accessRoleId?:string|undefined;
   status?:InternalStaffStatus|undefined;
   pickupPointIds?:string[]|undefined;
   reason?:string|undefined;
@@ -34,6 +36,17 @@ const staffNo=():string=>`STF-${new Date().toISOString().replace(/[-:.TZ]/g,'').
 
 export class StaffService {
   public constructor(private readonly store:CommerceStore) {}
+
+  private async validateAccessRole(store:CommerceStore,role:InternalStaffRole,accessRoleId?:string):Promise<string|undefined> {
+    if(role==='SUPER_ADMIN') {
+      if(accessRoleId && accessRoleId!=='SUPER_ADMIN') throw new BusinessError('VALIDATION_ERROR','超级管理员不能绑定自定义角色',400);
+      return undefined;
+    }
+    const policy=await store.getAccessRole(accessRoleId??role);
+    if(!policy || policy.status!=='ACTIVE') throw new BusinessError('VALIDATION_ERROR','请选择启用中的角色',400);
+    if((policy.scope==='PICKUP')!==(role==='PICKUP_MANAGER')) throw new BusinessError('VALIDATION_ERROR','角色与员工的数据范围不一致',400);
+    return policy.id;
+  }
 
   private async validatePointScope(store:CommerceStore,role:InternalStaffRole,pickupPointIds:string[],allowEmpty=false):Promise<string[]> {
     const ids=uniqueIds(pickupPointIds);
@@ -133,13 +146,14 @@ export class StaffService {
       await this.assertCurrentSuperAdmin(store,actor);
       if(await store.findAdminCredential(input.username))throw new BusinessError('RESOURCE_IN_USE','账号名已被使用',409);
       if((await store.listInternalStaff()).some((item)=>item.phone===input.phone))throw new BusinessError('RESOURCE_IN_USE','手机号已被内部员工使用',409);
+      const accessRoleId=await this.validateAccessRole(store,input.role,input.accessRoleId);
       const pointIds=await this.validatePointScope(store,input.role,input.pickupPointIds);
       if(input.role==='PICKUP_MANAGER')await this.assertPointBindingsAvailable(store,pointIds);
       const now=new Date().toISOString();
       const userId=randomUUID();
       const credential=temporaryPassword();
       const initialStatus:InternalStaffStatus=input.status==='ACTIVE'?'PASSWORD_SETUP_REQUIRED':'SUSPENDED';
-      const staff:InternalStaff={
+      const staff:InternalStaff={...(accessRoleId?{accessRoleId}:{}),
         userId,staffNo:staffNo(),displayName:input.displayName,phone:input.phone,role:input.role,status:initialStatus,
         createdBy:actor.userId,activatedAt:null,suspendedAt:input.status==='SUSPENDED'?now:null,suspensionReason:input.status==='SUSPENDED'?'创建时设为已停用':null,authorizationVersion:1,createdAt:now,updatedAt:now,
       };
@@ -181,7 +195,10 @@ export class StaffService {
       const credential=await store.findAdminCredentialByUserId(userId);
       if(!credential)throw new BusinessError('RESOURCE_NOT_FOUND','员工登录凭据不存在',404);
       if(input.status==='PASSWORD_SETUP_REQUIRED')throw new BusinessError('INVALID_STATE_TRANSITION','账号密码状态只能由系统管理',409);
-      const roleChanged=nextRole!==before.role;
+      const nextAccessRoleId=input.accessRoleId??(input.role&&input.role!==before.role?undefined:before.accessRoleId);
+      const accessChanged=(nextAccessRoleId??nextRole)!==(before.accessRoleId??before.role);
+      if(accessChanged||input.role!==undefined||input.status==='ACTIVE') await this.validateAccessRole(store,nextRole,nextAccessRoleId);
+      const roleChanged=nextRole!==before.role||accessChanged;
       const statusChanged=requestedStatus!==before.status;
       const scopeChanged=!sameIds(pointIds,currentPointIds);
       const reactivating=before.status!=='ACTIVE'&&requestedStatus==='ACTIVE';
@@ -199,8 +216,9 @@ export class StaffService {
       const now=new Date().toISOString();
       const nextAuthorizationVersion=authorizationChanged?Math.max(before.authorizationVersion,credential.authorizationVersion)+1:before.authorizationVersion;
       const nextStatus=requestedStatus==='ACTIVE'&&credential.mustChangePassword?'PASSWORD_SETUP_REQUIRED':requestedStatus;
-      const after:InternalStaff={...before,displayName:input.displayName??before.displayName,phone:input.phone??before.phone,role:nextRole,status:nextStatus,activatedAt:nextStatus==='ACTIVE'?(before.activatedAt??now):before.activatedAt,suspendedAt:nextStatus==='SUSPENDED'?(statusChanged?now:before.suspendedAt):null,suspensionReason:nextStatus==='SUSPENDED'?(statusChanged?input.reason!.trim():before.suspensionReason):null,authorizationVersion:nextAuthorizationVersion,updatedAt:now};
+      const after:InternalStaff={...before,...(nextAccessRoleId?{accessRoleId:nextAccessRoleId}:{}),displayName:input.displayName??before.displayName,phone:input.phone??before.phone,role:nextRole,status:nextStatus,activatedAt:nextStatus==='ACTIVE'?(before.activatedAt??now):before.activatedAt,suspendedAt:nextStatus==='SUSPENDED'?(statusChanged?now:before.suspendedAt):null,suspensionReason:nextStatus==='SUSPENDED'?(statusChanged?input.reason!.trim():before.suspensionReason):null,authorizationVersion:nextAuthorizationVersion,updatedAt:now};
       if(after.phone!==before.phone&&(await store.listInternalStaff()).some((item)=>item.userId!==userId&&item.phone===after.phone))throw new BusinessError('RESOURCE_IN_USE','手机号已被内部员工使用',409);
+      if(!nextAccessRoleId || nextRole==='SUPER_ADMIN') delete after.accessRoleId;
       await store.saveInternalStaff(after);
       await store.replaceUserRoles(userId,[nextRole],authorizationChanged?nextAuthorizationVersion:undefined);
       if(scopeChanged)await this.replacePointScope(store,userId,pointIds,actor.userId,now);

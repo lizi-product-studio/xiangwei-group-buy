@@ -151,7 +151,7 @@ test("治理和审计读取的同身份迟到响应不会覆盖最新 generation
   await login(page, account.username, account.password);
   await page.getByRole("menuitem", { name: "通知处理" }).click();
   await expect.poll(() => governanceCalls).toBe(1);
-  await page.getByRole("menuitem", { name: "员工与权限" }).click();
+  await page.getByRole("menuitem", { name: "员工管理" }).click();
   await page.getByRole("menuitem", { name: "通知处理" }).click();
   await expect(page.getByText("CURRENT-GOVERNANCE", { exact: true })).toBeVisible();
   const unknownRow = page
@@ -176,7 +176,7 @@ test("治理和审计读取的同身份迟到响应不会覆盖最新 generation
   });
   await page.getByRole("menuitem", { name: "操作日志" }).click();
   await expect.poll(() => auditCalls).toBe(1);
-  await page.getByRole("menuitem", { name: "员工与权限" }).click();
+  await page.getByRole("menuitem", { name: "员工管理" }).click();
   await page.getByRole("menuitem", { name: "操作日志" }).click();
   await expect(page.getByText("CURRENT_AUDIT", { exact: true })).toBeVisible();
   releaseAudit();

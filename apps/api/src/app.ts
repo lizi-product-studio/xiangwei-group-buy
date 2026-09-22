@@ -1,3 +1,5 @@
+import { registerAccessRoutes } from "./routes/access-routes.js";
+import { attachAccess, actorCan } from "./modules/auth/access-control.js";
 import { exceptionReadModel } from "./modules/fulfillment/exception-readmodel.js";
 import { exceptionRefundFacts } from "./modules/finance/refund-readmodel.js";
 import { operationsPageSchema } from "./routes/operations-pagination.js";
@@ -650,6 +652,7 @@ export async function buildApp(
             ? readDemoActor(request)
             : await authService!.authenticate(request.headers.authorization)),
       )
+      .then((actor) => attachAccess(store, actor))
       .then(
         (actor) => {
           request.actor = actor;
@@ -658,6 +661,7 @@ export async function buildApp(
         (error: Error) => done(error),
       );
   });
+  registerAccessRoutes(app, store);
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof BusinessError && error.code === "LOGIN_RATE_LIMITED") {
       const retryAfterSeconds =
@@ -1927,13 +1931,11 @@ export async function buildApp(
       "FINANCE",
       "SUPER_ADMIN",
     ]);
-    const visibleStatuses = actor.roles.includes("SUPER_ADMIN")
-      ? undefined
-      : actor.roles.includes("CUSTOMER_SERVICE")
-        ? ["REGISTERED", "ACCEPTED", "REJECTED"]
-        : actor.roles.includes("OPERATOR")
-          ? ["ACCEPTED", "REFUNDING", "REJECTED", "RESOLVED"]
-          : ["REFUNDING", "RESOLVED"];
+    const visibleStatuses = actor.permissions
+      ? actorCan(actor, "service.view") ? undefined : ["REFUNDING", "RESOLVED"]
+      : actor.roles.includes("SUPER_ADMIN") ? undefined
+        : actor.roles.includes("CUSTOMER_SERVICE") ? ["REGISTERED", "ACCEPTED", "REJECTED"]
+          : actor.roles.includes("OPERATOR") ? ["ACCEPTED", "REFUNDING", "REJECTED", "RESOLVED"] : ["REFUNDING", "RESOLVED"];
     const page = await store.listOperationsQueue("quality", {
       ...operationsPageSchema.parse(request.query),
       ...(visibleStatuses ? {allowedStatuses: visibleStatuses} : {}),

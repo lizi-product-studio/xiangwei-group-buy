@@ -48,6 +48,7 @@ const internalStaffBaseSchema = z.object({
   displayName: z.string().trim().min(2).max(80),
   phone: mainlandChinaMobileSchema,
   role: internalStaffRoleSchema,
+  accessRoleId: identifierSchema.optional(),
   pickupPointIds: z.array(identifierSchema).max(100).default([]),
 });
 export const createInternalStaffSchema = internalStaffBaseSchema.extend({
@@ -62,6 +63,7 @@ export const updateInternalStaffSchema = z
     displayName: z.string().trim().min(2).max(80).optional(),
     phone: mainlandChinaMobileSchema.optional(),
     role: internalStaffRoleSchema.optional(),
+    accessRoleId: identifierSchema.optional(),
     status: z.enum(["ACTIVE", "SUSPENDED"]).optional(),
     pickupPointIds: z.array(identifierSchema).max(100).optional(),
     reason: z.string().trim().min(2).max(500).optional(),
@@ -570,3 +572,5 @@ export interface ApiErrorResponse {
   requestId: string;
   details?: unknown;
 }
+
+export * from "./access-control.js";
