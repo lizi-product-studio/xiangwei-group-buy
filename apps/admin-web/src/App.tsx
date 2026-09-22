@@ -752,83 +752,12 @@ function navigationGroupIcon(groupKey: string) {
   return <SafetyCertificateOutlined aria-hidden="true" />;
 }
 
-function Dashboard({
-  areas,
-  points,
-  campaigns,
-  orders,
-  onNavigate,
-}: {
-  areas: ServiceArea[];
-  points: PickupPoint[];
-  campaigns: Campaign[];
-  orders: Order[];
-  onNavigate: (page: AdminPage) => void;
-}) {
-  return (
-    <>
-      <PageTitle title="运营工作台" subtitle="从团期到领取，查看当前运营与履约进度" />
-      <div className="stats-grid">
-        <Card>
-          <Statistic
-            title="已开通区域"
-            value={areas.filter((v) => v.orderEnabled).length}
-          />
-        </Card>
-        <Card>
-          <Statistic
-            title="启用自提点"
-            value={points.filter((v) => v.status === "ACTIVE").length}
-          />
-        </Card>
-        <Card>
-          <Statistic
-            title="进行中团期"
-            value={
-              campaigns.filter(
-                (v) => !["COMPLETED", "CANCELLED"].includes(v.status),
-              ).length
-            }
-          />
-        </Card>
-        <Card>
-          <Statistic
-            title="待处理订单"
-            value={
-              orders.filter(
-                (v) =>
-                  !["COMPLETED", "CANCELLED", "REFUNDED"].includes(v.status),
-              ).length
-            }
-          />
-        </Card>
-      </div>
-      <div className="dashboard-grid">
-        <Card title="当前团期" extra={<Button type="link" onClick={() => onNavigate("campaigns")}>查看团期</Button>}>
-          {campaigns.filter((campaign) => !["COMPLETED", "CANCELLED"].includes(campaign.status)).length === 0
-            ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无进行中的团期，配置商品与自提点后即可创建" />
-            : <div className="dashboard-campaign-list">
-              {newestFirst(campaigns).filter((campaign) => !["COMPLETED", "CANCELLED"].includes(campaign.status)).slice(0, 5).map((campaign) => (
-                <div className="dashboard-campaign-row" key={campaign.id}>
-                  <div><strong>{campaign.title}</strong><span>截单 {dayjs(campaign.cutoffAt).format("MM-DD HH:mm")}</span></div>
-                  <Status value={campaign.status} />
-                </div>
-              ))}
-            </div>}
-        </Card>
-        <Card title="订单履约概览" extra={<Button type="link" onClick={() => onNavigate("orders")}>查看订单</Button>}>
-          <div className="dashboard-order-stages">
-            {[
-              { label: "待履约", statuses: ["PAID_WAITING_CLOSE"] },
-              { label: "备货与运输", statuses: ["LOCKED", "ALLOCATING", "IN_TRANSIT"] },
-              { label: "待领取", statuses: ["READY_FOR_PICKUP"] },
-              { label: "退款处理中", statuses: ["REFUNDING"] },
-            ].map((stage) => <div key={stage.label}><span>{stage.label}</span><strong>{orders.filter((order) => stage.statuses.includes(order.status)).length}</strong></div>)}
-          </div>
-        </Card>
-      </div>
-    </>
-  );
+function Dashboard({summary,onNavigate}:{summary:Awaited<ReturnType<typeof api.dashboard>>|null;onNavigate:(page:AdminPage)=>void}) {
+  return <><PageTitle title="运营工作台" subtitle="从团期到领取，查看当前运营与履约进度" />
+    <div className="stats-grid">{[{title:"已开通区域",value:summary?.activeAreas},{title:"启用自提点",value:summary?.activePoints},{title:"进行中团期",value:summary?.activeCampaigns},{title:"待处理订单",value:summary?.pendingOrders}].map(item=><Card key={item.title}><Statistic title={item.title} value={item.value??0}/></Card>)}</div>
+    <div className="dashboard-grid"><Card title="当前团期" extra={<Button permission="campaigns.view" type="link" onClick={()=>onNavigate("campaigns")}>查看团期</Button>}>
+      {!summary?.campaigns.length?<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无进行中的团期，配置商品与自提点后即可创建"/>:<div className="dashboard-campaign-list">{summary.campaigns.map(campaign=><div className="dashboard-campaign-row" key={campaign.id}><div><strong>{campaign.title}</strong><span>截单 {dayjs(campaign.cutoffAt).format("MM-DD HH:mm")}</span></div><Status value={campaign.status}/></div>)}</div>}
+    </Card><Card title="订单履约概览" extra={<Button permission="orders.view" type="link" onClick={()=>onNavigate("orders")}>查看订单</Button>}><div className="dashboard-order-stages">{summary?.stages.map(stage=><div key={stage.label}><span>{stage.label}</span><strong>{stage.count}</strong></div>)}</div></Card></div></>;
 }
 function PageTitle({
   title,
@@ -893,6 +822,7 @@ function Products({
 }) {
   const [query,setQuery] = useState("");
   const [filterStatus,setFilterStatus] = useState("ALL");
+  const can = useCan();
   const { message } = AntApp.useApp();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<CatalogSku | null>(null);
@@ -1182,7 +1112,7 @@ function Products({
         footer={null}
         onCancel={() => setCategoryOpen(false)}
       >
-        <Form
+        {can("categories.manage") && <Form
           form={categoryForm}
           layout="inline"
           style={{ marginBottom: 24, rowGap: 12 }}
@@ -1238,7 +1168,7 @@ function Products({
               取消编辑
             </Button>
           )}
-        </Form>
+        </Form>}
         <Table
           rowKey="id"
           pagination={false}
@@ -2310,7 +2240,6 @@ function CampaignReview({
 function Orders({
   values,
   campaigns,
-  roles,
   reload,
   onNavigate,
 }: {
@@ -2348,7 +2277,9 @@ function Orders({
   const detailCampaign = selected
     ? campaigns.find((campaign) => campaign.id === selected.campaignId)
     : undefined;
-  const casePage = isAllowedAdminPage(roles, "service") ? "service" : "finance";
+  const can=useCan();
+  const canService=can("service.view"), canFinance=can("finance.view"), canCancellations=can("cancellations.view"), canRecords=can("finance-records.view");
+  const casePage = canService ? "service" : "finance";
   return (
     <>
       <PageTitle
@@ -2465,8 +2396,8 @@ function Orders({
                     type="info"
                     message={`取消申请：${displayLabel(selected.cancellation.status)}`}
                     description={`${selected.cancellation.reason}${selected.cancellation.refundId ? ` · 退款单 ${selected.cancellation.refundId}` : ""}`}
-                    action={
-                      <Button type="link" onClick={() => onNavigate(isAllowedAdminPage(roles, "cancellations") ? "cancellations" : "finance")}>
+                    action={(canCancellations || canFinance) &&
+                      <Button type="link" onClick={() => onNavigate(canCancellations ? "cancellations" : "finance")}>
                         查看取消队列
                       </Button>
                     }
@@ -2478,7 +2409,7 @@ function Orders({
                     type={refund.status === "SUCCEEDED" ? "success" : "warning"}
                     message={`部分退款 ${money(refund.amountCents)} · ${displayLabel(refund.status)}`}
                     description={`关联异常 ${refund.exceptionId}`}
-                    action={isAllowedAdminPage(roles, "finance-records") &&
+                    action={canRecords &&
                       <Button type="link" onClick={() => onNavigate("finance-records")}>
                         查看财务记录
                       </Button>
@@ -2491,7 +2422,7 @@ function Orders({
                     type="info"
                     message={`品质售后 ${displayLabel(qualityCase.status)}`}
                     description={qualityCase.items.map((item) => `${item.name} × ${item.quantity}：${item.description}`).join("；")}
-                    action={
+                    action={(canService || canFinance) &&
                       <Button type="link" onClick={() => onNavigate(casePage)}>
                         查看品质队列
                       </Button>
@@ -2504,7 +2435,7 @@ function Orders({
                     type="warning"
                     message={`履约异常 · ${displayLabel(exception.status)}`}
                     description={`${exception.sourceStage} · ${exception.responsibility}${exception.resolutionNote ? ` · ${exception.resolutionNote}` : ""}`}
-                    action={
+                    action={(canService || canFinance) &&
                       <Button type="link" onClick={() => onNavigate(casePage)}>
                         查看异常队列
                       </Button>
@@ -2733,7 +2664,6 @@ function Logistics({
   deliveries: CommunityDelivery[];
   batches: Array<{ id: string; campaignId: string; status: string }>;
   campaigns: Campaign[];
-  orders: Order[];
   roles: string[];
   loading: boolean;
   error: string | null;
@@ -4393,8 +4323,9 @@ function PickupWindowQueue({
     deadlineAt?: dayjs.Dayjs;
     note: string;
   }>();
-  const canOperate = useCan()("service.pickup");
-  if (!canOperate) return null;
+  const can = useCan();
+  const canOperate = can("service.pickup");
+  if (!can("service.pickup-view")) return null;
   const submit = async (value: { deadlineAt?: dayjs.Dayjs; note: string }) => {
     if (!action) return;
     setSubmitting(true);
@@ -4445,7 +4376,7 @@ function PickupWindowQueue({
           {
             title: "操作",
             render: (_, value) =>
-              value.status === "EXPIRED_PENDING" ? (
+              value.status === "EXPIRED_PENDING" && canOperate ? (
                 <Space wrap>
                   <Button onClick={() => setAction({ window: value, type: "extend" })}>
                     一次延期
@@ -5584,6 +5515,7 @@ export function App() {
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loginNotice, setLoginNotice] = useState<string | null>(null);
+  const [dashboard,setDashboard] = useState<Awaited<ReturnType<typeof api.dashboard>>|null>(null);
   const [areas, setAreas] = useState<ServiceArea[]>([]),
     [points, setPoints] = useState<PickupPoint[]>([]),
     [skus, setSkus] = useState<CatalogSku[]>([]),
@@ -5650,6 +5582,7 @@ export function App() {
     reloadGeneration.current += 1;
     setAccess(null);
     setAccessError("");
+    setDashboard(null);
     setAreas([]);
     setPoints([]);
     setSkus([]);
@@ -5701,13 +5634,7 @@ export function App() {
     }
     try {
       const work: Array<Promise<unknown>> = [];
-      if (currentPage === "dashboard")
-        work.push(
-          api.areas().then(commit(setAreas)),
-          api.points().then(commit(setPoints)),
-          api.campaigns().then(commit(setCampaigns)),
-          api.orders().then(commit(setOrders)),
-        );
+      if (currentPage === "dashboard") work.push(api.dashboard().then(commit(setDashboard)));
       if (currentPage === "products")
         work.push(
           api.skus().then(commit(setSkus)),
@@ -5738,7 +5665,6 @@ export function App() {
           api.batches().then(commit(setBatches)),
           api.deliveries().then(commit(setDeliveries)),
           api.campaigns().then(commit(setCampaigns)),
-          api.orders().then(commit(setOrders)),
         );
       if (currentPage === "pickup-points")
         work.push(api.areas().then(commit(setAreas)), api.points().then(commit(setPoints)));
@@ -5809,7 +5735,7 @@ export function App() {
   const pageContent = mainPageLoadFailed ? (
     <PageLoadError page={currentPage} reload={reload} />
   ) : currentPage === "dashboard" ? (
-      <Dashboard {...{ areas, points, campaigns, orders }} onNavigate={setPage} />
+      <Dashboard summary={dashboard} onNavigate={setPage} />
     ) : currentPage === "products" ? (
       <Products key={currentView} view={currentView} values={skus} categories={categories} reload={reload} />
     ) : currentPage === "homepage-banners" ? (
@@ -5840,7 +5766,6 @@ export function App() {
           batches,
           deliveries,
           campaigns,
-          orders,
           roles,
           loading,
           error: loadError,

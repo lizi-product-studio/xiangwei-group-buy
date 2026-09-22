@@ -400,7 +400,8 @@ test("同一标签切换账号会清空旧工作区，客服和财务刷新只�
   });
   await loginWithTemporaryPassword(finance);
   await expect(page.getByRole("heading", { name: "退款待办" })).toBeVisible();
-  await expect.poll(() => financeReads.length).toBeGreaterThanOrEqual(2);
+  await expect.poll(() => financeReads.filter(url => url.includes("/finance/refunds")).length).toBeGreaterThanOrEqual(1);
+  expect(financeReads.some(url => url.includes("/finance/ledger"))).toBe(false);
   await page.getByRole("menuitem", { name: "账务流水", exact: true }).click();
   await expect(page.getByRole("heading", { name: "账务流水", level: 2 })).toBeVisible();
   // Create a payment after the finance page's initial read.  The only way it
@@ -466,9 +467,11 @@ test("同一标签切换账号会清空旧工作区，客服和财务刷新只�
   }>;
   const externalEntry = externalLedger.find((entry) => entry.referenceId === order.id);
   expect(externalEntry).toBeTruthy();
-  const financeBeforeRefresh = financeReads.length;
+  const financeBeforeRefresh = financeReads.filter(url => url.includes("/finance/ledger")).length;
+  const refundsBeforeRefresh = financeReads.filter(url => url.includes("/finance/refunds")).length;
   await page.getByRole("button", { name: "刷新" }).click();
-  await expect.poll(() => financeReads.length).toBeGreaterThanOrEqual(financeBeforeRefresh + 2);
+  await expect.poll(() => financeReads.filter(url => url.includes("/finance/ledger")).length).toBeGreaterThanOrEqual(financeBeforeRefresh + 1);
+  expect(financeReads.filter(url => url.includes("/finance/refunds")).length).toBe(refundsBeforeRefresh);
   await expect(
     await findLedgerReference(page, externalEntry!.referenceId),
   ).toBeVisible();

@@ -3,9 +3,11 @@ WORKDIR /workspace
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY apps/admin-web/package.json apps/admin-web/package.json
+COPY packages/api-contracts/package.json packages/api-contracts/package.json
 RUN pnpm install --frozen-lockfile --filter @hometown/admin-web...
 COPY apps/admin-web apps/admin-web
-RUN pnpm --filter @hometown/admin-web build
+COPY packages/api-contracts packages/api-contracts
+RUN pnpm --filter @hometown/api-contracts build && pnpm --filter @hometown/admin-web build
 
 FROM nginx:1.27-alpine
 COPY apps/admin-web/nginx.conf /etc/nginx/conf.d/default.conf

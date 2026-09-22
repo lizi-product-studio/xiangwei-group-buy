@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
-import type { FastifyInstance } from "fastify";
+import type { FastifyRequest, FastifyInstance } from "fastify";
 import { buildApp } from "../../app.js";
 import { loadConfig } from "../../config.js";
 import { MemoryStore } from "../core/store.js";
 import { createAdminCredential, AdminAuthService } from "./admin-auth.js";
-import { attachAccess } from "./access-control.js";
+import { ALL_PERMISSION_CODES } from "@hometown/api-contracts";
+import { requireActor } from "./auth.js";
+import { attachAccess, ROUTE_PERMISSIONS } from "./access-control.js";
 import { RoleService } from "./role-service.js";
 import { StaffService } from "./staff-service.js";
 import { runWithInternalWriteActor } from "./internal-write-context.js";
@@ -88,4 +90,77 @@ describe("configurable access roles",()=>{
     expect((await store.getInternalStaff("viewer"))?.authorizationVersion).toBe(1);
     expect(await new AdminAuthService(store,3600).authenticate(headers.authorization)).not.toBeNull();
   });
+  it("does not expose complete orders to summary and fulfillment roles",async()=>{
+    const store=new MemoryStore(false); await account(store,"super","SUPER_ADMIN");
+    const service=new RoleService(store); app=await buildApp({store,config:loadConfig({NODE_ENV:"test"})});
+    for(const permission of ["dashboard.view","logistics.view","arrival-exceptions.view"]){
+      const role=await service.save(null,{...roleInput,name:permission,permissions:[permission]},superActor,"summary");
+      const headers=await account(store,permission,"OPERATOR",role.id);
+      for(const url of ["/api/v1/admin/orders","/api/v1/admin/orders?orderNo=known-order"])
+        expect((await app.inject({url,headers})).statusCode,permission+url).toBe(403);
+      if(permission==="dashboard.view"){
+        const result=await app.inject({url:"/api/v1/admin/dashboard",headers});
+        expect(result.statusCode).toBe(200);
+        expect(Object.keys(result.json().data).sort()).toEqual(["activeAreas","activeCampaigns","activePoints","campaigns","pendingOrders","stages"]);
+      }
+    }
+  });
+  it("preserves legacy quality-case status boundaries and pickup-window access",async()=>{
+    const store=new MemoryStore(false);const now=new Date().toISOString();
+    const statuses=["REGISTERED","ACCEPTED","REJECTED","REFUNDING","RESOLVED"] as const;
+    for(const status of statuses) await store.saveCommunityQualityCase({id:status,orderId:status,userId:"consumer",clientRequestId:status,payloadHash:status,status,registeredAt:now,acceptedBy:null,acceptedAt:null,acceptanceNote:null,decisionBy:null,decidedAt:null,decisionNote:null,refundApprovedBy:null,refundApprovedAt:null,financeExecutedBy:null,financeExecutedAt:null,refundExceptionId:null,items:[]});
+    app=await buildApp({store,config:loadConfig({NODE_ENV:"test"})});
+    const expected={CUSTOMER_SERVICE:["REGISTERED","ACCEPTED","REJECTED"],OPERATOR:["ACCEPTED","REJECTED","REFUNDING","RESOLVED"],FINANCE:["REFUNDING","RESOLVED"],SUPER_ADMIN:[...statuses]};
+    for(const identity of Object.keys(expected) as Array<keyof typeof expected>){
+      const headers=await account(store,identity.toLowerCase(),identity);
+      const result=await app.inject({url:"/api/v1/admin/quality-cases",headers});
+      expect(result.statusCode,identity).toBe(200);
+      expect(result.json().data.map((v:{status:string})=>v.status).sort(),identity).toEqual(expected[identity].sort());
+      expect((await app.inject({url:"/api/v1/admin/community/pickup-windows",headers})).statusCode,identity).toBe(identity==="CUSTOMER_SERVICE"?403:200);
+    }
+  });
+  it("denies login while a role is inactive and allows fresh login after reactivation",async()=>{
+    const store=new MemoryStore(false);await account(store,"super","SUPER_ADMIN");const service=new RoleService(store);
+    const role=await service.save(null,roleInput,superActor,"create");const headers=await account(store,"viewer","OPERATOR",role.id);
+    const inactive=await service.save(role.id,{...roleInput,status:"INACTIVE",version:role.version},superActor,"disable");
+    const auth=new AdminAuthService(store,3600);
+    expect(await auth.authenticate(headers.authorization)).toBeNull();
+    await expect(auth.login("viewer",password)).rejects.toMatchObject({code:"ACCOUNT_DISABLED"});
+    await service.save(role.id,{...roleInput,version:inactive.version},superActor,"enable");
+    const fresh=await auth.login("viewer",password);expect(fresh.nextAction).toBe("LOGIN");
+    expect(await auth.authenticate(headers.authorization)).toBeNull();
+  });
+  it("registers every capability and denies future unregistered protected routes",()=>{
+    const routes=new Set(Object.values(ROUTE_PERMISSIONS).flat());
+    // These are evaluated after the route guard: SKU upsert branch and quality row projection.
+    ["products.edit","service.intake","service.progress"].forEach(code=>routes.add(code));
+    expect(ALL_PERMISSION_CODES.filter(code=>!routes.has(code))).toEqual([]);
+    expect([...routes].filter(code=>!ALL_PERMISSION_CODES.includes(code))).toEqual([]);
+    const request={actor:{userId:"viewer",roles:["OPERATOR"],permissions:[...ALL_PERMISSION_CODES]},method:"GET",routeOptions:{url:"/api/v1/admin/future-sensitive-endpoint"}} as unknown as FastifyRequest;
+    expect(()=>requireActor(request,["OPERATOR"])).toThrow("没有此功能的操作权限");
+  });
+
+  it("requires both pickup functionality and assigned points, preserving existing fulfillment on inactive points",async()=>{
+    const store=new MemoryStore(false);await account(store,"super","SUPER_ADMIN");const service=new RoleService(store);
+    const role=await service.save(null,{...roleInput,name:"点位只读",scope:"PICKUP",permissions:["point-pickup.view"]},superActor,"point");
+    const headers=await account(store,"point-viewer","PICKUP_MANAGER",role.id);const now=new Date().toISOString();
+    for(const id of ["point-a","point-b"]){
+      await store.savePickupPoint({id,serviceAreaId:"area",name:id,address:id,businessHours:"09:00-20:00",pickupInstructions:"领取",latitude:39,longitude:116,contactName:"manager",contactPhone:"13800138000",status:"ACTIVE",capacityPerDay:null,createdAt:now});
+      await store.saveDeliveryPlan({id,campaignId:id,serviceAreaId:"area",pickupPointId:id,status:"ARRIVED",siteName:id,address:id,arrivalStartAt:null,arrivalEndAt:null,contactName:null,contactPhone:null,vehicleOrderNo:null,driverName:null,driverPhone:null,vehiclePlate:null,logisticsPlatform:null,estimatedArrivalAt:null,remark:null,confirmedAt:now,bookedAt:null,dispatchedAt:null,arrivedAt:now,createdAt:now,updatedAt:now});
+    }
+    app=await buildApp({store,config:loadConfig({NODE_ENV:"test"})});const url="/api/v1/pickup/delivery-plans";
+    expect((await app.inject({url,headers})).json().data).toEqual([]);
+    await store.replaceStaffPickupPointAssignments("point-viewer",[{staffUserId:"point-viewer",pickupPointId:"point-a",assignedBy:"super",createdAt:now,updatedAt:now}]);
+    expect((await app.inject({url,headers})).json().data.map((p:{id:string})=>p.id)).toEqual(["point-a"]);
+    expect((await app.inject({method:"POST",url:"/api/v1/pickup/verify",headers,payload:{}})).statusCode).toBe(403);
+    // Point order intake can be disabled without stranding previously paid fulfillment.
+    const point=(await store.listPickupPoints()).find(p=>p.id==="point-a")!;await store.savePickupPoint({...point,status:"INACTIVE"});
+    expect((await app.inject({url,headers})).json().data.map((p:{id:string})=>p.id)).toEqual(["point-a"]);
+    await service.save(role.id,{...roleInput,name:role.name,scope:"PICKUP",permissions:[],version:role.version},superActor,"revoke");
+    const login=await new AdminAuthService(store,3600).login("point-viewer",password);if(login.nextAction!=="LOGIN")throw new Error("login");
+    const fresh={authorization:`Bearer ${login.accessToken}`};expect((await app.inject({url,headers:fresh})).statusCode).toBe(403);
+    const staff=(await store.getInternalStaff("point-viewer"))!;await store.saveInternalStaff({...staff,status:"SUSPENDED",suspendedAt:now,suspensionReason:"停用"});
+    expect((await app.inject({url,headers:fresh})).statusCode).toBe(401);
+  });
+
 });

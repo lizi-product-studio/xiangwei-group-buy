@@ -6,6 +6,17 @@ import { requireActor } from "../modules/auth/auth.js";
 import { RoleService } from "../modules/auth/role-service.js";
 export function registerAccessRoutes(app: FastifyInstance, store: CommerceStore): void {
   const service = new RoleService(store);
+  app.get("/api/v1/admin/dashboard", async request => {
+    requireActor(request, ["OPERATOR", "SUPER_ADMIN"]);
+    return store.readSnapshot(async snapshot => {
+      const [areas,points,campaigns,orders]=await Promise.all([snapshot.listServiceAreas(),snapshot.listPickupPoints(),snapshot.listCampaigns(),snapshot.listOrders(Number.MAX_SAFE_INTEGER)]);
+      const activeCampaigns=campaigns.filter(c=>!["COMPLETED","CANCELLED"].includes(c.status));
+      return {data:{activeAreas:areas.filter(a=>a.orderEnabled).length,activePoints:points.filter(p=>p.status==="ACTIVE").length,activeCampaigns:activeCampaigns.length,pendingOrders:orders.filter(o=>!["COMPLETED","CANCELLED","REFUNDED"].includes(o.status)).length,
+        campaigns:activeCampaigns.sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,5).map(c=>({id:c.id,title:c.title,cutoffAt:c.cutoffAt,status:c.status})),
+        stages:[{label:"待履约",statuses:["PAID_WAITING_CLOSE"]},{label:"备货与运输",statuses:["LOCKED","ALLOCATING","IN_TRANSIT"]},{label:"待领取",statuses:["READY_FOR_PICKUP"]},{label:"退款处理中",statuses:["REFUNDING"]}].map(s=>({label:s.label,count:orders.filter(o=>s.statuses.includes(o.status)).length}))
+      }};
+    });
+  });
   app.get("/api/v1/admin/me/access", async request => {
     const actor = request.actor;
     if (!actor || actor.roles.includes("USER")) throw new BusinessError("AUTH_REQUIRED", "请先登录", 401);

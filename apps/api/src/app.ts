@@ -1932,7 +1932,11 @@ export async function buildApp(
       "SUPER_ADMIN",
     ]);
     const visibleStatuses = actor.permissions
-      ? actorCan(actor, "service.view") ? undefined : ["REFUNDING", "RESOLVED"]
+      ? actor.roles.includes("SUPER_ADMIN") ? undefined : [...new Set([
+        ...(actorCan(actor,"service.view") ? ["ACCEPTED","REJECTED"] : []),
+        ...(actorCan(actor,"service.intake") ? ["REGISTERED"] : []),
+        ...(actorCan(actor,"service.progress") || actorCan(actor,"finance.view") ? ["REFUNDING","RESOLVED"] : []),
+      ])]
       : actor.roles.includes("SUPER_ADMIN") ? undefined
         : actor.roles.includes("CUSTOMER_SERVICE") ? ["REGISTERED", "ACCEPTED", "REJECTED"]
           : actor.roles.includes("OPERATOR") ? ["ACCEPTED", "REFUNDING", "REJECTED", "RESOLVED"] : ["REFUNDING", "RESOLVED"];

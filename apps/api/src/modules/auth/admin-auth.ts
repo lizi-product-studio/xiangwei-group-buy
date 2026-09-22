@@ -108,6 +108,10 @@ export class AdminAuthService {
     const staff = await this.store.getInternalStaff(user.id);
     if (!staff || staff.status === "SUSPENDED")
       throw new BusinessError("ACCOUNT_DISABLED", "账号当前不可用", 403);
+    if (staff.role !== "SUPER_ADMIN") {
+      const accessRole = await this.store.getAccessRole(staff.accessRoleId ?? staff.role);
+      if (!accessRole || accessRole.status !== "ACTIVE") throw new BusinessError("ACCOUNT_DISABLED", "当前岗位已停用，请联系管理员", 403);
+    }
     if (credential.legacyDisabled)
       throw new BusinessError(
         "PASSWORD_SETUP_REQUIRED",

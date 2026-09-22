@@ -1046,6 +1046,7 @@ export const api = {
       {},
       true,
     ),
+  dashboard: () => request<{activeAreas:number;activePoints:number;activeCampaigns:number;pendingOrders:number;campaigns:Array<{id:string;title:string;cutoffAt:string;status:string}>;stages:Array<{label:string;count:number}>}>("/api/v1/admin/dashboard"),
   access: () => request<AccessSnapshot>("/api/v1/admin/me/access"),
   accessRoles: () => request<Array<AccessRole & {staffCount: number}>>("/api/v1/admin/access/roles"),
   permissionCatalog: () => request<PermissionDefinition[]>("/api/v1/admin/access/permissions"),
