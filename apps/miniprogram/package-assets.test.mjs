@@ -84,7 +84,8 @@ describe('mini-program upload package assets', () => {
     expect(homeMarkup).toContain('image-mode="aspectFit"');
     expect(categoryMarkup).toContain('image-mode="aspectFit"');
     expect(detailMarkup).toContain('image-mode="aspectFit"');
-    expect(detailMarkup).toContain('/assets/location-green.png');
+    expect(detailMarkup).toContain("pickupPoint.photoUrl || ''");
+    expect(detailMarkup).toContain('mode="widthFix"');
     expect(detailMarkup).not.toContain('/assets/pickup-point.jpg');
   });
 });

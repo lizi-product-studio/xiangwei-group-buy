@@ -219,6 +219,7 @@ describe("public API contracts", () => {
       latitude: 39.9042,
       longitude: 116.4074,
       capacityPerDay: null,
+      photoUrl: "https://example.com/pickup.jpg",
     };
     expect(createPickupPointSchema.parse(input)).toMatchObject({
       contactName: "",

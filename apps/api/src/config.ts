@@ -11,6 +11,8 @@ const configSchema = z.object({
   HOST: z.string().default("127.0.0.1"),
   PORT: z.coerce.number().int().min(1).max(65_535).default(3100),
   PRODUCT_IMAGE_DIR: z.string().trim().min(1).default(join(homedir(), ".local", "share", "hometown", "product-images")),
+  PRODUCT_IMAGE_STORAGE_QUOTA_BYTES: z.coerce.number().int().min(50 * 1024 * 1024).default(5 * 1024 * 1024 * 1024),
+  PRODUCT_IMAGE_MIN_FREE_BYTES: z.coerce.number().int().min(1024 * 1024).default(1024 * 1024 * 1024),
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),

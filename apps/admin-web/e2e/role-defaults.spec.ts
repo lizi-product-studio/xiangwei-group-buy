@@ -1,3 +1,4 @@
+import { fixturePhoto } from './media-fixture';
 import { expect, test, type Browser, type Page } from "@playwright/test";
 
 const apiBase = process.env.E2E_API_BASE_URL ?? "http://127.0.0.1:3101";
@@ -64,7 +65,8 @@ test("五个内部角色仅加载其默认页与可见菜单，USER 被后台拒
   const area = (await pointResponse.json()).data as { id: string };
   const pickupResponse = await request.fetch(`${apiBase}/api/v1/admin/pickup-points`, {
     method: "POST", headers: adminHeaders,
-    data: { serviceAreaId: area.id, name: `角色点位 ${suffix()}`, address: "东城区角色权限测试点一号", businessHours: "每日 09:00–20:00", pickupInstructions: "请出示领取码后领取商品", longitude: 116.4, latitude: 39.9, contactName: "测试负责人", contactPhone: "13800138008", capacityPerDay: 8 },
+    data: { photoUrl: await fixturePhoto(request),
+    serviceAreaId: area.id, name: `角色点位 ${suffix()}`, address: "东城区角色权限测试点一号", businessHours: "每日 09:00–20:00", pickupInstructions: "请出示领取码后领取商品", longitude: 116.4, latitude: 39.9, contactName: "测试负责人", contactPhone: "13800138008", capacityPerDay: 8 },
   });
   expect(pickupResponse.status()).toBeLessThan(300);
   const point = (await pickupResponse.json()).data as { id: string };
@@ -93,6 +95,36 @@ test("五个内部角色仅加载其默认页与可见菜单，USER 被后台拒
     headers: { "x-demo-user-id": "p1a-user", "x-demo-role": "USER" },
   });
   expect(userDenied.status()).toBe(403);
+});
+
+test("售后按问题类型分栏且保留筛选，小屏无多表堆叠", async ({ browser }, testInfo) => {
+  const session = await createStaff(browser, "OPERATOR");
+  const { page } = session;
+  await page.getByRole("menuitem", { name: "售后与异常", exact: true }).click();
+  const quality = page.getByRole("region", { name: "品质售后列表" });
+  const differences = page.getByRole("region", { name: "履约差异列表", includeHidden: true });
+  const pickup = page.getByRole("region", { name: "逾期领取列表", includeHidden: true });
+  await expect(quality).toBeVisible();
+  await expect(differences).not.toBeVisible();
+  await expect(pickup).not.toBeVisible();
+  await quality.getByLabel("待办状态筛选").first().click();
+  await page.locator(".ant-select-dropdown:visible").getByText("待运营审核", { exact: true }).click();
+  await page.getByRole("tab", { name: "履约差异", exact: true }).click();
+  await expect(differences).toBeVisible();
+  await expect(quality).not.toBeVisible();
+  await page.getByRole("tab", { name: "逾期领取", exact: true }).click();
+  await expect(pickup).toBeVisible();
+  await expect(differences).not.toBeVisible();
+  await page.getByRole("tab", { name: "品质售后", exact: true }).click();
+  await expect(quality.getByText("待运营审核", { exact: true })).toBeVisible();
+  for (const width of [375, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await expect(page.getByRole("table")).toHaveCount(1);
+  }
+  await page.screenshot({ path: testInfo.outputPath("service-tabs.png"), fullPage: true });
+  expect(session.failures).toEqual([]);
+  await session.context.close();
 });
 
 test("后台框架提供高对比账号入口、可展开分组和运营可读审计表", async ({ browser }, testInfo) => {

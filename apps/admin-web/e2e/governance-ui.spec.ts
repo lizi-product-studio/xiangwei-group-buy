@@ -1,3 +1,4 @@
+import { fixturePhoto } from './media-fixture';
 import { randomUUID } from "node:crypto";
 import {
   expect,
@@ -125,6 +126,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
     regionCode: "110101",
   });
   const point = await post<{ id: string }>(request, "/api/v1/admin/pickup-points", {
+    photoUrl: await fixturePhoto(request),
     serviceAreaId: area.id,
     name: `P1-C 治理点 ${suffix}`,
     address: "东城区治理闭环测试点一号",
@@ -137,6 +139,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
     capacityPerDay: 30,
   });
   await post<{ id: string }>(request, "/api/v1/admin/pickup-points", {
+    photoUrl: await fixturePhoto(request),
     serviceAreaId: area.id,
     name: `P1-C 空闲点 ${suffix}`,
     address: "东城区治理闭环测试点二号",

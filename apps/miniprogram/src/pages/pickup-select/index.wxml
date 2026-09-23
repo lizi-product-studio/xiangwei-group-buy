@@ -23,7 +23,7 @@
 
   <view wx:for="{{points}}" wx:key="id" class="ui-view area-group">
     <view class="ui-view point-row {{selectedId === item.id ? 'point-row--selected' : ''}}" data-id="{{item.id}}" bindtap="choosePoint">
-      <view class="ui-view point-row__pin"><image class="ui-image point-row__asset" src="/assets/location-green.png" mode="aspectFit"/></view>
+      <view class="pickup-photo"><product-image src="{{item.photoUrl || ''}}" label="自提点照片" /></view>
       <view class="ui-view point-row__copy"><text class="ui-text">{{item.name}}</text><text class="ui-text">{{item.address}}</text><text class="ui-text" wx:if="{{item.businessHours}}">营业时间：{{item.businessHours}}</text><text class="ui-text" wx:if="{{item.pickupInstructions}}">领取提示：{{item.pickupInstructions}}</text><text class="ui-text" wx:if="{{item.contactName || item.contactPhone}}">联系人：{{item.contactName || '点位负责人'}} {{item.contactPhone}}</text><view class="ui-view point-row__actions"><text class="ui-text" data-id="{{item.id}}" catchtap="openLocation">一键导航</text><text class="ui-text" data-id="{{item.id}}" catchtap="callPoint">拨打电话</text></view></view>
       <text class="ui-text point-row__check">{{selectedId === item.id ? '已选择' : '选择'}}</text>
     </view>

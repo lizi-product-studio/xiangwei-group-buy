@@ -71,6 +71,7 @@ get("admin/catalog/skus", "products.view", "categories.view", "campaigns.view");
 get("admin/catalog/categories", "products.view", "categories.view", "homepage-banners.view");
 post("admin/catalog/categories", "categories.manage"); route("DELETE", "admin/catalog/categories/:id", "categories.delete");
 post("admin/catalog/skus", "products.create"); post("admin/product-images", "products.create");
+route("POST", "admin/product-detail-images", "products.create", "products.edit");
 get("admin/campaigns", "campaigns.view", "orders.view", "logistics.view", "arrival-exceptions.view", "homepage-banners.view");
 post("admin/campaigns", "campaigns.create"); route("PATCH", "admin/campaigns/:id", "campaigns.edit"); route("DELETE", "admin/campaigns/:id", "campaigns.delete");
 for (const action of ["open", "close", "cancel"]) post(`admin/campaigns/:id/${action}`, `campaigns.${action}`);

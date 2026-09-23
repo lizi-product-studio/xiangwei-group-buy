@@ -1,3 +1,4 @@
+import { fixturePhoto } from './media-fixture';
 import { expect, test, type APIRequestContext } from '@playwright/test';
 
 const apiBase = process.env.E2E_API_BASE_URL ?? 'http://127.0.0.1:3101';
@@ -22,6 +23,7 @@ test('网页草稿过期恢复、编辑开售、无引用删除与消费者只�
   const area = await post<{ id: string }>(request, '/api/v1/admin/service-areas', { regionCode: '110101' });
   await post(request, `/api/v1/admin/service-areas/${area.id}/order-status`, { orderEnabled: true });
   const point = await post<{ id: string }>(request, '/api/v1/admin/pickup-points', {
+    photoUrl: await fixturePhoto(request),
     serviceAreaId: area.id, name: `CRUD点位 ${suffix}`, address: '东城区社区服务站 99 号', businessHours: '09:00-20:00', pickupInstructions: '出示取货码', latitude: 39.9042, longitude: 116.4074, contactName: '本地负责人', contactPhone: '13800138000', capacityPerDay: 100,
   });
   const productTitle = `CRUD蔬菜 ${suffix}`;

@@ -16,6 +16,7 @@ export interface ServiceArea {
   createdAt: string;
 }
 export interface PickupPoint {
+  photoUrl?: string | null;
   id: string;
   serviceAreaId: string;
   name: string;
@@ -66,6 +67,10 @@ export interface CatalogSku {
     category: string;
     origin: string;
     imageUrl: string | null;
+    imageUrls?: string[];
+    description?: string;
+    detailImageUrls?: string[];
+    salesQuantity?: number;
     status: string;
   };
 }
@@ -893,6 +898,7 @@ export const api = {
       method: "DELETE",
     }),
   createPoint: (body: {
+    photoUrl: string;
     serviceAreaId: string;
     name: string;
     address: string;
@@ -907,6 +913,7 @@ export const api = {
   updatePoint: (
     id: string,
     body: {
+      photoUrl?: string | null;
       name: string;
       address: string;
       businessHours: string;
@@ -932,6 +939,13 @@ export const api = {
       method: "POST", body: file, headers: { "content-type": file.type }, ...(signal ? { signal } : {}),
     });
   },
+  uploadProductDetailImage: (file: File, signal?: AbortSignal) => {
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type) || !file.size || file.size > 10 * 1024 * 1024)
+      return Promise.reject(new AdminApiError("请选择不超过 10 MB 的 JPG、PNG 或 WebP 图片"));
+    return request<{ imageUrl: string }>("/api/v1/admin/product-detail-images", {
+      method: "POST", body: file, headers: { "content-type": file.type }, ...(signal ? { signal } : {}),
+    });
+  },
   skus: () => request<CatalogSku[]>("/api/v1/admin/catalog/skus"),
   saveSku: (body: {
     id?: string;
@@ -941,6 +955,9 @@ export const api = {
     category: string;
     origin: string;
     imageUrl: string | null;
+    imageUrls?: string[];
+    description?: string;
+    detailImageUrls?: string[];
     skuName: string;
     retailPriceCents: number;
     defaultSellableQuantity: number;

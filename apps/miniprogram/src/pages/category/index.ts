@@ -19,6 +19,7 @@ interface CategoryProduct extends CampaignDto {
   unitPriceCents: number;
   stock: number;
   soldQuantity: number;
+  salesQuantity: number;
 }
 
 Page({
@@ -69,6 +70,7 @@ Page({
           unitPriceCents: item.unitPriceCents,
           stock: item.stock,
           soldQuantity: item.soldQuantity,
+          salesQuantity: item.salesQuantity ?? 0,
           priceText: formatMoney(item.unitPriceCents),
           cutoffText: formatChinaDateTime(campaign.cutoffAt, true),
           arrivalText: estimatedArrivalText(campaign) ?? "到货时间待确认",

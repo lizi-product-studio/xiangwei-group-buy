@@ -10,7 +10,7 @@
       <view wx:if="{{!products.length}}" class="category-empty">这个分类暂无商品<br/>换个分类看看</view>
       <view wx:for="{{products}}" wx:key="renderKey" class="category-product" data-id="{{item.id}}" data-sku="{{item.skuId}}" bindtap="openProduct">
         <view class="category-product__image"><product-image src="{{item.imageUrl || ''}}" refresh-key="{{imageRefreshKey}}" image-mode="aspectFit" /></view>
-        <view class="category-product__content"><text class="category-product__title">{{item.productTitle}}</text><text class="category-product__sku">{{item.skuName}}</text><text class="category-product__arrival">{{item.arrivalText}}</text><view class="category-product__foot"><view class="category-product__price-block"><text class="category-product__price">¥{{item.priceText}}</text><text class="category-product__price-note">团购价</text></view><view class="category-product__add" role="button" aria-label="加入购物车" catchtap="addToCart" data-key="{{item.renderKey}}"><text class="category-product__add-label">＋ 加购</text></view></view></view>
+        <view class="category-product__content"><text class="category-product__title">{{item.productTitle}}</text><text class="category-product__sku">{{item.skuName}}</text><text class="category-product__arrival">{{item.arrivalText}}</text><view class="category-product__foot"><view class="category-product__price-block"><text class="category-product__price">¥{{item.priceText}}</text><text class="category-product__price-note">已售 {{item.salesQuantity}} 件</text></view><view class="category-product__add" role="button" aria-label="加入购物车" catchtap="addToCart" data-key="{{item.renderKey}}"><text class="category-product__add-label">＋ 加购</text></view></view></view>
       </view>
     </scroll-view>
   </view>

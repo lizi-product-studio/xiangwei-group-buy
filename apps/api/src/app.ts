@@ -4,7 +4,7 @@ import { exceptionReadModel } from "./modules/fulfillment/exception-readmodel.js
 import { exceptionRefundFacts } from "./modules/finance/refund-readmodel.js";
 import { operationsPageSchema } from "./routes/operations-pagination.js";
 import { z } from "zod";
-import { ProductImages } from './modules/media/product-images.js';
+import { PRODUCT_DETAIL_IMAGE_MAX_BYTES, ProductImages } from './modules/media/product-images.js';
 import { registerProductImageRoutes } from './routes/product-image-routes.js';
 import { registerMerchandisingRoutes } from "./routes/merchandising-routes.js";
 import { registerProfileRoutes } from "./routes/profile-routes.js";
@@ -85,6 +85,7 @@ import { LedgerService } from "./modules/finance/ledger-service.js";
 import { CommunityFulfillmentService } from "./modules/fulfillment/community-fulfillment-service.js";
 import { CommunityOperationsService } from "./modules/fulfillment/community-operations-service.js";
 import { CommunityQualityService } from "./modules/fulfillment/community-quality-service.js";
+import { calculateNetSalesFromOrders, calculateNetSalesSnapshot, type NetSalesSnapshot } from "./modules/catalog/catalog-sales.js";
 import { DeliveryPlanService } from "./modules/fulfillment/delivery-plan-service.js";
 import { FulfillmentService } from "./modules/fulfillment/fulfillment-service.js";
 import { NotificationService } from "./modules/notifications/notification-service.js";
@@ -245,9 +246,22 @@ export async function buildApp(
   dependencies: AppDependencies,
 ): Promise<FastifyInstance> {
   const { config } = dependencies;
-  const productImages = new ProductImages(config.PRODUCT_IMAGE_DIR);
-  const profileImages = new ProductImages(resolve(config.PRODUCT_IMAGE_DIR, "profiles"), "/api/v1/profile-images/");
-  await Promise.all([productImages.initialize(), profileImages.initialize()]);
+  const imageStorageOptions = {
+    storageQuotaBytes: config.PRODUCT_IMAGE_STORAGE_QUOTA_BYTES,
+    minimumFreeBytes: config.PRODUCT_IMAGE_MIN_FREE_BYTES,
+  };
+  const productImages = new ProductImages(config.PRODUCT_IMAGE_DIR, undefined, imageStorageOptions);
+  const detailImages = new ProductImages(config.PRODUCT_IMAGE_DIR, '/api/v1/product-images/', {
+    maxUploadBytes: PRODUCT_DETAIL_IMAGE_MAX_BYTES,
+    maxStoredBytes: PRODUCT_DETAIL_IMAGE_MAX_BYTES,
+    maxWidth: 1200,
+    maxHeight: 20_000,
+    maxInputPixels: 40_000_000,
+    uploadErrorMessage: '请上传有效的 JPEG、PNG 或 WebP 详情长图（最多 10 MB、宽度不超过 1200 像素）',
+    ...imageStorageOptions,
+  });
+  const profileImages = new ProductImages(resolve(config.PRODUCT_IMAGE_DIR, "profiles"), "/api/v1/profile-images/", imageStorageOptions);
+  await Promise.all([productImages.initialize(), detailImages.initialize(), profileImages.initialize()]);
   const app = Fastify({
     logger:
       dependencies.logger ?? (config.NODE_ENV === "test"
@@ -524,33 +538,13 @@ export async function buildApp(
           estimatedArrivalAt: plan.estimatedArrivalAt,
         }
       : null;
-  const campaignView = async (campaign: Campaign) => {
+  const campaignView = async (campaign: Campaign, sales: NetSalesSnapshot) => {
     const [plan, orders, points] = await Promise.all([
       store.getDeliveryPlanByCampaign(campaign.id),
       store.listOrdersByCampaign(campaign.id),
       store.listPickupPoints(campaign.serviceAreaId),
     ]);
-    const paidBySku = new Map<string, number>();
-    for (const order of orders) {
-      if (
-        order.paidAt === null ||
-        ![
-          "PAID_WAITING_CLOSE",
-          "LOCKED",
-          "ALLOCATING",
-          "IN_TRANSIT",
-          "READY_FOR_PICKUP",
-          "PICKED_UP",
-          "COMPLETED",
-        ].includes(order.status)
-      )
-        continue;
-      for (const item of order.items)
-        paidBySku.set(
-          item.skuId,
-          (paidBySku.get(item.skuId) ?? 0) + item.quantity,
-        );
-    }
+    const paidBySku = calculateNetSalesFromOrders(orders, sales.fullyRefundedOrderIds);
     return {
       ...campaign,
       deliveryPlan: publicPlan(plan),
@@ -568,6 +562,10 @@ export async function buildApp(
         skuName: item.skuName,
         origin: item.origin,
         imageUrl: item.imageUrl,
+        imageUrls: item.imageUrls?.length ? item.imageUrls : (item.imageUrl ? [item.imageUrl] : []),
+        description: item.description ?? "",
+        detailImageUrls: item.detailImageUrls ?? [],
+        salesQuantity: sales.quantities.get(item.catalogSkuId) ?? 0,
         unitPriceCents: Number(item.retailPriceCents),
         stock: item.sellableQuantity,
         paidQuantity: paidBySku.get(item.catalogSkuId) ?? 0,
@@ -575,9 +573,9 @@ export async function buildApp(
       })),
     };
   };
-  const publicCampaignView = async (campaign: Campaign) => {
+  const publicCampaignView = async (campaign: Campaign, sales: NetSalesSnapshot) => {
     const [view, catalog] = await Promise.all([
-      campaignView(campaign),
+      campaignView(campaign, sales),
       store.listCatalogSkus(),
     ]);
     const activeSkus = new Map(
@@ -591,7 +589,16 @@ export async function buildApp(
       // product descriptions and persisted campaign/order snapshots stay frozen.
       items: view.items.flatMap((item) => {
         const sku = activeSkus.get(item.skuId);
-        return sku ? [{ ...item, imageUrl: sku.product.imageUrl }] : [];
+        if (!sku) return [];
+        const imageUrls = sku.product.imageUrls?.length ? sku.product.imageUrls : (sku.product.imageUrl ? [sku.product.imageUrl] : []);
+        return [{
+          ...item,
+          imageUrl: imageUrls[0] ?? null,
+          imageUrls,
+          description: sku.product.description ?? "",
+          detailImageUrls: sku.product.detailImageUrls ?? [],
+          salesQuantity: item.salesQuantity ?? 0,
+        }];
       }),
     };
   };
@@ -772,7 +779,7 @@ export async function buildApp(
     return { status: "ok", dependencies };
   });
 
-  registerProductImageRoutes(app, { productImages, profileImages, store });
+  registerProductImageRoutes(app, { productImages, detailImages, profileImages, store });
   registerMerchandisingRoutes(app, {
     store,
     images: productImages,
@@ -801,6 +808,7 @@ export async function buildApp(
       const managerNames = managers.map((value) => value.displayName);
       return {
         ...point,
+        photoUrl: point.photoUrl ?? null,
         contactName: managerNames.length ? `${managerNames.join("、")}${managers.length > 1 ? "（关联冲突）" : ""}` : "",
         contactPhone: managers.length === 1 ? managers[0]!.phone : "",
         managerNames,
@@ -811,10 +819,12 @@ export async function buildApp(
   registerPublicCatalogRoutes(app, {
     readSnapshot: work => store.readSnapshot(work),
     campaigns,
+    getSalesSnapshot: () => calculateNetSalesSnapshot(store),
     listServiceAreas: () => store.listServiceAreas(),
     listPickupPoints: async (id) => (await listPickupPointManagerDirectory(id)).map((point) => {
       Reflect.deleteProperty(point, "managerNames");
       Reflect.deleteProperty(point, "managerConflict");
+      point.photoUrl = point.photoUrl ?? null;
       return point;
     }),
     getDeliveryPlanByCampaign: (id) => store.getDeliveryPlanByCampaign(id),
@@ -1037,6 +1047,7 @@ export async function buildApp(
     contactName: string;
     contactPhone: string;
     capacityPerDay: number | null;
+    photoUrl: string;
   }) => {
     const serviceArea = (await pointStore.listServiceAreas()).find(
       (value) => value.id === input.serviceAreaId,
@@ -1097,6 +1108,7 @@ export async function buildApp(
         point.contactName === candidate.contactName &&
         point.contactPhone === candidate.contactPhone &&
         point.capacityPerDay === candidate.capacityPerDay &&
+        point.photoUrl === candidate.photoUrl &&
         point.status === candidate.status,
     );
 
@@ -1113,6 +1125,7 @@ export async function buildApp(
     const { confirmDuplicate, ...input } = createPickupPointSchema.parse(
       request.body,
     );
+    await detailImages.validateReference(input.photoUrl);
     const result = await store.transaction(async (transactionStore) => {
       const created = await buildPickupPoint(transactionStore, input);
       const location = await locationCheck(transactionStore, created);
@@ -1167,6 +1180,7 @@ export async function buildApp(
     const { confirmDuplicate, ...input } = updatePickupPointSchema.parse(
       request.body,
     );
+    if (input.photoUrl !== undefined) await detailImages.validateReference(input.photoUrl);
     const result = await store.transaction(async (transactionStore) => {
       const before = (await transactionStore.listPickupPoints()).find(
         (point) => point.id === id,
@@ -1189,8 +1203,12 @@ export async function buildApp(
             address: before.address,
             latitude: before.latitude,
             longitude: before.longitude,
-          };
-      if (after.status === "ACTIVE") createPickupPointSchema.parse(after);
+      };
+      if (after.status === "ACTIVE") {
+        const legacyCompatiblePoint = { ...after };
+        delete legacyCompatiblePoint.photoUrl;
+        createPickupPointSchema.omit({ photoUrl: true }).parse(legacyCompatiblePoint);
+      }
       if (before.status === "ACTIVE" && after.status === "INACTIVE") {
         const [campaigns, plans, staff, assignments, orders] = await Promise.all([
           transactionStore.listCampaigns(),
@@ -1380,7 +1398,9 @@ export async function buildApp(
           contactName: point.contactName,
           contactPhone: point.contactPhone,
           capacityPerDay: point.capacityPerDay,
+          photoUrl: point.photoUrl,
         });
+        await detailImages.validateReference(value.photoUrl);
         const location = await locationCheck(transactionStore, value);
         if (location.duplicates.length) throw duplicateError(location.duplicates);
         await transactionStore.savePickupPoint(value);
@@ -1405,7 +1425,17 @@ export async function buildApp(
 
   app.get("/api/v1/admin/catalog/skus", async (request) => {
     requireActor(request, ["OPERATOR", "SUPER_ADMIN"]);
-    return { data: await store.listCatalogSkus() };
+    const sales = (await calculateNetSalesSnapshot(store)).quantities;
+    return { data: (await store.listCatalogSkus()).map((sku) => ({
+      ...sku,
+      product: {
+        ...sku.product,
+        imageUrls: sku.product.imageUrls?.length ? sku.product.imageUrls : (sku.product.imageUrl ? [sku.product.imageUrl] : []),
+        description: sku.product.description ?? "",
+        detailImageUrls: sku.product.detailImageUrls ?? [],
+        salesQuantity: sales.get(sku.id) ?? 0,
+      },
+    })) };
   });
   app.get("/api/v1/admin/catalog/categories", async (request) => {
     requireActor(request, ["OPERATOR", "SUPER_ADMIN"]);
@@ -1476,7 +1506,9 @@ export async function buildApp(
   app.post("/api/v1/admin/catalog/skus", async (request, reply) => {
     const actor = requireActor(request, ["OPERATOR", "SUPER_ADMIN"]);
     const input = catalogSkuSchema.parse(request.body);
-    await productImages.validateReference(input.imageUrl);
+    const imageUrls = input.imageUrls.length ? input.imageUrls : (input.imageUrl ? [input.imageUrl] : []);
+    const imageUrl = imageUrls[0] ?? null;
+    for (const image of [...imageUrls, ...input.detailImageUrls]) await detailImages.validateReference(image);
     const { existing, value } = await store.transaction(
       async (transactionStore) => {
         const existing = input.id
@@ -1499,7 +1531,11 @@ export async function buildApp(
             title: input.title,
             category: input.category,
             origin: input.origin,
-            imageUrl: input.imageUrl,
+            imageUrl,
+            imageUrls,
+            description: input.description,
+            detailImageUrls: input.detailImageUrls,
+            salesQuantity: 0,
             storageType: "NORMAL_TEMPERATURE",
             status: input.status === "ACTIVE" ? "ACTIVE" : "DRAFT",
           },
@@ -1589,8 +1625,9 @@ export async function buildApp(
   });
   app.get("/api/v1/admin/campaigns", async (request) => {
     requireActor(request, ["OPERATOR", "FINANCE", "SUPER_ADMIN"]);
+    const sales = await calculateNetSalesSnapshot(store);
     return {
-      data: await Promise.all((await campaigns.list()).map(campaignView)),
+      data: await Promise.all((await campaigns.list()).map((campaign) => campaignView(campaign, sales))),
     };
   });
   app.post("/api/v1/admin/campaigns", async (request, reply) => {
@@ -1600,14 +1637,14 @@ export async function buildApp(
       actor.userId,
       request.id,
     );
-    return reply.status(201).send({ data: await campaignView(value) });
+    return reply.status(201).send({ data: await campaignView(value, await calculateNetSalesSnapshot(store)) });
   });
   app.patch("/api/v1/admin/campaigns/:id", async (request) => {
     const actor = requireActor(request, ["OPERATOR", "SUPER_ADMIN"]);
     const id = identifierSchema.parse((request.params as { id: string }).id);
     const version = z.object({ version: z.int().min(1) }).parse(request.body).version;
     const value = await communityFulfillment.createCampaign(communityCampaignSchema.parse(request.body), actor.userId, request.id, { id, version });
-    return { data: await campaignView(value) };
+    return { data: await campaignView(value, await calculateNetSalesSnapshot(store)) };
   });
   app.delete("/api/v1/admin/campaigns/:id", async (request) => {
     const actor = requireActor(request, ["OPERATOR", "SUPER_ADMIN"]);

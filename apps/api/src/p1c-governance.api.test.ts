@@ -873,6 +873,7 @@ describe("P1-C governance API contracts", () => {
         contactName: "李店长",
         contactPhone: "13900000000",
         capacityPerDay: 10,
+        photoUrl: "https://example.com/audit-pickup.jpg",
       },
     });
     expect(point.statusCode).toBe(500);

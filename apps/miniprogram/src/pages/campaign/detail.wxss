@@ -46,3 +46,13 @@
 .detail .primary-button::after, .detail .cart-button::after { border: 0; }
 .cart-button { color: #c2412d; background: #fff7f3; border: 1rpx solid #edb3a4; }
 .primary-button { color: #fff; background: #c9412d; box-shadow: 0 6rpx 14rpx rgba(201,65,45,.18); }
+
+.product-gallery, .gallery-slide { width: 100%; height: 100%; }
+.product-hero .gallery-count { position: absolute; left: auto; right: 24rpx; bottom: 24rpx; padding: 8rpx 14rpx; border-radius: 12rpx; color: white; background: rgba(35,49,45,.75); font-size: 22rpx; }
+.price-row { flex-wrap: wrap; }
+.product-introduction, .product-details { margin: 24rpx 32rpx 0; overflow: hidden; background: #fffefa; border: 1rpx solid #e6e3d8; border-radius: 24rpx; }
+.content-heading { display: block; padding: 24rpx; font-size: 30rpx; color: #23312d; font-weight: 650; }
+.content-copy { display: block; padding: 0 24rpx 24rpx; white-space: pre-wrap; word-break: break-all; line-height: 1.7; font-size: 28rpx; color: #626c60; }
+.product-details__image { display: block; width: 100%; }
+.product-details__failed { padding: 48rpx 24rpx; text-align: center; color: #626c60; font-size: 26rpx; }
+.pickup-photo { width: 112rpx; height: 112rpx; flex: none; border-radius: 16rpx; overflow: hidden; }

@@ -26,14 +26,22 @@ describe('product image HTTP boundary', () => {
     const uploaded = await app.inject({ method: 'POST', url, headers, payload: input });
     expect(uploaded.statusCode, uploaded.body).toBe(201);
     const imageUrl = uploaded.json().data.imageUrl as string;
+    const detailInput = await sharp({ create: { width: 1600, height: 3000, channels: 3, background: 'white' } }).png().toBuffer();
+    const detailUploaded = await app.inject({ method: 'POST', url: '/api/v1/admin/product-detail-images', headers, payload: detailInput });
+    expect(detailUploaded.statusCode, detailUploaded.body).toBe(201);
+    const detailUrl = detailUploaded.json().data.imageUrl as string;
+    const detailImage = await app.inject({ method: 'GET', url: detailUrl });
+    expect(detailImage.statusCode).toBe(200);
+    await expect(sharp(detailImage.rawPayload).metadata()).resolves.toMatchObject({ width: 1200, height: 2250 });
     const superUpload = await app.inject({ method: 'POST', url, headers: { ...headers, 'x-demo-role': 'SUPER_ADMIN' }, payload: input });
     expect(superUpload.statusCode).toBe(201);
     const sku = { title: '真实测试商品', category: '蔬菜', origin: '本地', skuName: '一份', retailPriceCents: 1200, status: 'ACTIVE' };
     const jsonHeaders = { ...headers, 'content-type': 'application/json' };
     expect((await app.inject({ method: 'POST', url: '/api/v1/admin/catalog/skus', headers: jsonHeaders, payload: { ...sku, imageUrl: '/api/v1/product-images/00000000-0000-4000-8000-000000000000.webp' } })).statusCode).toBe(404);
-    const saved = await app.inject({ method: 'POST', url: '/api/v1/admin/catalog/skus', headers: jsonHeaders, payload: { ...sku, imageUrl } });
+    const saved = await app.inject({ method: 'POST', url: '/api/v1/admin/catalog/skus', headers: jsonHeaders, payload: { ...sku, imageUrl, imageUrls: [imageUrl], description: '商品描述', detailImageUrls: [detailUrl] } });
     expect(saved.statusCode, saved.body).toBe(201);
     expect(saved.json().data.product.imageUrl).toBe(imageUrl);
+    expect(saved.json().data.product).toMatchObject({ imageUrls: [imageUrl], description: '商品描述', detailImageUrls: [detailUrl], salesQuantity: 0 });
 
     const image = await app.inject({ method: 'GET', url: imageUrl });
     expect(image.statusCode).toBe(200);

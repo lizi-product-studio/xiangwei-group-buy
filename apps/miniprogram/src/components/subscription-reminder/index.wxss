@@ -1,0 +1,13 @@
+:host { display: block; }
+.reminder { box-sizing: border-box; margin: 24rpx 0; padding: 24rpx; border: 1rpx solid #efc7b7; border-radius: 24rpx; background: #fff4eb; }
+.reminder--complete { background: #f0f4ec; border-color: #dce4d5; }
+.reminder__title { display: block; color: #23312d; font-size: 28rpx; font-weight: 650; }
+.reminder__note { display: block; margin-top: 10rpx; color: #626c60; font-size: 24rpx; line-height: 1.6; }
+.reminder__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 16rpx; margin-top: 18rpx; }
+.reminder__button, .reminder__link { display: flex; align-items: center; justify-content: center; box-sizing: border-box; min-height: 64rpx; margin: 0; padding: 12rpx 22rpx; border-radius: 16rpx; font-size: 24rpx; line-height: 1.4; }
+.reminder__button { color: white; background: #c2412d; }
+.reminder__button[disabled] { color: #7a8178; background: #ebe8df; }
+.reminder__link { background: transparent; color: #43683b; padding: 10rpx 0; }
+.reminder__button::after, .reminder__link::after { border: none; }
+.reminder__error { margin-top: 14rpx; color: #c2412d; font-size: 24rpx; }
+.reminder__footnote { border-top: 1rpx solid #e5dfd3; padding-top: 16rpx; }

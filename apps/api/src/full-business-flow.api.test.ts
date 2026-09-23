@@ -68,7 +68,7 @@ describe('registered consumer and authenticated staff full business flow', () =>
     };
     const operator = (await staff('OPERATOR', 'operator', '13800000001')).headers;
     const area = await post('/api/v1/admin/service-areas', operator, { regionCode: '110101' }, 201);
-    const point = async (name: string, latitude: number) => post('/api/v1/admin/pickup-points', operator, { serviceAreaId: area.id, name, address: `${name}测试地址`, businessHours: '09:00-20:00', pickupInstructions: '请出示取货码', latitude, longitude: 116.4074, contactName: '测试负责人', contactPhone: '13800000002', capacityPerDay: 100 }, 201);
+    const point = async (name: string, latitude: number) => post('/api/v1/admin/pickup-points', operator, { serviceAreaId: area.id, name, address: `${name}测试地址`, businessHours: '09:00-20:00', pickupInstructions: '请出示取货码', latitude, longitude: 116.4074, contactName: '测试负责人', contactPhone: '13800000002', capacityPerDay: 100, photoUrl: 'https://example.com/pickup.jpg' }, 201);
     const pointA = await point('东门', 39.9042);
     const pointB = await point('西门', 39.91);
     const manager = await staff('PICKUP_MANAGER', 'manager', '13800000003', [pointA.id]);

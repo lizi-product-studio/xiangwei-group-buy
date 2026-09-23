@@ -1,3 +1,4 @@
+import { fixturePhoto } from './media-fixture';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 const apiBase = process.env.E2E_API_BASE_URL ?? 'http://127.0.0.1:3101';
@@ -41,6 +42,7 @@ test('同一主图商品与网页开售团贯穿运输到货及分批核销（�
   const area = await post<{ id: string; name: string }>(request, '/api/v1/admin/service-areas', { regionCode: '110101' });
   await post(request, `/api/v1/admin/service-areas/${area.id}/order-status`, { orderEnabled: true });
   const point = await post<{ id: string }>(request, '/api/v1/admin/pickup-points', {
+    photoUrl: await fixturePhoto(request),
     serviceAreaId: area.id, name: pointName, address: '东城区社区服务站 1 号', businessHours: '每日 09:00–20:00', pickupInstructions: '出示取货码', longitude: 116.4167, latitude: 39.9289,
     contactName: '本地测试店长', contactPhone: '13800138000', capacityPerDay: 100,
   });
@@ -56,11 +58,12 @@ test('同一主图商品与网页开售团贯穿运输到货及分批核销（�
   await page.getByLabel('分类', { exact: true }).click();
   await page.getByText(categoryName, { exact: true }).click();
   await page.getByLabel('产地').fill('本地农场');
-  await page.getByLabel('销售规格（包装单位）').fill('一份');
+  await page.getByText("更多设置 · 计价单位", { exact: true }).click();
+  await page.getByLabel("计价单位", { exact: true }).fill('一份');
   await page.getByLabel('售价（元）').fill('12.50');
   await page.getByLabel('默认团期可售量').fill('10');
   const uploaded = page.waitForResponse(r => r.url().endsWith('/api/v1/admin/product-images') && r.request().method() === 'POST');
-  await page.getByLabel('上传商品主图').setInputFiles({ name: 'local-fixture.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP4EGQERAwQCgArtgXRlFwMYgAAAABJRU5ErkJggg==', 'base64') });
+  await page.getByLabel('上传商品图片').setInputFiles({ name: 'local-fixture.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP4EGQERAwQCgArtgXRlFwMYgAAAABJRU5ErkJggg==', 'base64') });
   const upload = await uploaded;
   expect(upload.ok()).toBeTruthy();
   const imageUrl: string = (await upload.json()).data.imageUrl;

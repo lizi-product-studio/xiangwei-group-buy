@@ -12,6 +12,7 @@ import type {
   NotificationCampaignEnqueueStore,
   NotificationOrderEnqueueStore,
 } from "./notification-store.js";
+import type { NotificationPreference } from "../core/types.js";
 
 const paidOrderStatuses = new Set([
   "PAID_WAITING_CLOSE",
@@ -86,6 +87,40 @@ export class NotificationService {
     private readonly store: CommerceStore,
     private readonly provider: SubscriptionMessageProvider,
   ) {}
+
+  private samePreferenceSnapshot(
+    current: NotificationPreference | null,
+    snapshot: NotificationPreference | null,
+  ): boolean {
+    if (!current || !snapshot || current.updatedAt !== snapshot.updatedAt) return false;
+    if (current.types.length !== snapshot.types.length || current.types.some((type, index) => type !== snapshot.types[index])) return false;
+    const currentTemplates = Object.entries(current.templateIds ?? {}).sort(([left], [right]) => left.localeCompare(right));
+    const snapshotTemplates = Object.entries(snapshot.templateIds ?? {}).sort(([left], [right]) => left.localeCompare(right));
+    return currentTemplates.length === snapshotTemplates.length && currentTemplates.every(([key, value], index) => snapshotTemplates[index]?.[0] === key && snapshotTemplates[index]?.[1] === value);
+  }
+
+  private async markSentAndConsumeSuccessfulTemplate(
+    notificationId: string,
+    attemptId: string,
+    userId: string,
+    templateId: string | undefined,
+    snapshot: NotificationPreference | null,
+  ): Promise<void> {
+    await this.store.transaction(async (store) => {
+      const marked = await store.markOrderNotificationSentIfSubmission(notificationId, attemptId, null);
+      if (!marked || !templateId || !snapshot || !this.provider.templateIdFor) return;
+      const currentPreference = await store.getNotificationPreference(userId);
+      if (!currentPreference || !this.samePreferenceSnapshot(currentPreference, snapshot)) return;
+      const remainingTypes = currentPreference.types.filter((type) => this.provider.templateIdFor!(type) !== templateId);
+      const remainingTemplateIds = Object.fromEntries(Object.entries(currentPreference.templateIds ?? {}).filter(([, value]) => value !== templateId));
+      await store.saveNotificationPreference({
+        userId,
+        types: remainingTypes,
+        templateIds: remainingTemplateIds,
+        updatedAt: await store.databaseNow(),
+      });
+    });
+  }
 
   public async notifyCampaign(
     type: OrderNotificationType,
@@ -227,9 +262,16 @@ export class NotificationService {
       credential: await this.store.getPickupCredential(order.id),
       refund: notification.refundId ? await this.store.getPartialRefund(notification.refundId) : null,
     };
+    let templateId: string | undefined;
+    let preferenceSnapshot: NotificationPreference | null = null;
     try {
       const preference = await this.store.getNotificationPreference(user.id);
-      const templateId = this.provider.templateIdFor?.(notification.type);
+      templateId = this.provider.templateIdFor?.(notification.type);
+      preferenceSnapshot = preference ? {
+        ...preference,
+        types: [...preference.types],
+        ...(preference.templateIds ? { templateIds: { ...preference.templateIds } } : {}),
+      } : null;
       if (this.provider.templateIdFor && (!templateId || !preference?.types.includes(notification.type) || preference.templateIds?.[notification.type] !== templateId))
         throw new Error('当前模板尚未获得用户授权，请重新订阅');
       this.provider.prepare?.(input);
@@ -277,13 +319,7 @@ export class NotificationService {
       } finally {
         if (timer) clearTimeout(timer);
       }
-      await this.store.transaction((store) =>
-        store.markOrderNotificationSentIfSubmission(
-          submission.id,
-          attemptId,
-          null,
-        ),
-      );
+      await this.markSentAndConsumeSuccessfulTemplate(submission.id, attemptId, user.id, templateId, preferenceSnapshot);
     } catch (error) {
       // Any provider-side ambiguity stays UNKNOWN. Without a stable provider
       // idempotency key plus a reliable query contract, retrying would violate

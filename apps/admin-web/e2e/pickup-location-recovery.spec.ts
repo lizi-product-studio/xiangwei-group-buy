@@ -1,3 +1,5 @@
+import { uploadPointPhoto } from './media-fixture';
+import { fixturePhoto } from './media-fixture';
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
 const apiBase = process.env.E2E_API_BASE_URL ?? "http://127.0.0.1:3101";
@@ -73,6 +75,7 @@ test("地图同地址重新检测可恢复，候选确认清除旧错误且保�
   await page.reload();
   await page.getByRole("menuitem", { name: "自提点管理" }).click();
   await page.getByRole("button", { name: "新增自提点", exact: true }).click();
+  await uploadPointPhoto(page);
   const dialog = page.getByRole("dialog", { name: "新增自提点" });
   await dialog.getByLabel("服务区域", { exact: true }).click();
   await page.getByTitle(areaName, { exact: true }).last().click();
@@ -136,6 +139,7 @@ test("分类与点位操作精简，状态在编辑中修改且使用居中弹�
   const area = (await areaResponse.json()).data;
   const pointName = `布局点位${suffix}`;
   const pointResponse = await request.post(`${apiBase}/api/v1/admin/pickup-points`, { headers: demoHeaders, data: {
+    photoUrl: await fixturePhoto(request),
     serviceAreaId: area.id, name: pointName, address: "东城区布局测试街 1 号", latitude: 39.94, longitude: 116.44,
     businessHours: "每日 09:00–20:00", pickupInstructions: "出示取货码", contactName: "", contactPhone: "", capacityPerDay: null,
   } });
@@ -157,6 +161,7 @@ test("分类与点位操作精简，状态在编辑中修改且使用居中弹�
   await expect(dialog).toBeHidden();
   await expect(pointRow.getByText("已停用", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "新增自提点", exact: true }).click();
+  await uploadPointPhoto(page);
   const create = page.getByRole("dialog", { name: "新增自提点" });
   await expect(create).toBeVisible();
   await expect(create.getByRole("button", { name: /^保\s*存$/ })).toBeDisabled();

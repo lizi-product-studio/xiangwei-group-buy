@@ -1,4 +1,5 @@
 import { api, customerAuth, customerErrorMessage } from "../../utils/api";
+import { resolveProductImageUrl } from "../../utils/product-image";
 import { formatMoney } from "../../utils/format";
 import {
   campaignPaidQuantity,
@@ -78,6 +79,9 @@ Page({
     unformedRuleText: "",
     pickupPoint: null as PickupPointSelection | null,
     canBuy: false,
+    gallery: [] as string[],
+    detailImages: [] as Array<{ url: string; failed: boolean }>,
+    galleryIndex: 0,
   },
 
   onLoad(options: Record<string, string | undefined>) {
@@ -115,6 +119,9 @@ Page({
       this.setData({
         campaign,
         product,
+        gallery: (product.imageUrls?.length ? product.imageUrls : product.imageUrl ? [product.imageUrl] : []).map(url => resolveProductImageUrl(url, getApp<IAppOption>().globalData.apiBaseUrl)).filter(Boolean).slice(0, 5),
+        galleryIndex: 0,
+        detailImages: (product.detailImageUrls ?? []).slice(0, 10).map(url => ({ url: resolveProductImageUrl(url, getApp<IAppOption>().globalData.apiBaseUrl), failed: false })).filter(item => item.url),
         area: context.selected,
         deliveryTitle: delivery.title,
         deliveryNote: delivery.note,
@@ -143,6 +150,18 @@ Page({
     }
   },
 
+  changeGallery(event: WechatMiniprogram.SwiperChange) { this.setData({ galleryIndex: event.detail.current }); },
+  previewGallery() {
+    if (this.data.gallery.length) void wx.previewImage({ current: this.data.gallery[this.data.galleryIndex] ?? this.data.gallery[0]!, urls: this.data.gallery });
+  },
+  detailImageFailed(event: WechatMiniprogram.BaseEvent) {
+    const index = Number(event.currentTarget.dataset.index);
+    if (this.data.detailImages[index]) this.setData({ [`detailImages[${index}].failed`]: true });
+  },
+  retryDetailImage(event: WechatMiniprogram.BaseEvent) {
+    const index = Number(event.currentTarget.dataset.index);
+    if (this.data.detailImages[index]) this.setData({ [`detailImages[${index}].failed`]: false });
+  },
   retryLoad() {
     if (this.data.campaignId)
       void this.loadCampaign(this.data.campaignId, this.data.skuId || undefined);

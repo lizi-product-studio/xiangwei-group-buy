@@ -1,3 +1,6 @@
 {
-  "navigationBarTitleText": "订单消息"
+  "navigationBarTitleText": "订单消息",
+  "usingComponents": {
+    "subscription-reminder": "/components/subscription-reminder/index"
+  }
 }

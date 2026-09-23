@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { afterEach, describe, expect, it } from 'vitest';
-import { ProductImages, PRODUCT_IMAGE_MAX_BYTES } from './product-images.js';
+import { ProductImages, PRODUCT_DETAIL_IMAGE_MAX_BYTES, PRODUCT_IMAGE_MAX_BYTES } from './product-images.js';
 const directories: string[] = [];
 const setup = async () => {
   const directory = await mkdtemp(join(tmpdir(), 'product-image-test-'));
@@ -72,5 +72,38 @@ describe('product image storage', () => {
     const images = new ProductImages(file);
     await expect(images.initialize()).rejects.toThrow();
     await expect(images.upload(await png(), 'image/png')).rejects.toThrow();
+  });
+  it('rejects uploads over a small storage quota without writing, then allows another instance with quota', async () => {
+    const { directory, images } = await setup();
+    const limited = new ProductImages(directory, undefined, { storageQuotaBytes: 0 });
+    await expect(limited.upload(await png(), 'image/png')).rejects.toMatchObject({ statusCode: 507 });
+    expect(await readdir(directory)).toEqual([]);
+    await expect(images.upload(await png(), 'image/png')).resolves.toMatch(/webp$/);
+    expect(await readdir(directory)).toHaveLength(1);
+  });
+  it('rejects uploads below the injected free-space reserve and releases the shared decoder gate', async () => {
+    const { directory, images } = await setup();
+    const lowSpace = new ProductImages(directory, undefined, { minimumFreeBytes: Number.MAX_SAFE_INTEGER });
+    await expect(lowSpace.upload(await png(), 'image/png')).rejects.toMatchObject({ statusCode: 507 });
+    expect(await readdir(directory)).toEqual([]);
+    await expect(images.upload(await png(), 'image/png')).resolves.toMatch(/webp$/);
+    expect(await readdir(directory)).toHaveLength(1);
+  });
+  it('keeps detail long-image content within the width/height guard and uses the 10 MB input limit', async () => {
+    const { directory } = await setup();
+    const detail = new ProductImages(directory, undefined, {
+      maxUploadBytes: PRODUCT_DETAIL_IMAGE_MAX_BYTES,
+      maxStoredBytes: PRODUCT_DETAIL_IMAGE_MAX_BYTES,
+      maxWidth: 1200,
+      maxHeight: 20_000,
+      maxInputPixels: 40_000_000,
+    });
+    await detail.initialize();
+    const input = await sharp({ create: { width: 1600, height: 3000, channels: 3, background: 'white' } }).png().toBuffer();
+    const url = await detail.upload(input, 'image/png');
+    const metadata = await sharp(await detail.read(url.split('/').at(-1)!)).metadata();
+    expect(metadata.width).toBe(1200);
+    expect(metadata.height).toBe(2250);
+    await expect(detail.upload(Buffer.alloc(PRODUCT_DETAIL_IMAGE_MAX_BYTES + 1), 'image/png')).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
   });
 });

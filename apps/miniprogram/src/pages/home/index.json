@@ -1,4 +1,6 @@
 {
-  "navigationBarTitleText": "乡味集"
+  "navigationBarTitleText": "乡味集",
+  "usingComponents": {
+    "subscription-reminder": "/components/subscription-reminder/index"
+  }
 }
-

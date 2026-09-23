@@ -61,6 +61,7 @@ describe("community group-buying API lifecycle", () => {
         contactName: "张店长",
         contactPhone: "13800000000",
         capacityPerDay: 500,
+        photoUrl: "https://example.com/community-pickup.jpg",
       },
     });
     expect(point.statusCode, point.body).toBe(201);

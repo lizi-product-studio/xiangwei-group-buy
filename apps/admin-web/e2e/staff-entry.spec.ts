@@ -1,3 +1,4 @@
+import { fixturePhoto } from './media-fixture';
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
 const apiBase = process.env.E2E_API_BASE_URL ?? "http://127.0.0.1:3101";
@@ -112,6 +113,7 @@ test("超管从网页创建员工，临时密码改密与撤权后的默认页�
     regionCode: "110101",
   });
   const point = await post<{ id: string }>(request, "/api/v1/admin/pickup-points", {
+    photoUrl: await fixturePhoto(request),
     serviceAreaId: area.id,
     name: `P1-A 授权点 ${suffix}`,
     address: "东城区 P1-A 测试点",
@@ -290,6 +292,7 @@ test("同一标签切换账号会清空旧工作区，客服和财务刷新只�
     regionCode: "110101",
   });
   const pointA = await post<{ id: string }>(request, "/api/v1/admin/pickup-points", {
+    photoUrl: await fixturePhoto(request),
     serviceAreaId: area.id,
     name: `换号点位 A ${suffix}`,
     address: "东城区换号测试点 A",
@@ -302,6 +305,7 @@ test("同一标签切换账号会清空旧工作区，客服和财务刷新只�
     capacityPerDay: 10,
   });
   const pointB = await post<{ id: string }>(request, "/api/v1/admin/pickup-points", {
+    photoUrl: await fixturePhoto(request),
     serviceAreaId: area.id,
     name: `换号点位 B ${suffix}`,
     address: "东城区换号测试点 B",

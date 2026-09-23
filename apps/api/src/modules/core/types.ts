@@ -8,6 +8,10 @@ export interface CampaignItem {
   skuName: string;
   origin: string;
   imageUrl: string | null;
+  imageUrls?: string[];
+  description?: string;
+  detailImageUrls?: string[];
+  salesQuantity?: number;
   retailPriceCents: MoneyCents;
   sellableQuantity: number;
   reservedQuantity: number;
@@ -77,6 +81,10 @@ export interface CatalogSku {
     category: string;
     origin: string;
     imageUrl: string | null;
+    imageUrls?: string[];
+    description?: string;
+    detailImageUrls?: string[];
+    salesQuantity?: number;
     storageType: "NORMAL_TEMPERATURE";
     status: "DRAFT" | "ACTIVE" | "OFF_SHELF";
   };
@@ -132,6 +140,7 @@ export interface PickupPoint {
   status: "ACTIVE" | "INACTIVE";
   archivedAt?: string | null;
   capacityPerDay: number | null;
+  photoUrl?: string | null;
   createdAt: string;
 }
 export interface DispatchBatch {

@@ -8,6 +8,10 @@ import { createAdminCredential } from './modules/auth/admin-auth.js';
 import type { CommunityCampaignInput } from './modules/fulfillment/community-fulfillment-service.js';
 
 class InspectableStore extends MemoryStore {
+  salesOrderReads = 0;
+  salesRefundReads = 0;
+  override async listOrders(limit: number) { this.salesOrderReads += 1; return super.listOrders(limit); }
+  override async listOrderRefunds(limit: number) { this.salesRefundReads += 1; return super.listOrderRefunds(limit); }
   businessSnapshot() {
     const value = JSON.parse(this.exportState()) as Record<string,unknown>;
     return {users:value.users,sessions:value.sessions,audit:value.audits,orders:value.orders,ledger:value.ledger};
@@ -33,7 +37,7 @@ describe('draft campaign CRUD and private consumer directory', () => {
     headers = {authorization:`Bearer ${login.json().data.accessToken}`};
     const area = await call('POST','/api/v1/admin/service-areas',{regionCode:'110101'});
     const areaId = area.json().data.id;
-    const point = await call('POST','/api/v1/admin/pickup-points',{serviceAreaId:areaId,name:'测试自提点',address:'测试社区一号',businessHours:'09:00-20:00',pickupInstructions:'请出示取货码',latitude:39.9,longitude:116.4,contactName:'测试负责人',contactPhone:'13800000002',capacityPerDay:100});
+    const point = await call('POST','/api/v1/admin/pickup-points',{serviceAreaId:areaId,name:'测试自提点',address:'测试社区一号',businessHours:'09:00-20:00',pickupInstructions:'请出示取货码',latitude:39.9,longitude:116.4,contactName:'测试负责人',contactPhone:'13800000002',capacityPerDay:100,photoUrl:'https://example.com/pickup.jpg'});
     expect(point.statusCode,point.body).toBe(201);
     pointId = point.json().data.id;
     const sku = await call('POST','/api/v1/admin/catalog/skus',{title:'测试蔬菜',category:'蔬菜',origin:'测试农场',imageUrl:null,skuName:'一份',retailPriceCents:1200,defaultSellableQuantity:20,status:'ACTIVE'});
@@ -73,6 +77,26 @@ describe('draft campaign CRUD and private consumer directory', () => {
     const hidden = await app.inject({method: 'GET', url: `/api/v1/campaigns/${campaign.id}`});
     expect(hidden.json().data.items).toEqual([]);
     expect(await state(campaign.id)).toEqual(frozen);
+  });
+  it('shares one net-sales aggregation across an admin campaign list request', async () => {
+    await create();
+    await create({ ...input, title: '第二个团期' });
+    store.salesOrderReads = 0;
+    store.salesRefundReads = 0;
+    const response = await call('GET', '/api/v1/admin/campaigns');
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json().data).toHaveLength(2);
+    expect(store.salesOrderReads).toBe(1);
+    expect(store.salesRefundReads).toBe(1);
+    const campaigns = response.json().data as Array<{ id: string }>;
+    for (const campaign of campaigns) expect((await call('POST', `/api/v1/admin/campaigns/${campaign.id}/open`)).statusCode).toBe(200);
+    store.salesOrderReads = 0;
+    store.salesRefundReads = 0;
+    const publicResponse = await app.inject({ method: 'GET', url: '/api/v1/campaigns' });
+    expect(publicResponse.statusCode, publicResponse.body).toBe(200);
+    expect(publicResponse.json().data).toHaveLength(2);
+    expect(store.salesOrderReads).toBe(1);
+    expect(store.salesRefundReads).toBe(1);
   });
   it('repairs expired draft through PATCH then opens with preserved identity and updated snapshot',async()=>{
     const campaign = await create({...input,cutoffAt:new Date(Date.now()-1000).toISOString()});
@@ -132,7 +156,7 @@ describe('draft campaign CRUD and private consumer directory', () => {
     const before = await state(c.id);
     expect((await call('DELETE',`/api/v1/admin/campaigns/${c.id}`,{version:2})).statusCode).toBe(409);
     expect(await state(c.id)).toEqual(before);
-    const secondPoint = await call('POST','/api/v1/admin/pickup-points',{serviceAreaId:input.serviceAreaId,name:'另一测试点',address:'测试社区二号',businessHours:'09:00-20:00',pickupInstructions:'请出示取货码',latitude:39.91,longitude:116.4,contactName:'测试负责人',contactPhone:'13800000002',capacityPerDay:100});
+    const secondPoint = await call('POST','/api/v1/admin/pickup-points',{serviceAreaId:input.serviceAreaId,name:'另一测试点',address:'测试社区二号',businessHours:'09:00-20:00',pickupInstructions:'请出示取货码',latitude:39.91,longitude:116.4,contactName:'测试负责人',contactPhone:'13800000002',capacityPerDay:100,photoUrl:'https://example.com/second-pickup.jpg'});
     expect((await call('PATCH',`/api/v1/admin/campaigns/${c.id}`,{...input,version:2,pickupPointId:secondPoint.json().data.id})).statusCode).toBe(409);
     expect((await store.getCampaign(c.id))).toEqual(before.campaign);
     const etaConflict = {...input,version:2,dispatchAt:new Date(Date.parse(input.estimatedArrivalStartAt)+1000).toISOString(),estimatedArrivalStartAt:input.estimatedArrivalEndAt,estimatedArrivalEndAt:input.estimatedArrivalEndAt};

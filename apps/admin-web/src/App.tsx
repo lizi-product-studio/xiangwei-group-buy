@@ -5,7 +5,7 @@ import { newestFirst, earliestFirst, refundHistory } from "./list-order.ts";
 import { OperationsQueueTable } from "./operations-queue-table.tsx";
 import { adminErrorNotice } from "./request-error.tsx";
 import { Consumers } from "./consumers-page.tsx";
-import { ProductImageField, ProductPicture } from "./ProductImageField.tsx";
+import { ProductGalleryField, ProductImageField, ProductPicture } from "./ProductImageField.tsx";
 import { getEntryBranding } from "./entry-branding.ts";
 import {
   useCallback,
@@ -829,11 +829,17 @@ function Products({
   const [categoryOpen, setCategoryOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<ProductCategory | null>(null);
   const [saving, setSaving] = useState(false);
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const imageUrlRef = useRef<string | null>(null);
+  const [imageUrls, setImageUrls] = useState<string[]>([]);
+  const [detailImageUrls, setDetailImageUrls] = useState<string[]>([]);
+  const imageUrlsRef = useRef<string[]>([]);
+  const detailImageUrlsRef = useRef<string[]>([]);
+  const [uploadingDetails, setUploadingDetails] = useState(false);
+  const detailsBusyRef = useRef(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const uploadBusyRef = useRef(false);
-  const updateImage = (value: string | null) => { imageUrlRef.current = value; setImageUrl(value); };
+  const updateImage = (value: string[]) => { imageUrlsRef.current = value; setImageUrls(value); };
+  const updateDetails = (value: string[]) => { detailImageUrlsRef.current = value; setDetailImageUrls(value); };
+  const updateDetailsBusy = (busy: boolean) => { detailsBusyRef.current = busy; setUploadingDetails(busy); };
   const updateImageBusy = (busy: boolean) => { uploadBusyRef.current = busy; setUploadingImage(busy); };
   const [savingCategory, setSavingCategory] = useState(false);
   const [categoryForm] = Form.useForm();
@@ -844,11 +850,12 @@ function Products({
     categoryId?: string | null;
     origin: string;
     skuName: string;
+    description?: string;
     retailPriceYuan: string;
     defaultSellableQuantity: number;
     status: "ACTIVE" | "INACTIVE";
   }) => {
-    if (saving || uploadBusyRef.current) return;
+    if (saving || uploadBusyRef.current || detailsBusyRef.current) return;
     setSaving(true);
     try {
       const { retailPriceYuan, ...product } = value;
@@ -856,7 +863,9 @@ function Products({
         ...(editing ? { id: editing.id, productId: editing.productId } : {}),
         ...product,
         retailPriceCents: yuanToCents(retailPriceYuan),
-        imageUrl: imageUrlRef.current,
+        imageUrl: imageUrlsRef.current[0] ?? null,
+        imageUrls: imageUrlsRef.current,
+        detailImageUrls: detailImageUrlsRef.current,
       });
       setOpen(false);
       setEditing(null);
@@ -880,6 +889,9 @@ function Products({
         categoryId: value.categoryId ?? null,
         origin: value.product.origin,
         imageUrl: value.product.imageUrl,
+        imageUrls: value.product.imageUrls ?? (value.product.imageUrl ? [value.product.imageUrl] : []),
+        detailImageUrls: value.product.detailImageUrls ?? [],
+        description: value.product.description ?? "",
         skuName: value.name,
         retailPriceCents: value.retailPriceCents,
         defaultSellableQuantity: value.defaultSellableQuantity,
@@ -939,10 +951,12 @@ function Products({
             icon={<PlusOutlined />}
             onClick={() => {
               setEditing(null);
-              updateImage(null);
+              updateImage([]);
+              updateDetails([]);
+              updateDetailsBusy(false);
               updateImageBusy(false);
               form.resetFields();
-              form.setFieldsValue({ status: "ACTIVE" });
+              form.setFieldsValue({ status: "ACTIVE", skuName: "件", description: "", defaultSellableQuantity: 0 });
               setOpen(true);
             }}
           >
@@ -970,6 +984,7 @@ function Products({
           },
           { title: "默认售价", render: (_, v) => money(v.retailPriceCents) },
           { title: "默认团期可售量", dataIndex: "defaultSellableQuantity" },
+          { title: "累计销量（件）", render: (_, v) => v.product.salesQuantity ?? 0 },
           { title: "状态", render: (_, v) => <Status value={v.status} /> },
           {
             title: "操作",
@@ -978,9 +993,12 @@ function Products({
                 <Button permission="products.edit"
                   onClick={() => {
                     setEditing(value);
-                    updateImage(value.product.imageUrl);
+                    updateImage(value.product.imageUrls ?? (value.product.imageUrl ? [value.product.imageUrl] : []));
+                    updateDetails(value.product.detailImageUrls ?? []);
+                    updateDetailsBusy(false);
                     updateImageBusy(false);
                     form.setFieldsValue({
+                      description: value.product.description ?? "",
                       title: value.product.title,
                       category: value.product.category,
                       categoryId: value.categoryId ?? null,
@@ -1012,17 +1030,21 @@ function Products({
       <Modal
         open={open}
         title={editing ? "编辑商品" : "新增商品"}
+        width={820}
         footer={null}
         onCancel={() => {
-          if (saving) return;
+          if (saving || uploadBusyRef.current || detailsBusyRef.current) return;
           setOpen(false);
           setEditing(null);
           updateImageBusy(false);
         }}
       >
         <Form form={form} layout="vertical" onFinish={(v) => void save(v)}>
-          <Form.Item label="商品主图">
-            {open && <ProductImageField key={editing?.id ?? "new"} value={imageUrl} onChange={updateImage} onBusyChange={updateImageBusy} disabled={saving} />}
+          <Form.Item label="商品图片 · 最多 5 张">
+            {open && <ProductGalleryField key={editing?.id ?? "new"} value={imageUrls} onChange={updateImage} onBusyChange={updateImageBusy} disabled={saving || uploadingDetails} />}
+          </Form.Item>
+          <Form.Item name="description" label="产品介绍" rules={[{ max: 300, message: "产品介绍最多 300 字" }]}>
+            <Input.TextArea rows={4} maxLength={300} showCount placeholder="介绍商品特点、用途或售后说明" />
           </Form.Item>
           <Form.Item
             name="title"
@@ -1065,12 +1087,13 @@ function Products({
               <Input />
             </Form.Item>
           </div>
-          <Form.Item
-            name="skuName"
-            label="销售规格（包装单位）"
-            rules={[{ required: true }]}
-          >
-            <Input placeholder="例如 500克/袋、12枚/盒" />
+          <details style={{ marginBottom: 20 }}><summary style={{ cursor: "pointer", marginBottom: 12 }}>更多设置 · 计价单位</summary>
+            <Form.Item name="skuName" label="计价单位" extra="用于订单和提货数量，原有规格保留" rules={[{ required: true }]}>
+              <Input placeholder="例如 件、500克/袋" />
+            </Form.Item>
+          </details>
+          <Form.Item label="商品详情长图 · 最多 10 张">
+            {open && <ProductGalleryField key={`detail-${editing?.id ?? "new"}`} detail value={detailImageUrls} onChange={updateDetails} onBusyChange={updateDetailsBusy} disabled={saving || uploadingImage || uploadingDetails} />}
           </Form.Item>
           <div className="form-grid">
             <Form.Item
@@ -1101,7 +1124,7 @@ function Products({
               ]}
             />
           </Form.Item>
-          <Button type="primary" htmlType="submit" loading={saving} disabled={saving || uploadingImage}>
+          <Button type="primary" htmlType="submit" loading={saving} disabled={saving || uploadingImage || uploadingDetails}>
             保存商品
           </Button>
         </Form>
@@ -3174,6 +3197,9 @@ function Areas({
     useState<PickupLocationVerificationState>("UNCONFIRMED");
   const [submitting, setSubmitting] = useState(false);
   const [pointForm] = Form.useForm();
+  const [pointImageBusy, setPointImageBusy] = useState(false);
+  const pointImageBusyRef = useRef(false);
+  const updatePointImageBusy = (busy: boolean) => { pointImageBusyRef.current = busy; setPointImageBusy(busy); };
   const pointLatitude = Form.useWatch("latitude", pointForm);
   const pointLongitude = Form.useWatch("longitude", pointForm);
   const selectedServiceAreaId = Form.useWatch("serviceAreaId", pointForm) as
@@ -3201,6 +3227,7 @@ function Areas({
     setEditingPoint(null);
     setLocationChangeRequired(true);
     setLocationVerification("UNCONFIRMED");
+    updatePointImageBusy(false);
     pointForm.resetFields();
     pointForm.setFieldsValue({
       businessHours: "每日 09:00–20:00",
@@ -3209,6 +3236,7 @@ function Areas({
     setPointOpen(true);
   };
   const editablePointFields = (point: PickupPoint) => ({
+    photoUrl: point.photoUrl ?? null,
     serviceAreaId: point.serviceAreaId,
     name: point.name,
     address: point.address,
@@ -3221,6 +3249,7 @@ function Areas({
   });
   const startEditPoint = (point: PickupPoint) => {
     setEditingPoint(point);
+    updatePointImageBusy(false);
     setLocationChangeRequired(false);
     setLocationVerification("CONFIRMED");
     pointForm.setFieldsValue(editablePointFields(point));
@@ -3301,7 +3330,7 @@ function Areas({
         dataSource={points.filter(v=>(pointStatus === "ALL" || (v.archivedAt ? "ARCHIVED" : v.status) === pointStatus) && matchesKeyword(pointQuery,v.name,v.address,v.contactName,areas.find(area=>area.id===v.serviceAreaId)?.name))}
         locale={{ emptyText: "暂无自提点，请先选择服务区域并新增" }}
         columns={[
-          { title: "名称", dataIndex: "name" },
+          { title: "名称", render: (_, point) => <Space><ProductPicture src={point.photoUrl ?? null} label="自提点照片" /><span>{point.name}</span></Space> },
           { title: "地址", dataIndex: "address" },
           { title: "营业时间", dataIndex: "businessHours", width: 170 },
           {
@@ -3441,7 +3470,7 @@ function Areas({
             <Button onClick={() => setPointOpen(false)}>取消</Button>
             <Button type="primary" htmlType="submit" form="pickup-point-form"
               loading={submitting}
-              disabled={submitting || isPickupLocationSubmissionBlocked(locationChangeRequired, locationVerification)}>
+              disabled={submitting || pointImageBusy || isPickupLocationSubmissionBlocked(locationChangeRequired, locationVerification)}>
               保存
             </Button>
           </div>
@@ -3500,6 +3529,7 @@ function Areas({
               setLocationVerification("UNCONFIRMED");
           }}
           onFinish={(v) => {
+            if (pointImageBusyRef.current || submitting) return;
             if (
               isPickupLocationSubmissionBlocked(
                 locationChangeRequired,
@@ -3589,6 +3619,10 @@ function Areas({
             void savePoint();
           }}
         >
+          <Form.Item name="photoUrl" label="自提点照片" rules={editingPoint ? [] : [{ required: true, message: "请上传真实自提点照片" }]} extra="上传真实门头或领取位置，帮助用户找准地点">
+            <ProductImageField disabled={submitting} purpose="自提点照片" required={!editingPoint} onBusyChange={updatePointImageBusy} value={pointForm.getFieldValue("photoUrl") ?? null} onChange={url => pointForm.setFieldValue("photoUrl", url)} />
+          </Form.Item>
+          {pointImageBusy && <Typography.Paragraph type="secondary">照片正在上传，请稍候再保存。</Typography.Paragraph>}
           {areas.length > 1 ? (
             <Form.Item
               name="serviceAreaId"
@@ -4459,6 +4493,7 @@ function Service({
   const canAcceptQuality = can("service.accept");
   const canDecideQuality = can("service.decision");
   const canReviewCancellation = can("cancellations.review");
+  const [serviceTab, setServiceTab] = useState("quality");
   const [qualityAction, setQualityAction] = useState<{
     value: Awaited<ReturnType<typeof api.quality>>[number];
     type: "accept" | "approve" | "reject";
@@ -4513,7 +4548,7 @@ function Service({
     <>
       <PageTitle
         title={view === "cancellations" ? "取消申请" : "售后与异常"}
-        subtitle="客服受理、运营决定、财务退款，职责分离"
+        subtitle={view === "cancellations" ? "查看并审核用户的取消申请" : "按问题类型处理售后，退款执行请前往财务退款待办"}
       />
       {loading && <Alert type="info" showIcon message="正在刷新售后队列" />}
       {error && (
@@ -4525,8 +4560,18 @@ function Service({
           action={<Button size="small" onClick={() => void reload().catch(() => undefined)}>重试</Button>}
         />
       )}
-      {view !== "cancellations" && <>
-      <Typography.Title level={4}>品质售后</Typography.Title>
+      {view !== "cancellations" && <Tabs
+        aria-label="售后问题类型"
+        activeKey={serviceTab}
+        onChange={setServiceTab}
+        items={[
+          { key: "quality", label: "品质售后" },
+          { key: "differences", label: "履约差异" },
+          ...(can("service.pickup-view") ? [{ key: "pickup", label: "逾期领取" }] : []),
+        ]}
+      />}
+      {view !== "cancellations" && <section aria-label="品质售后列表" hidden={serviceTab !== "quality"}>
+      <Typography.Paragraph type="secondary">受理商品质量问题，查看审核结果与退款进度。</Typography.Paragraph>
       <OperationsQueueTable
         rowKey="id"
         loadPage={api.qualityPage} refreshToken={quality} statuses={["REGISTERED", "ACCEPTED", "REFUNDING", "REJECTED", "RESOLVED"]}
@@ -4578,7 +4623,7 @@ function Service({
           },
         ]}
       />
-      </>}
+      </section>}
       {view === "cancellations" && <>
       <Typography.Title level={4}>取消申请</Typography.Title>
       <OperationsQueueTable
@@ -4614,8 +4659,8 @@ function Service({
         ]}
       />
       </>}
-      {view !== "cancellations" && <>
-      <Typography.Title level={4}>履约差异</Typography.Title>
+      {view !== "cancellations" && <section aria-label="履约差异列表" hidden={serviceTab !== "differences"}>
+      <Typography.Paragraph type="secondary">查看少货、破损等到货差异及处理进度；登记和确认差异请前往“发货管理—到货异常处理”。</Typography.Paragraph>
       <OperationsQueueTable
         rowKey="id"
         loadPage={api.exceptionsPage} refreshToken={exceptions} statuses={["REGISTERED", "REFUND_CONFIRMED", "REFUND_PROCESSING", "RESOLVED"]}
@@ -4635,8 +4680,10 @@ function Service({
           { title: "运营确认说明", dataIndex: "resolutionNote" },
         ]}
       />
-      <PickupWindowQueue values={pickupWindows} roles={roles} reload={reload} />
-      </>}
+      </section>}
+      {view !== "cancellations" && can("service.pickup-view") && <section aria-label="逾期领取列表" hidden={serviceTab !== "pickup"}>
+        <PickupWindowQueue values={pickupWindows} roles={roles} reload={reload} />
+      </section>}
       <Modal
         open={Boolean(qualityAction && !qualityAction.note)}
         title={qualityAction ? `填写${qualityActionLabel(qualityAction.type)}说明` : ""}

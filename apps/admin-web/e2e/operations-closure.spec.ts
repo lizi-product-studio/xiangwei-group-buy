@@ -1,3 +1,4 @@
+import { fixturePhoto } from './media-fixture';
 import { expect, test, type APIRequestContext } from "@playwright/test";
 
 const apiBase = process.env.E2E_API_BASE_URL ?? "http://127.0.0.1:3101";
@@ -64,7 +65,8 @@ test("超管通过网页复核运输、发车、紧急纠正、订单详情和�
     request,
     "/api/v1/admin/pickup-points",
     {
-      serviceAreaId: area.id,
+      photoUrl: await fixturePhoto(request),
+    serviceAreaId: area.id,
       name: `网页验收点 ${suffix}`,
       address: "东城区社区服务站 99 号",
       businessHours: "09:00-20:00",

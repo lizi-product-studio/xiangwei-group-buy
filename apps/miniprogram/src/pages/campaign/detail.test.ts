@@ -45,7 +45,7 @@ vi.mock("../../utils/cart", () => ({
 describe("campaign detail loading", () => {
   beforeEach(() => {
     vi.resetModules();
-    vi.stubGlobal("getApp", () => ({ globalData: {} }));
+    vi.stubGlobal("getApp", () => ({ globalData: { apiBaseUrl: "https://api.example.test" } }));
     vi.stubGlobal("wx", {
       getStorageSync: vi.fn(),
       setStorageSync: vi.fn(),
@@ -80,7 +80,11 @@ describe("campaign detail loading", () => {
           category: "蔬菜",
           origin: "本地",
           skuName: "一份",
-          imageUrl: null,
+          imageUrl: "/api/v1/product-images/one.webp",
+          imageUrls: ["/api/v1/product-images/one.webp", "/api/v1/product-images/two.webp"],
+          description: "新鲜直采\n售后说明",
+          detailImageUrls: ["/api/v1/product-images/detail.webp"],
+          salesQuantity: 23,
           unitPriceCents: 100,
           stock: 10,
           soldQuantity: 0,
@@ -113,6 +117,9 @@ describe("campaign detail loading", () => {
     expect(definition.data.campaign).toMatchObject({ id: campaign.id });
     expect(definition.data.error).toBe("");
     expect(definition.data.loading).toBe(false);
+    expect(definition.data.gallery).toEqual(["https://api.example.test/api/v1/product-images/one.webp", "https://api.example.test/api/v1/product-images/two.webp"]);
+    expect(definition.data.detailImages).toEqual([{ url: "https://api.example.test/api/v1/product-images/detail.webp", failed: false }]);
+    expect(definition.data.product).toMatchObject({ salesQuantity: 23, description: "新鲜直采\n售后说明" });
 
     first.reject(new Error("GET /api/v1/campaigns/campaign-1 failed"));
     await Promise.resolve();

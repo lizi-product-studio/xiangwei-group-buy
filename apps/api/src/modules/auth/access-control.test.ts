@@ -1,4 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import sharp from "sharp";
 import type { FastifyRequest, FastifyInstance } from "fastify";
 import { buildApp } from "../../app.js";
 import { loadConfig } from "../../config.js";
@@ -80,6 +84,28 @@ describe("configurable access roles",()=>{
       expect(response.statusCode,identity).toBe(200);expect(response.json().data.permissions.length).toBeGreaterThan(0);
     }
     const empty=new SnapshotStore(false);empty.restore('{"accessRoles":[]}');expect(await empty.getAccessRole("OPERATOR")).not.toBeNull();
+  });
+  it("allows detail-image uploads with either product create or edit and denies roles without either grant",async()=>{
+    const store=new MemoryStore(false);await account(store,"super","SUPER_ADMIN");const service=new RoleService(store);
+    const createRole=await service.save(null,{...roleInput,name:"商品新建",permissions:["products.create"]},superActor,"create");
+    const editRole=await service.save(null,{...roleInput,name:"商品编辑",permissions:["products.edit"]},superActor,"edit");
+    const viewRole=await service.save(null,{...roleInput,name:"仅查看商品",permissions:["products.view"]},superActor,"view");
+    const createHeaders=await account(store,"product-create","OPERATOR",createRole.id);
+    const editHeaders=await account(store,"product-edit","OPERATOR",editRole.id);
+    const viewHeaders=await account(store,"product-view","OPERATOR",viewRole.id);
+    const directory=await mkdtemp(join(tmpdir(),"detail-image-rbac-"));
+    try {
+      app=await buildApp({store,config:loadConfig({NODE_ENV:"test",PRODUCT_IMAGE_DIR:directory})});
+      const payload=await sharp({create:{width:2,height:2,channels:3,background:"red"}}).png().toBuffer();
+      const request=(headers:{authorization:string})=>app!.inject({method:"POST",url:"/api/v1/admin/product-detail-images",headers:{...headers,"content-type":"image/png"},payload});
+      expect((await request(createHeaders)).statusCode).toBe(201);
+      expect((await request(editHeaders)).statusCode).toBe(201);
+      expect((await request(viewHeaders)).statusCode).toBe(403);
+      expect(ROUTE_PERMISSIONS["POST /api/v1/admin/product-detail-images"]).toEqual(["products.create","products.edit"]);
+    } finally {
+      await app?.close();app=undefined;
+      await rm(directory,{recursive:true,force:true});
+    }
   });
   it("rolls back role edits and session revision together on audit failure",async()=>{
     class FailingAudit extends MemoryStore { fail=false;override async saveAuditLog(...args:Parameters<MemoryStore["saveAuditLog"]>){if(this.fail)throw new Error("audit unavailable");return super.saveAuditLog(...args);} }

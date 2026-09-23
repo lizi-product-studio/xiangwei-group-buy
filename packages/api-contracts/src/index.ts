@@ -89,6 +89,9 @@ export const catalogSkuSchema = z.object({
   category: z.string().trim().min(2).max(40),
   origin: z.string().trim().min(2).max(160),
   imageUrl: z.string().trim().max(2048).nullable().default(null),
+  imageUrls: z.array(z.string().trim().min(1).max(2048)).max(5).default([]),
+  description: z.string().trim().max(300).default(""),
+  detailImageUrls: z.array(z.string().trim().min(1).max(2048)).max(10).default([]),
   skuName: z.string().trim().min(1).max(160),
   retailPriceCents: z.int().min(1),
   defaultSellableQuantity: z.int().min(0).max(10_000_000).default(0),
@@ -295,6 +298,7 @@ export const createPickupPointSchema = z.object({
     )
     .default(""),
   capacityPerDay: z.int().min(1).max(1_000_000).nullable().default(null),
+  photoUrl: z.string().trim().min(1).max(2048),
   /**
    * A duplicate is only a review prompt.  The explicit acknowledgement is
    * intentionally carried on the write request rather than persisted as a
@@ -345,6 +349,7 @@ export const batchCreatePickupPointsSchema = z.object({
           )
           .default(""),
         capacityPerDay: z.int().min(1).max(1_000_000).nullable().default(null),
+        photoUrl: z.string().trim().min(1).max(2048),
       }),
     )
     .min(1)

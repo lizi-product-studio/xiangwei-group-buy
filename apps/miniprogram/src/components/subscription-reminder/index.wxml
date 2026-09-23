@@ -1,0 +1,11 @@
+<view class="reminder {{complete ? 'reminder--complete' : ''}}">
+  <view class="reminder__main"><view class="reminder__copy"><text class="reminder__title">{{complete ? '本次订单提醒已订阅' : '别错过到货和领取提醒'}}</text><text class="reminder__note">{{copy}}</text></view></view>
+  <view wx:if="{{error}}" class="reminder__error">{{error}}</view>
+  <view class="reminder__actions">
+    <button wx:if="{{!complete}}" class="reminder__button" loading="{{busy || loading}}" disabled="{{busy || loading || !configured}}" bindtap="enable">{{!ready && loggedIn && !loading ? '重新加载设置' : label}}</button>
+    <button wx:if="{{complete && !management}}" class="reminder__link" bindtap="openMessages">查看或管理 ›</button>
+    <button wx:if="{{management && accepted.length}}" class="reminder__link" disabled="{{busy || loading}}" bindtap="closeReminders">关闭平台提醒</button>
+    <button wx:if="{{management}}" class="reminder__link" bindtap="openSettings">微信订阅设置</button>
+  </view>
+  <text wx:if="{{management}}" class="reminder__note reminder__footnote">关闭平台提醒后不再发送微信提醒，站内消息保留；微信侧授权可在“微信订阅设置”管理。</text>
+</view>

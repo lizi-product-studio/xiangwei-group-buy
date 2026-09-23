@@ -1,3 +1,5 @@
+import { uploadPointPhoto } from './media-fixture';
+import { fixturePhoto } from './media-fixture';
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
 const apiBase = process.env.E2E_API_BASE_URL ?? "http://127.0.0.1:3101";
@@ -126,7 +128,8 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
     request,
     "/api/v1/admin/pickup-points",
     {
-      serviceAreaId: area.id,
+      photoUrl: await fixturePhoto(request),
+    serviceAreaId: area.id,
       name: `E2E 社区点 ${suffix}`,
       address: "东城区社区服务站 1 号",
       businessHours: "每日 09:00–20:00",
@@ -185,7 +188,8 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   await page.getByLabel("分类").click();
   await page.getByText(`蔬菜 ${suffix}`, { exact: true }).click();
   await page.getByLabel("产地").fill("本地农场");
-  await page.getByLabel("销售规格（包装单位）").fill("一份");
+  await page.getByText("更多设置 · 计价单位", { exact: true }).click();
+  await page.getByLabel("计价单位", { exact: true }).fill("一份");
   await page.getByLabel("售价（元）").fill("19.999");
   await page.getByLabel("默认团期可售量").fill("100");
   await page.getByRole("button", { name: "保存商品" }).click();
@@ -203,6 +207,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   const reviewPointName = `E2E 复核点 ${suffix}`;
   await page.getByRole("menuitem", { name: "自提点管理", exact: true }).click();
   await page.getByRole("button", { name: "新增自提点" }).click();
+  await uploadPointPhoto(page);
   const pointAreaSelect = page.getByLabel("服务区域");
   if (await pointAreaSelect.count()) {
     await pointAreaSelect.click();
@@ -294,6 +299,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
 
   const duplicatePointName = `${reviewPointName}（重复复核）`;
   await page.getByRole("button", { name: "新增自提点" }).click();
+  await uploadPointPhoto(page);
   const duplicateDialog = page.getByRole("dialog", { name: "新增自提点" });
   await expect(duplicateDialog).toBeVisible();
   const duplicateAreaSelect = duplicateDialog.getByLabel("服务区域");
@@ -815,6 +821,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   await page.unroute(allocationConfirmRoute);
   await page.getByText("售后与异常", { exact: true }).click();
   await expect(page.getByRole("heading", { name: "售后与异常" })).toBeVisible();
+  await page.getByRole("tab", { name: "逾期领取", exact: true }).click();
   await page.setViewportSize({ width: 375, height: 800 });
   await expect
     .poll(() =>

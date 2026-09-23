@@ -41,6 +41,10 @@ interface CampaignDto {
     skuName: string;
     origin: string;
     imageUrl: string | null;
+    imageUrls?: string[];
+    description?: string;
+    detailImageUrls?: string[];
+    salesQuantity?: number;
     unitPriceCents: number;
     stock: number;
     soldQuantity: number;
@@ -188,6 +192,7 @@ interface ServiceAreaDto {
 }
 
 interface PickupPointDto {
+  photoUrl?: string | null;
   id: string;
   serviceAreaId: string;
   name: string;

@@ -17,6 +17,7 @@ interface CampaignView extends CampaignDto {
   origin: string;
   priceText: string;
   soldQuantity: number;
+  salesQuantity: number;
   category: string;
   imageUrl: string | null;
   arrivalText: string;
@@ -70,7 +71,7 @@ Page({
         .filter((campaign) => isCampaignPurchasable(campaign) && areaContext.selected && selectedPoint && campaign.serviceAreaId === areaContext.selected.id && campaign.deliveryPlan?.pickupPointId === selectedPoint.id)
         .flatMap((campaign) => campaign.items.map((product) => ({
           ...campaign, renderKey: `${campaign.id}:${product.skuId}`, skuId: product.skuId, productTitle: product.title, skuName: product.skuName, category: product.category, unitPriceCents: product.unitPriceCents, stock: product.stock,
-          imageUrl: product.imageUrl, origin: product.origin, priceText: formatMoney(product.unitPriceCents), soldQuantity: product.soldQuantity,
+          imageUrl: product.imageUrl, origin: product.origin, priceText: formatMoney(product.unitPriceCents), soldQuantity: product.soldQuantity, salesQuantity: product.salesQuantity ?? 0,
           cutoffText: formatChinaDateTime(campaign.cutoffAt, true), dispatchText: formatChinaDateTime(campaign.dispatchAt),
           arrivalText: estimatedArrivalText(campaign) ?? '到货时间待确认',
         })));

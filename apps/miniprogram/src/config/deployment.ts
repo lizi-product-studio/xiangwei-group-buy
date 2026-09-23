@@ -82,6 +82,15 @@ const remoteDevelop: MiniProgramDeployment = {
   subscriptionTemplates: [],
   demoLoginEnabled: false,
 };
+// DevTools uses the same application and API as the generated remote target.
+// Reuse its approved mapping, never placeholder IDs or a different API's map.
+const remoteTemplateSource = [releaseDeployments.release, releaseDeployments.trial].find((candidate) =>
+  candidate?.authMode === 'wechat' &&
+  candidate.apiBaseUrl.replace(/\/$/, '') === remoteDevelop.apiBaseUrl &&
+  validSubscriptionMap(candidate.subscriptionTemplates) &&
+  candidate.subscriptionTemplates.every((item) => !/(?:example|approved-(?:trial|release)-)/i.test(item.templateId)),
+);
+remoteDevelop.subscriptionTemplates = remoteTemplateSource?.subscriptionTemplates ?? [];
 const localDevelop: MiniProgramDeployment = {
   apiBaseUrl: 'http://127.0.0.1:3100',
   authMode: 'demo',

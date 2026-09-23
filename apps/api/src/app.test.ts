@@ -147,6 +147,7 @@ describe("single community application surface", () => {
         contactName: "张店长",
         contactPhone: "13800000000",
         capacityPerDay: null,
+        photoUrl: "https://example.com/community-pickup.jpg",
       },
     });
     expect(point.statusCode).toBe(201);
@@ -155,8 +156,8 @@ describe("single community application surface", () => {
       businessHours: "09:00-20:00",
       pickupInstructions: "请从东门进入并出示核销码",
       latitude: 39.9042,
-      longitude: 116.4074,
-      contactName: "张店长",
+        longitude: 116.4074,
+        contactName: "张店长",
       contactPhone: "13800000000",
     });
     const pointWithoutManager = await app.inject({
@@ -172,6 +173,7 @@ describe("single community application surface", () => {
         latitude: 39.9042,
         longitude: 116.4074,
         capacityPerDay: null,
+        photoUrl: "https://example.com/unassigned-pickup.jpg",
         confirmDuplicate: true,
       },
     });
@@ -537,6 +539,7 @@ describe("single community application surface", () => {
         contactName: "",
         contactPhone: "",
         capacityPerDay: null,
+        photoUrl: "https://example.com/unavailable-pickup.jpg",
       },
     });
     expect(response.statusCode, response.body).toBe(503);
@@ -559,6 +562,7 @@ describe("single community application surface", () => {
         contactName: "",
         contactPhone: "",
         capacityPerDay: null,
+        photoUrl: "https://example.com/unmappable-pickup.jpg",
       },
     });
     expect(unmappable.statusCode, unmappable.body).toBe(422);
@@ -589,6 +593,7 @@ describe("single community application surface", () => {
         contactName: "",
         contactPhone: "",
         capacityPerDay: null,
+        photoUrl: "https://example.com/mismatch-pickup.jpg",
       },
     });
     expect(mismatch.statusCode, mismatch.body).toBe(409);
@@ -672,6 +677,7 @@ describe("single community application surface", () => {
         contactName: "",
         contactPhone: "",
         capacityPerDay: null,
+        photoUrl: "https://example.com/location-pickup.jpg",
       },
     });
     expect(point.statusCode, point.body).toBe(201);
@@ -747,6 +753,7 @@ describe("single community application surface", () => {
       contactName: "",
       contactPhone: "",
       capacityPerDay: null,
+      photoUrl: "https://example.com/duplicate-pickup.jpg",
     };
     const first = await app.inject({
       method: "POST",

@@ -20,6 +20,17 @@ function loadGeneratedDeployment(generated) {
 }
 
 describe('generated environment configuration', () => {
+  it('reuses approved same-target remote templates in DevTools while local stays isolated', () => {
+    const valid = { apiBaseUrl: 'https://liziqi.icu', authMode: 'wechat', subscriptionTemplates: fiveTemplates };
+    const config = loadGeneratedDeployment({ deployments: { trial: valid, release: valid } });
+    expect(config.resolveDeployment('develop').subscriptionTemplates).toEqual(fiveTemplates);
+    expect(config.resolveDeployment('local').subscriptionTemplates).toEqual([]);
+    for (const invalid of [
+      { ...valid, apiBaseUrl: 'https://another.test' },
+      { ...valid, subscriptionTemplates: fiveTemplates.slice(1) },
+      { ...valid, subscriptionTemplates: fiveTemplates.map(item => ({ ...item, templateId: `example-${item.templateId}` })) },
+    ]) expect(loadGeneratedDeployment({ deployments: { trial: invalid } }).resolveDeployment('develop').subscriptionTemplates).toEqual([]);
+  });
   it('selects explicit local and remote overrides independently of release metadata', () => {
     expect(loadGeneratedDeployment({ development: { mode: 'local' } }).resolveDeployment('develop')).toMatchObject({
       apiBaseUrl: 'http://127.0.0.1:3100', authMode: 'demo', demoLoginEnabled: true,

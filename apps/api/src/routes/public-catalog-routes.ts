@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { identifierSchema } from '@hometown/api-contracts';
 import type { Campaign, DeliveryPlan, PickupPoint, ServiceArea } from '../modules/core/types.js';
+import type { NetSalesSnapshot } from '../modules/catalog/catalog-sales.js';
 
 /** Read-only consumer catalogue routes. Serialisers stay injected so this
  * route module cannot acquire operations-only fields by reaching into app.ts. */
@@ -10,10 +11,14 @@ export function registerPublicCatalogRoutes(app: FastifyInstance, dependencies: 
   listServiceAreas(): Promise<ServiceArea[]>;
   listPickupPoints(serviceAreaId?: string): Promise<PickupPoint[]>;
   getDeliveryPlanByCampaign(campaignId: string): Promise<DeliveryPlan | null>;
-  withCampaignItems(campaign: Campaign): Promise<unknown>;
+  getSalesSnapshot(): Promise<NetSalesSnapshot>;
+  withCampaignItems(campaign: Campaign, sales: NetSalesSnapshot): Promise<unknown>;
   publicDeliveryPlan(plan: DeliveryPlan | null): unknown;
 }): void {
-  app.get('/api/v1/campaigns', async () => dependencies.readSnapshot(async () => ({ data: await Promise.all((await dependencies.campaigns.listPublic()).map(dependencies.withCampaignItems)) })));
+  app.get('/api/v1/campaigns', async () => dependencies.readSnapshot(async () => {
+    const [campaigns, sales] = await Promise.all([dependencies.campaigns.listPublic(), dependencies.getSalesSnapshot()]);
+    return { data: await Promise.all(campaigns.map((campaign) => dependencies.withCampaignItems(campaign, sales))) };
+  }));
   app.get('/api/v1/service-areas', async () => dependencies.readSnapshot(async () => {
     const [areas, points] = await Promise.all([
       dependencies.listServiceAreas(),
@@ -39,7 +44,8 @@ export function registerPublicCatalogRoutes(app: FastifyInstance, dependencies: 
   });
   app.get('/api/v1/campaigns/:id', async (request) => dependencies.readSnapshot(async () => {
     const id = identifierSchema.parse((request.params as { id: string }).id);
-    return { data: await dependencies.withCampaignItems(await dependencies.campaigns.getPublic(id)) };
+    const [campaign, sales] = await Promise.all([dependencies.campaigns.getPublic(id), dependencies.getSalesSnapshot()]);
+    return { data: await dependencies.withCampaignItems(campaign, sales) };
   }));
   app.get('/api/v1/delivery-plans/:campaignId', async (request) => dependencies.readSnapshot(async () => {
     const campaignId = identifierSchema.parse((request.params as { campaignId: string }).campaignId);
