@@ -1,4 +1,4 @@
-import { Alert, Button, Descriptions, Table, Tooltip, Typography } from "antd";
+import { Alert, Button, Descriptions, Spin, Table, Tooltip, Typography } from "antd";
 import type { AuditLog, InternalStaff } from "./api.ts";
 import { formatAuditTime, resolveAuditActor, shortAuditId } from "./audit-display.ts";
 import { displayLabel } from "./labels.ts";
@@ -31,14 +31,14 @@ export function AuditPage({
         <div>
           <Typography.Title level={2}>审计记录</Typography.Title>
           <Typography.Paragraph type="secondary">
-            仅显示安全脱敏后的变更快照，可按 requestId 追溯操作。
+            仅显示经过安全处理的变更快照，可按 requestId 追溯操作。
           </Typography.Paragraph>
         </div>
         <Button loading={loading} onClick={() => void reload().catch(() => undefined)}>
           刷新记录
         </Button>
       </header>
-      {loading && <Alert type="info" showIcon message="正在刷新审计记录" />}
+      {loading && <div className="neutral-loading-strip" role="status" aria-label="正在刷新审计记录"><Spin size="small" /></div>}
       {error && (
         <Alert
           type="error"

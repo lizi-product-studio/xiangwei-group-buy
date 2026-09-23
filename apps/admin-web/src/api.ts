@@ -169,6 +169,10 @@ export interface Order {
   deliveryPlanId: string;
   status: string;
   totalCents: number;
+  consumerNumber?: number | null;
+  maskedPhone?: string | null;
+  phoneNumber?: string;
+  customerName?: string | null;
   paidAt: string | null;
   expiresAt?: string;
   createdAt?: string;
@@ -776,6 +780,35 @@ async function request<T>(path: string, init: RequestInit = {}, includeEnvelope 
   const body = (await response.json()) as Envelope<T>;
   return includeEnvelope ? body as T : body.data;
 }
+async function requestBlob(path: string): Promise<{ blob: Blob; rowCount: number }> {
+  let response: Response;
+  try {
+    response = await fetch(path, { headers: headers(false) });
+  } catch (error) {
+    throw new AdminApiError("暂时无法连接后台服务，请稍后重试；持续失败请联系超级管理员", {
+      code: "NETWORK_UNAVAILABLE",
+      details: error,
+    });
+  }
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as ErrorEnvelope;
+    if (response.status === 401) {
+      auth.clear();
+      window.dispatchEvent(new Event("admin-auth-expired"));
+    }
+    throw new AdminApiError(body.message ?? "后台请求未完成", {
+      ...(body.code ? { code: body.code } : {}),
+      ...(body.requestId ? { requestId: body.requestId } : {}),
+      ...(body.details !== undefined ? { details: body.details } : {}),
+      statusCode: response.status,
+    });
+  }
+  const rowCountHeader = response.headers.get("x-exported-row-count");
+  const rowCount = rowCountHeader === null ? Number.NaN : Number(rowCountHeader);
+  if (!Number.isSafeInteger(rowCount) || rowCount < 0)
+    throw new AdminApiError("导出结果缺少有效的记录数，请重试", { code: "INVALID_RESPONSE" });
+  return { blob: await response.blob(), rowCount };
+}
 const post = <T>(path: string, body?: unknown) =>
   request<T>(path, {
     method: "POST",
@@ -964,7 +997,8 @@ export const api = {
     status: "ACTIVE" | "INACTIVE";
   }) => post<CatalogSku>("/api/v1/admin/catalog/skus", body),
   consumers: (query: {query:string;page:number;pageSize:number}) => request<{items:ConsumerSummary[];total:number;page:number;pageSize:number}>(`/api/v1/admin/consumers?${new URLSearchParams({query:query.query,page:String(query.page),pageSize:String(query.pageSize)})}`),
-  consumerDetail: (id:string) => request<ConsumerDetail>(`/api/v1/admin/consumers/${encodeURIComponent(id)}`),
+  consumerDetail: (id:number) => request<ConsumerDetail>(`/api/v1/admin/consumers/${encodeURIComponent(String(id))}`),
+  consumerPhone: (id:number) => request<{phoneNumber:string}>(`/api/v1/admin/consumers/${encodeURIComponent(String(id))}/phone`),
   campaigns: () => request<Campaign[]>("/api/v1/admin/campaigns"),
   createCampaign: (body: CampaignInput) => post<Campaign>("/api/v1/admin/campaigns", body),
   updateCampaign: (id: string, body: CampaignInput & {version: number}) => patch<Campaign>(`/api/v1/admin/campaigns/${id}`, body),
@@ -995,6 +1029,48 @@ export const api = {
     request<Order[]>(
       `/api/v1/admin/orders${orderNo ? `?orderNo=${encodeURIComponent(orderNo)}` : ""}`,
     ),
+  ordersSearch: (query: {
+    keyword: string;
+    status?: string;
+    campaignId?: string;
+    pickupPointId?: string;
+    dateType: "CREATED_AT" | "PAID_AT";
+    from?: string;
+    to?: string;
+    page: number;
+    pageSize: number;
+  }) => request<{items: Order[]; total: number; page: number; pageSize: number}>(
+    `/api/v1/admin/orders/search?${new URLSearchParams({
+      keyword: query.keyword,
+      dateType: query.dateType,
+      page: String(query.page),
+      pageSize: String(query.pageSize),
+      ...(query.status ? {status: query.status} : {}),
+      ...(query.campaignId ? {campaignId: query.campaignId} : {}),
+      ...(query.pickupPointId ? {pickupPointId: query.pickupPointId} : {}),
+      ...(query.from ? {from: query.from} : {}),
+      ...(query.to ? {to: query.to} : {}),
+    })}`,
+  ),
+  exportOrders: (query: {
+    keyword: string;
+    status?: string;
+    campaignId?: string;
+    pickupPointId?: string;
+    dateType: "CREATED_AT" | "PAID_AT";
+    from?: string;
+    to?: string;
+  }) => requestBlob(
+    `/api/v1/admin/orders/export?${new URLSearchParams({
+      keyword: query.keyword,
+      dateType: query.dateType,
+      ...(query.status ? {status: query.status} : {}),
+      ...(query.campaignId ? {campaignId: query.campaignId} : {}),
+      ...(query.pickupPointId ? {pickupPointId: query.pickupPointId} : {}),
+      ...(query.from ? {from: query.from} : {}),
+      ...(query.to ? {to: query.to} : {}),
+    })}`,
+  ),
   plans: () => request<DeliveryPlan[]>("/api/v1/admin/delivery-plans"),
   bookVehicle: (
     id: string,

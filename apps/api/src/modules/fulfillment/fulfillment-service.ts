@@ -47,6 +47,14 @@ export class FulfillmentService {
       const campaign = await store.getCampaignForUpdate(campaignId);
       if (!campaign)
         throw new BusinessError("RESOURCE_NOT_FOUND", "团期不存在", 404);
+      if (["CANCELLED", "COMPLETED"].includes(campaign.status))
+        throw new BusinessError(
+          "INVALID_STATE_TRANSITION",
+          campaign.status === "CANCELLED"
+            ? "团期已取消，不能创建或复用发车批次"
+            : "团期已完成，不能创建或复用发车批次",
+          409,
+        );
       const existing = (await store.listDispatchBatches()).find(
         (value) => value.campaignId === campaignId,
       );
@@ -93,6 +101,17 @@ export class FulfillmentService {
   public async dispatch(id: string): Promise<DispatchBatch> {
     return this.store.transaction(async (store) => {
       const batch = await this.batch(id, store);
+      const campaign = await store.getCampaignForUpdate(batch.campaignId);
+      if (!campaign)
+        throw new BusinessError("RESOURCE_NOT_FOUND", "团期不存在", 404);
+      if (["CANCELLED", "COMPLETED"].includes(campaign.status))
+        throw new BusinessError(
+          "INVALID_STATE_TRANSITION",
+          campaign.status === "CANCELLED"
+            ? "团期已取消，不能发车"
+            : "团期已完成，不能发车",
+          409,
+        );
       if (batch.status === "IN_TRANSIT") return batch;
       if (batch.status !== "DRAFT")
         throw new BusinessError(

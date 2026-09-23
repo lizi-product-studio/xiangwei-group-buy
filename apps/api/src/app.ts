@@ -59,6 +59,10 @@ import {
   type LoginRateLimiter,
 } from "./modules/auth/login-rate-limiter.js";
 import { StaffService } from "./modules/auth/staff-service.js";
+import {
+  ensureConsumerPublicNumbers,
+  findConsumerByPublicNumber,
+} from "./modules/customers/consumer-directory-service.js";
 import { runWithInternalWriteActor } from "./modules/auth/internal-write-context.js";
 import {
   AuthService,
@@ -1601,7 +1605,7 @@ export async function buildApp(
     return reply.status(existing ? 200 : 201).send({ data: value });
   });
   const consumerSummary = async (user: NonNullable<Awaited<ReturnType<CommerceStore["getUser"]>>>) => ({
-    id: user.id,
+    id: user.consumerNumber!,
     maskedPhone: user.phoneNumber ? maskPhone(user.phoneNumber) : null,
     status: user.status,
     createdAt: user.createdAt,
@@ -1612,16 +1616,50 @@ export async function buildApp(
     requireActor(request, ["SUPER_ADMIN", "CUSTOMER_SERVICE"]);
     const query = z.object({query:z.string().trim().max(80).default(""),page:z.coerce.number().int().min(1).max(100000).default(1),pageSize:z.coerce.number().int().min(1).max(100).default(20)}).parse(request.query);
     const needle = query.query.toLowerCase();
-    const users = (await store.listConsumerUsers()).filter(user => !needle || user.id.toLowerCase().includes(needle) || (user.phoneNumber ?? "").includes(needle)).sort((a,b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id));
+    const users = (await ensureConsumerPublicNumbers(store)).filter(user => !needle || String(user.consumerNumber).includes(needle) || (user.displayName ?? "").toLowerCase().includes(needle) || (user.phoneNumber ?? "").includes(needle)).sort((a,b) => (a.consumerNumber ?? 0) - (b.consumerNumber ?? 0));
     return {data:{items:await Promise.all(users.slice((query.page-1)*query.pageSize,query.page*query.pageSize).map(consumerSummary)),total:users.length,page:query.page,pageSize:query.pageSize}};
   });
   app.get("/api/v1/admin/consumers/:id", async (request) => {
-    requireActor(request, ["SUPER_ADMIN", "CUSTOMER_SERVICE"]);
-    const id = identifierSchema.parse((request.params as {id:string}).id);
-    const user = (await store.listConsumerUsers()).find(value => value.id === id);
+    const actor = requireActor(request, ["SUPER_ADMIN", "CUSTOMER_SERVICE"]);
+    const consumerNumber = z.coerce.number().int().min(1).max(Number.MAX_SAFE_INTEGER).parse((request.params as {id:string}).id);
+    const users = await ensureConsumerPublicNumbers(store);
+    const user = findConsumerByPublicNumber(users, consumerNumber);
     if (!user) throw new BusinessError("RESOURCE_NOT_FOUND", "消费者不存在", 404);
-    const orders = (await store.listOrdersByUser(id)).sort((a,b) => b.createdAt.localeCompare(a.createdAt)).slice(0,50).map(order => ({id:order.id,status:order.status,totalAmountCents:order.totalCents,createdAt:order.createdAt}));
-    return {data:{...await consumerSummary(user),orders}};
+    const canViewPhone = actorCan(actor, "consumers.phone.view");
+    if (canViewPhone && user.phoneNumber)
+      await store.transaction(transactionStore => auditInTransaction(
+        transactionStore,
+        request,
+        actor.userId,
+        "CONSUMER_PHONE_VIEWED",
+        "CONSUMER",
+        user.id,
+        null,
+        { consumerNumber, phoneViewed: true },
+      ));
+    const orders = (await store.listOrdersByUser(user.id)).sort((a,b) => b.createdAt.localeCompare(a.createdAt)).slice(0,50).map(order => ({orderNo:order.orderNo,status:order.status,totalAmountCents:order.totalCents,createdAt:order.createdAt}));
+    return {data:{...await consumerSummary(user),...(canViewPhone && user.phoneNumber ? {phoneNumber:user.phoneNumber} : {}),orders}};
+  });
+  app.get("/api/v1/admin/consumers/:id/phone", async (request) => {
+    const actor = requireActor(request, ["SUPER_ADMIN", "CUSTOMER_SERVICE", "OPERATOR", "FINANCE"]);
+    const consumerNumber = z.coerce.number().int().min(1).max(Number.MAX_SAFE_INTEGER).parse((request.params as {id:string}).id);
+    const users = await ensureConsumerPublicNumbers(store);
+    const user = findConsumerByPublicNumber(users, consumerNumber);
+    if (!user) throw new BusinessError("RESOURCE_NOT_FOUND", "消费者不存在", 404);
+    if (!actorCan(actor, "consumers.phone.view"))
+      throw new BusinessError("FORBIDDEN", "没有查看手机号的权限", 403);
+    if (!user.phoneNumber) throw new BusinessError("RESOURCE_NOT_FOUND", "用户尚未绑定手机号", 404);
+    await store.transaction(transactionStore => auditInTransaction(
+      transactionStore,
+      request,
+      actor.userId,
+      "CONSUMER_PHONE_VIEWED",
+      "CONSUMER",
+      user.id,
+      null,
+      { consumerNumber, phoneViewed: true },
+    ));
+    return {data:{phoneNumber:user.phoneNumber}};
   });
   app.get("/api/v1/admin/campaigns", async (request) => {
     requireActor(request, ["OPERATOR", "FINANCE", "SUPER_ADMIN"]);

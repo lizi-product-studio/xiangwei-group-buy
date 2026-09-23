@@ -10,6 +10,7 @@ import {
   Modal,
   Select,
   Space,
+  Spin,
   Table,
   Tag,
   Typography,
@@ -171,7 +172,7 @@ export function GovernancePage({
           刷新队列
         </Button>
       </header>
-      {loading && <Alert type="info" showIcon message="正在刷新治理队列" />}
+      {loading && <div className="neutral-loading-strip" role="status" aria-label="正在刷新治理队列"><Spin size="small" /></div>}
       {error && (
         <Alert
           type="error"

@@ -1,4 +1,4 @@
-<view class="product-image">
+<view class="product-image {{autoAspect ? 'product-image--auto-aspect' : ''}}" style="{{imageAspectStyle}}">
   <image wx:if="{{resolvedSrc && !failed}}" class="product-image__photo {{loaded ? 'product-image__photo--loaded' : ''}}" src="{{resolvedSrc}}" data-src="{{resolvedSrc}}" data-version="{{sourceVersion}}" mode="{{imageMode}}" bindload="loadedImage" binderror="failedImage" lazy-load aria-label="{{label}}" />
   <view wx:if="{{!loaded}}" class="product-image__placeholder"><text>{{resolvedSrc && !failed ? '图片加载中' : '暂无图片'}}</text></view>
 </view>

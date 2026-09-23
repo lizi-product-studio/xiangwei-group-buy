@@ -34,6 +34,7 @@ import {
   Radio,
   Select,
   Space,
+  Spin,
   Statistic,
   Table,
   Tabs,
@@ -2261,88 +2262,228 @@ function CampaignReview({
 }
 
 function Orders({
-  values,
   campaigns,
-  reload,
+  points,
   onNavigate,
 }: {
-  values: Order[];
   campaigns: Campaign[];
-  roles: string[];
-  reload: () => Promise<void>;
+  points: PickupPoint[];
   onNavigate: (page: AdminPage) => void;
 }) {
   const { message } = AntApp.useApp();
-  const [query, setQuery] = useState("");
-  const [searching, setSearching] = useState(false);
+  type Filters = {
+    keyword: string;
+    status?: string;
+    campaignId?: string;
+    pickupPointId?: string;
+    dateType: "CREATED_AT" | "PAID_AT";
+    from?: string;
+    to?: string;
+  };
+  const emptyFilters: Filters = { keyword: "", dateType: "CREATED_AT" };
+  const [draftFilters, setDraftFilters] = useState<Filters>(emptyFilters);
+  const [filters, setFilters] = useState<Filters>(emptyFilters);
+  const [page, setPage] = useState(1);
+  const [searching, setSearching] = useState(true);
+  const [exporting, setExporting] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [result, setResult] = useState({ items: [] as Order[], total: 0, page: 1, pageSize: 20 });
   const [selected, setSelected] = useState<Order | null>(null);
-  const [displayValues, setDisplayValues] = useState(values);
-  useEffect(() => setDisplayValues(values), [values]);
-  const search = async () => {
+  const can = useCan();
+  const canViewPhone = can("consumers.phone.view");
+  const [phoneLookupFailed, setPhoneLookupFailed] = useState(false);
+  const [requestVersion, setRequestVersion] = useState(0);
+  const filtersVersion = useRef(0);
+  useEffect(() => {
+    let active = true;
     setSearching(true);
+    setFailed(false);
+    void api.ordersSearch({ ...filters, page, pageSize: 20 }).then((next) => {
+      if (active) setResult(next);
+    }).catch(() => {
+      if (active) {
+        setFailed(true);
+        setResult({ items: [], total: 0, page, pageSize: 20 });
+      }
+    }).finally(() => {
+      if (active) setSearching(false);
+    });
+    return () => { active = false; };
+  }, [filters, page, requestVersion]);
+  useEffect(() => {
+    if (!selected || !canViewPhone || !selected.consumerNumber || selected.phoneNumber) return;
+    let active = true;
+    setPhoneLookupFailed(false);
+    void api.consumerPhone(selected.consumerNumber).then((detail) => {
+      if (active) setSelected((current) => current?.id === selected.id
+        ? { ...current, ...(detail.phoneNumber ? { phoneNumber: detail.phoneNumber } : {}) }
+        : current);
+    }).catch(() => {
+      if (active) setPhoneLookupFailed(true);
+    });
+    return () => { active = false; };
+  }, [selected, canViewPhone]);
+  const updateDraft = <K extends keyof Filters>(key: K, value: Filters[K] | undefined) =>
+    setDraftFilters((current) => ({ ...current, [key]: value }));
+  const applyFilters = () => { filtersVersion.current += 1; setSearching(true); setResult({ items: [], total: 0, page: 1, pageSize: 20 }); setPage(1); setFilters({ ...draftFilters }); };
+  const resetFilters = () => { filtersVersion.current += 1; setSearching(true); setResult({ items: [], total: 0, page: 1, pageSize: 20 }); setDraftFilters(emptyFilters); setPage(1); setFilters(emptyFilters); };
+  const refreshOrders = () => { setSearching(true); setResult({ items: [], total: 0, page, pageSize: 20 }); setRequestVersion((value) => value + 1); };
+  const exportOrders = async () => {
+    if (searching || exporting || failed || result.total === 0) return;
+    const requestedFiltersVersion = filtersVersion.current;
+    setExporting(true);
     try {
-      const result = await api.orders(query.trim());
-      setDisplayValues(result);
-      // The parent reload remains the source of truth for all other page
-      // resources; update the selected detail immediately from the exact
-      // order-number lookup and then refresh the list generation.
-      setSelected((current) =>
-        current ? result.find((value) => value.id === current.id) ?? null : current,
-      );
-      if (!query.trim()) await reload();
-      void message.success(query.trim() ? "订单搜索完成" : "订单列表已刷新");
+      const exported = await api.exportOrders(filters);
+      if (requestedFiltersVersion !== filtersVersion.current)
+        throw new Error("筛选条件已变化，请等待最新结果后重试导出");
+      const blob = exported.blob;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "乡味集-订单筛选结果.csv";
+      link.click();
+      URL.revokeObjectURL(url);
+      void message.success(`已导出 ${exported.rowCount} 笔筛选结果`);
     } catch (error) {
       void message.error(adminErrorNotice(error, mutationErrorText(error)));
     } finally {
-      setSearching(false);
+      setExporting(false);
     }
   };
   const detailCampaign = selected
     ? campaigns.find((campaign) => campaign.id === selected.campaignId)
     : undefined;
-  const can=useCan();
   const canService=can("service.view"), canFinance=can("finance.view"), canCancellations=can("cancellations.view"), canRecords=can("finance-records.view");
   const casePage = canService ? "service" : "finance";
   return (
     <>
       <PageTitle
         title="订单列表"
-        subtitle="查看订单的支付、履约、领取、退款与售后进度"
+        subtitle="按时间、状态、团期、自提点与关键词查询；导出范围与当前筛选一致"
         action={
           <Space>
-            <Input.Search
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              onSearch={() => void search()}
-              allowClear
-              enterButton="搜索订单号"
-              loading={searching}
-              placeholder="输入完整订单号"
-              aria-label="订单号搜索"
-            />
-            <Button onClick={() => void search()} loading={searching}>
-              刷新
-            </Button>
+            <Button onClick={refreshOrders} loading={searching}>刷新</Button>
           </Space>
         }
       />
+      <Card
+        className="order-filter-panel"
+        title="筛选订单"
+        extra={<Typography.Text type="secondary">查询与导出使用相同条件</Typography.Text>}
+      >
+        <div className="order-filter-grid">
+          <label className="order-filter-field order-filter-keyword">
+            <span>关键词</span>
+            <Input
+              value={draftFilters.keyword}
+              placeholder="订单号 / 用户ID / 姓名 / 手机号"
+              maxLength={80}
+              onChange={(event) => updateDraft("keyword", event.target.value)}
+              onPressEnter={applyFilters}
+              aria-label="订单关键词"
+            />
+          </label>
+          <label className="order-filter-field">
+            <span>订单状态</span>
+            <Select
+              allowClear
+              value={draftFilters.status ?? null}
+              placeholder="全部状态"
+              options={[
+                "PENDING_PAYMENT", "PAID_WAITING_CLOSE", "LOCKED", "ALLOCATING",
+                "IN_TRANSIT", "READY_FOR_PICKUP", "PICKED_UP", "COMPLETED",
+                "CANCELLING", "REFUNDING", "REFUNDED", "CANCELLED",
+              ].map((value) => ({ value, label: displayLabel(value) }))}
+              onChange={(value) => updateDraft("status", value)}
+              aria-label="订单状态"
+            />
+          </label>
+          <label className="order-filter-field">
+            <span>团期</span>
+            <Select
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              value={draftFilters.campaignId ?? null}
+              placeholder="全部团期"
+              options={campaigns.map((value) => ({ value: value.id, label: value.title }))}
+              onChange={(value) => updateDraft("campaignId", value)}
+              aria-label="订单团期"
+            />
+          </label>
+          <label className="order-filter-field">
+            <span>自提点</span>
+            <Select
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              value={draftFilters.pickupPointId ?? null}
+              placeholder="全部自提点"
+              options={points.map((value) => ({ value: value.id, label: value.name }))}
+              onChange={(value) => updateDraft("pickupPointId", value)}
+              aria-label="订单自提点"
+            />
+          </label>
+          <div className="order-filter-field order-filter-dates">
+            <span>时间范围</span>
+            <Space.Compact block>
+              <Select
+                value={draftFilters.dateType}
+                options={[
+                  { value: "CREATED_AT", label: "下单时间" },
+                  { value: "PAID_AT", label: "支付时间" },
+                ]}
+                onChange={(value: Filters["dateType"]) => updateDraft("dateType", value)}
+                aria-label="筛选时间类型"
+              />
+              <DatePicker.RangePicker
+                value={draftFilters.from || draftFilters.to
+                  ? [draftFilters.from ? dayjs(draftFilters.from) : null, draftFilters.to ? dayjs(draftFilters.to) : null]
+                  : null}
+                format="YYYY-MM-DD"
+                onChange={(_, values) => {
+                  updateDraft("from", values[0] || undefined);
+                  updateDraft("to", values[1] || undefined);
+                }}
+                aria-label="订单日期范围"
+              />
+            </Space.Compact>
+          </div>
+          <div className="order-filter-actions">
+            <Button type="primary" onClick={applyFilters} loading={searching}>查询</Button>
+            <Button type="text" onClick={resetFilters}>重置</Button>
+          </div>
+        </div>
+      </Card>
+      <Card
+        className="order-results-panel"
+        title={<span>订单结果 <Typography.Text type="secondary">· {searching ? "查询中…" : `共 ${result.total} 笔`}</Typography.Text></span>}
+        extra={<Button onClick={() => void exportOrders()} loading={exporting} disabled={searching || result.total === 0 || failed}>导出筛选结果</Button>}
+      >
+      <Typography.Text className="order-export-note" type="secondary">单次最多导出 10,000 笔；超出时请缩小筛选范围。</Typography.Text>
+      {failed && <Alert type="error" showIcon message="订单列表加载失败" description="请重试查询；当前数据不会被误显示为空结果。" action={<Button onClick={refreshOrders}>重试</Button>} />}
       <Table
         rowKey="id"
-        dataSource={displayValues}
-        locale={{ emptyText: query.trim() ? "未找到匹配订单，请检查完整订单号" : "暂无订单" }}
+        loading={searching}
+        dataSource={result.items}
+        locale={{ emptyText: failed ? "列表暂不可用" : filters.keyword ? "没有符合条件的订单" : "暂无订单" }}
+        pagination={{ current: page, pageSize: result.pageSize, total: result.total, showSizeChanger: false, showTotal: (total) => searching ? "查询中…" : `共 ${total} 笔订单`, onChange: (nextPage) => { setSearching(true); setResult({ items: [], total: 0, page: nextPage, pageSize: 20 }); setPage(nextPage); } }}
         columns={[
-          { title: "订单号", dataIndex: "orderNo" },
-          { title: "实付金额", render: (_, v) => money(v.totalCents) },
+          {
+            title: "订单 / 用户",
+            render: (_, value) => <div className="order-primary-cell">
+              <Typography.Text className="mono" copyable>{value.orderNo}</Typography.Text>
+              <Typography.Text type="secondary">用户ID {value.consumerNumber ?? "—"} · {value.maskedPhone ?? "未绑定手机号"}</Typography.Text>
+            </div>,
+          },
           {
             title: "商品",
             render: (_, v) =>
               v.items.map((i) => `${i.name} × ${i.quantity}`).join("；"),
           },
-          {
-            title: "支付时间",
-            render: (_, v) =>
-              v.paidAt ? dayjs(v.paidAt).format("MM-DD HH:mm") : "未支付",
-          },
+          { title: "团期 / 自提点", render: (_, value) => <div className="order-primary-cell"><span>{value.campaignTitle ?? campaigns.find(campaign => campaign.id === value.campaignId)?.title ?? "—"}</span><Typography.Text type="secondary">{value.pickupPointName ?? points.find(point => point.id === value.pickupPointId)?.name ?? "—"}</Typography.Text></div> },
+          { title: "下单时间", render: (_, value) => dateTime(value.createdAt ?? "") },
+          { title: "实付金额", align: "right", render: (_, v) => money(v.totalCents) },
           { title: "订单状态", render: (_, v) => <Status value={v.status} /> },
           {
             title: "操作",
@@ -2352,6 +2493,7 @@ function Orders({
           },
         ]}
       />
+      </Card>
       <Modal
         width={900}
         open={!!selected}
@@ -2364,6 +2506,12 @@ function Orders({
           <Space direction="vertical" size="large" style={{ width: "100%" }}>
             <Descriptions bordered size="small" column={{ xs: 1, sm: 2 }}>
               <Descriptions.Item label="订单号">{selected.orderNo}</Descriptions.Item>
+              <Descriptions.Item label="用户ID">{selected.consumerNumber ?? "—"}</Descriptions.Item>
+              <Descriptions.Item label="手机号">
+                {canViewPhone
+                  ? selected.phoneNumber ?? (phoneLookupFailed ? "暂时无法读取，请关闭后重试" : "正在读取")
+                  : selected.maskedPhone ?? "未绑定"}
+              </Descriptions.Item>
               <Descriptions.Item label="订单状态"><Status value={selected.status} /></Descriptions.Item>
               <Descriptions.Item label="团期">
                 {selected.campaignTitle ?? detailCampaign?.title ?? selected.campaignId}
@@ -2883,8 +3031,10 @@ function Logistics({
             title: "下一步",
             render: (_, v) => {
               const batch = batches.find((value) => value.campaignId === v.campaignId);
+              const campaign = campaigns.find((value) => value.id === v.campaignId);
               return getDeliveryNextStep({
                 status: v.status,
+                ...(campaign ? { campaignStatus: campaign.status } : {}),
                 ...(batch ? { batchStatus: batch.status } : {}),
               });
             },
@@ -2896,10 +3046,12 @@ function Logistics({
               const batch = batches.find(
                 (value) => value.campaignId === v.campaignId,
               );
+              const campaign = campaigns.find((value) => value.id === v.campaignId);
               const actionLabels = getDeliveryActionLabels({
                 status: v.status,
                 canOperate,
                 emergencyProxy,
+                ...(campaign ? { campaignStatus: campaign.status } : {}),
                 ...(batch ? { batchStatus: batch.status } : {}),
               });
               return (
@@ -4550,7 +4702,7 @@ function Service({
         title={view === "cancellations" ? "取消申请" : "售后与异常"}
         subtitle={view === "cancellations" ? "查看并审核用户的取消申请" : "按问题类型处理售后，退款执行请前往财务退款待办"}
       />
-      {loading && <Alert type="info" showIcon message="正在刷新售后队列" />}
+      {loading && <div className="neutral-loading-strip" role="status" aria-label="正在刷新售后队列"><Spin size="small" /></div>}
       {error && (
         <Alert
           type="error"
@@ -4897,7 +5049,7 @@ function Finance({
   return (
     <>
       <PageTitle title={view === "finance-records" ? "退款记录" : view === "finance-ledger" ? "账务流水" : "退款待办"} subtitle={view === "finance" ? "选择退款类型，核对金额后处理；商品与审核说明可在详情中查看" : "查看退款进度与账务明细"} />
-      {loading && <Alert type="info" showIcon message="正在刷新财务数据" />}
+      {loading && <div className="neutral-loading-strip" role="status" aria-label="正在刷新财务数据"><Spin size="small" /></div>}
       {error && (
         <Alert
           type="error"
@@ -5569,7 +5721,6 @@ export function App() {
     [categories, setCategories] = useState<ProductCategory[]>([]),
     [homepageBanners, setHomepageBanners] = useState<HomepageBanner[]>([]),
     [campaigns, setCampaigns] = useState<Campaign[]>([]),
-    [orders, setOrders] = useState<Order[]>([]),
     [plans, setPlans] = useState<DeliveryPlan[]>([]),
     [batches, setBatches] = useState<
       Array<{ id: string; campaignId: string; status: string }>
@@ -5636,7 +5787,6 @@ export function App() {
     setCategories([]);
     setHomepageBanners([]);
     setCampaigns([]);
-    setOrders([]);
     setPlans([]);
     setBatches([]);
     setDeliveries([]);
@@ -5703,8 +5853,8 @@ export function App() {
         );
       if (currentPage === "orders")
         work.push(
-          api.orders().then(commit(setOrders)),
           api.campaigns().then(commit(setCampaigns)),
+          api.points().then(commit(setPoints)),
         );
       if (currentPage === "logistics")
         work.push(
@@ -5773,7 +5923,7 @@ export function App() {
         <Login done={establishSession} notice={loginNotice} />
       </AntApp>
     );
-  if (!hasAccess || !defaultPage) return <AntApp><div style={{padding:48}}><Alert type={accessError?"error":"info"} message={accessError || (!hasAccess ? "正在读取岗位权限…" : "当前角色尚未分配可用功能，请联系管理员")} /><Space style={{marginTop:16}}><Button onClick={()=>{setAccessError("");void api.access().then(setAccess).catch(error=>setAccessError(adminErrorText(error)));}}>重新加载</Button><Button onClick={()=>{auth.clear();clearWorkspace();setAuthenticated(false);}}>退出登录</Button></Space></div></AntApp>;
+  if (!hasAccess || !defaultPage) return <AntApp><div className="access-loading-shell">{accessError ? <Alert type="error" showIcon message={accessError} /> : !hasAccess ? <div className="access-loading" role="status" aria-label="正在读取岗位权限"><Spin /></div> : <Alert type="warning" showIcon message="当前角色尚未分配可用功能，请联系管理员" />}<Space style={{marginTop:16}}><Button onClick={()=>{setAccessError("");void api.access().then(setAccess).catch(error=>setAccessError(adminErrorText(error)));}}>重新加载</Button><Button onClick={()=>{auth.clear();clearWorkspace();setAuthenticated(false);}}>退出登录</Button></Space></div></AntApp>;
   const mainPageLoadFailed =
     Boolean(loadError) &&
     ["dashboard", "products", "homepage-banners", "campaigns", "orders", "pickup-points", "settings"].includes(
@@ -5800,10 +5950,8 @@ export function App() {
       />
     ) : currentPage === "orders" ? (
       <Orders
-        values={orders}
         campaigns={campaigns}
-        roles={roles}
-        reload={reload}
+        points={points}
         onNavigate={setPage}
       />
     ) : currentPage === "logistics" ? (
@@ -5902,17 +6050,9 @@ export function App() {
       <Settings {...{ staff, points, reload }} currentUserId={auth.userId()} />
     );
   const content = (
-    <>
-      {loading && (
-        <Alert
-          type="info"
-          showIcon
-          icon={<ReloadOutlined spin />}
-          message="正在加载数据…"
-        />
-      )}
-      {pageContent}
-    </>
+    <Spin spinning={loading} delay={250}>
+      <div className="page-content-frame">{pageContent}</div>
+    </Spin>
   );
   const navigationPath = getAdminNavigationPath(roles, currentView, permissions);
   return (

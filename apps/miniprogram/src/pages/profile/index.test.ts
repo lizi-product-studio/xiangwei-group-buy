@@ -6,6 +6,8 @@ type PageDefinition = {
   openOrders: (event: { currentTarget: { dataset: { filter?: string } } }) => void;
   loadArea: () => Promise<void>;
   logout: () => Promise<void>;
+  openPickupLocation: () => void;
+  callPickupPoint: () => void;
 };
 
 describe("profile page protected entry behavior", () => {
@@ -29,6 +31,8 @@ describe("profile page protected entry behavior", () => {
     const navigateTo = vi.fn(() => Promise.resolve());
     const switchTab = vi.fn(() => Promise.resolve());
     const request = vi.fn();
+    const openLocation = vi.fn();
+    const makePhoneCall = vi.fn();
     vi.stubGlobal("wx", {
       getStorageSync: (key: string) => storage.get(key),
       setStorageSync: (key: string, value: unknown) => storage.set(key, value),
@@ -38,6 +42,8 @@ describe("profile page protected entry behavior", () => {
       redirectTo: vi.fn(() => Promise.resolve()),
       switchTab,
       showToast: vi.fn(() => Promise.resolve()),
+      openLocation,
+      makePhoneCall,
       showModal: vi.fn(() => Promise.resolve({ confirm: true })),
       request,
     });
@@ -59,7 +65,7 @@ describe("profile page protected entry behavior", () => {
     await import("./index");
     if (!definition) throw new Error("profile page was not registered");
     definition.setData = (patch) => Object.assign(definition!.data, patch);
-    return { definition, navigateTo, switchTab };
+    return { definition, navigateTo, switchTab, openLocation, makePhoneCall };
   }
 
   it("sends a guest order entry through the existing auth intent", async () => {
@@ -84,6 +90,14 @@ describe("profile page protected entry behavior", () => {
     expect(switchTab).not.toHaveBeenCalled();
   });
 
+  it("routes the collected order shortcut to the existing DONE filter", async () => {
+    storage.set("hometown-demo-customer-session", true);
+    const { definition, navigateTo } = await loadPage();
+    definition.openOrders.call(definition, { currentTarget: { dataset: { filter: "DONE" } } });
+    expect(storage.get("orderFilter")).toBe("DONE");
+    expect(navigateTo).toHaveBeenCalledWith({ url: "/pages/orders/index" });
+  });
+
   it("keeps area failures separate from the order summary and offers an area retry", async () => {
     const { definition } = await loadPage({ areaError: true });
     await definition.loadArea.call(definition);
@@ -92,5 +106,16 @@ describe("profile page protected entry behavior", () => {
       "本地服务未启动，请在项目根目录运行 pnpm dev 后重试",
     );
     expect(definition.data.pickupPoint).toBeNull();
+  });
+
+  it("uses the current point coordinates and phone for location and call actions", async () => {
+    const { definition, openLocation, makePhoneCall } = await loadPage();
+    definition.data.pickupPoint = {
+      id: "point-1", name: "当前点位", address: "当前地址", latitude: 39.3, longitude: 115.6, contactPhone: "13800000000",
+    };
+    definition.openPickupLocation.call(definition);
+    definition.callPickupPoint.call(definition);
+    expect(openLocation).toHaveBeenCalledWith({ latitude: 39.3, longitude: 115.6, name: "当前点位", address: "当前地址" });
+    expect(makePhoneCall).toHaveBeenCalledWith({ phoneNumber: "13800000000" });
   });
 });

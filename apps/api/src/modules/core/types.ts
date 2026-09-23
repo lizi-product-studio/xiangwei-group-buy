@@ -204,6 +204,8 @@ export type InternalStaffStatus =
   | "SUSPENDED";
 export interface User {
   id: string;
+  /** Stable operator-facing number; id remains the internal UUID key. */
+  consumerNumber?: number;
   wechatOpenId: string | null;
   phoneNumber?: string;
   phoneVerifiedAt?: string;

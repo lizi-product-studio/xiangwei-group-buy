@@ -39,7 +39,6 @@ function createIntentId(now: number): string {
 
 const TAB_PATHS = new Set([
   "/pages/home/index",
-  "/pages/category/index",
   "/pages/cart/index",
   "/pages/profile/index",
 ]);

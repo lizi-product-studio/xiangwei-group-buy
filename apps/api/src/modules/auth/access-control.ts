@@ -78,6 +78,8 @@ for (const action of ["open", "close", "cancel"]) post(`admin/campaigns/:id/${ac
 get("admin/campaigns/:id/cancel-impact", "campaigns.cancel"); post("admin/campaigns/:id/postpone", "campaigns.edit");
 get("admin/campaigns/:id/packing-labels", "campaigns.labels", "logistics.view");
 get("admin/orders", "orders.view");
+get("admin/orders/search", "orders.view");
+get("admin/orders/export", "orders.view");
 get("admin/delivery-plans", "logistics.view", "arrival-exceptions.view"); post("admin/delivery-plans/:id/book-vehicle", "logistics.edit");
 get("admin/dispatch-batches", "logistics.view", "arrival-exceptions.view"); post("admin/dispatch-batches", "logistics.dispatch"); post("admin/dispatch-batches/:id/dispatch", "logistics.dispatch");
 get("admin/community/deliveries", "logistics.view", "arrival-exceptions.view", "point-workbench.view", "point-pickup.view");
@@ -89,6 +91,7 @@ get("admin/fulfillment-exceptions", "service.view", "finance.view"); post("admin
 get("admin/community/pickup-windows", "service.pickup-view", "finance.view"); post("admin/community/orders/:id/pickup-extension", "service.pickup"); post("admin/community/orders/:id/pickup-disposition", "service.pickup"); post("admin/community/orders/:id/pickup-refund", "finance.refund");
 get("admin/finance/refunds", "finance.view", "finance-records.view"); get("admin/finance/ledger", "finance-ledger.view");
 get("admin/consumers", "consumers.view"); get("admin/consumers/:id", "consumers.view");
+get("admin/consumers/:id/phone", "consumers.phone.view");
 get("admin/service-area-interests", "interests.view"); post("admin/service-area-interests/:id/status", "interests.manage");
 get("admin/notifications/manual", "governance.view"); post("admin/notifications/:id/retry", "governance.manage"); post("admin/notifications/:id/manual-complete", "governance.manage");
 get("admin/homepage-banners", "homepage-banners.view"); post("admin/homepage-banners", "homepage-banners.manage"); route("DELETE", "admin/homepage-banners/:id", "homepage-banners.delete");

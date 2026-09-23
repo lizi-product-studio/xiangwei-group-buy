@@ -6,6 +6,23 @@ import { BusinessError } from "@hometown/domain";
 import type { CommerceStore } from "../core/store.js";
 import type { DeliveryPlan } from "../core/types.js";
 
+async function assertCampaignAllowsTransportMutation(
+  store: CommerceStore,
+  plan: DeliveryPlan,
+): Promise<void> {
+  const campaign = await store.getCampaignForUpdate(plan.campaignId);
+  if (!campaign)
+    throw new BusinessError("RESOURCE_NOT_FOUND", "团期不存在", 404);
+  if (["CANCELLED", "COMPLETED"].includes(campaign.status))
+    throw new BusinessError(
+      "INVALID_STATE_TRANSITION",
+      campaign.status === "CANCELLED"
+        ? "团期已取消，不能修改运输信息"
+        : "团期已完成，不能修改运输信息",
+      409,
+    );
+}
+
 export class DeliveryPlanService {
   public constructor(private readonly store: CommerceStore) {}
   public async list(): Promise<DeliveryPlan[]> {
@@ -20,6 +37,7 @@ export class DeliveryPlanService {
       const plan = await store.getDeliveryPlan(id);
       if (!plan)
         throw new BusinessError("RESOURCE_NOT_FOUND", "配送计划不存在", 404);
+      await assertCampaignAllowsTransportMutation(store, plan);
       if (!["SITE_CONFIRMED", "VEHICLE_BOOKED"].includes(plan.status))
         throw new BusinessError(
           "DELIVERY_SITE_NOT_CONFIRMED",
@@ -54,6 +72,7 @@ export class DeliveryPlanService {
       const plan = await store.getDeliveryPlan(id);
       if (!plan)
         throw new BusinessError("RESOURCE_NOT_FOUND", "配送计划不存在", 404);
+      await assertCampaignAllowsTransportMutation(store, plan);
       if (!["IN_TRANSIT", "ARRIVED"].includes(plan.status))
         throw new BusinessError(
           "INVALID_STATE_TRANSITION",

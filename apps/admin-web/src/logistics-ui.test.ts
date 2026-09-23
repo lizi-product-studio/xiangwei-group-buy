@@ -67,6 +67,31 @@ describe("logistics loading and action states", () => {
     ).toEqual(["紧急纠正运输信息"]);
   });
 
+  it.each(["CANCELLED", "COMPLETED"] as const)(
+    "hides every transport action and explains terminal campaign status: %s",
+    (campaignStatus) => {
+      expect(
+        getDeliveryActionLabels({
+          status: "VEHICLE_BOOKED",
+          canOperate: true,
+          emergencyProxy: true,
+          campaignStatus,
+        }),
+      ).toEqual([]);
+      expect(
+        getDeliveryActionLabels({
+          status: "IN_TRANSIT",
+          canOperate: true,
+          emergencyProxy: true,
+          campaignStatus,
+        }),
+      ).toEqual([]);
+      expect(getDeliveryNextStep({ status: "VEHICLE_BOOKED", campaignStatus })).toBe(
+        campaignStatus === "CANCELLED" ? "团期已取消" : "团期已完成",
+      );
+    },
+  );
+
   it("describes the next business step without repeating the status", () => {
     expect(getDeliveryNextStep({ status: "SITE_CONFIRMED" })).toBe("登记运输信息");
     expect(getDeliveryNextStep({ status: "VEHICLE_BOOKED", batchStatus: "DRAFT" })).toBe("确认装袋并发车");
@@ -88,6 +113,7 @@ describe("dispatch review prerequisites", () => {
     expect(dispatchBlockReason({ campaignStatus: "FULFILLING", planStatus: "IN_TRANSIT", batchStatus: "IN_TRANSIT" })).toContain("已发车");
     expect(getDeliveryActionLabels({ status: "VEHICLE_BOOKED", batchStatus: "IN_TRANSIT", canOperate: true, emergencyProxy: false })).toEqual(["编辑运输信息"]);
     expect(dispatchBlockReason({ campaignStatus: "LOCKED", planStatus: "SITE_CONFIRMED" })).toContain("运输信息");
+    expect(getDeliveryActionLabels({ status: "SITE_CONFIRMED", canOperate: true, emergencyProxy: false, campaignStatus: "POSTPONED" })).toEqual(["登记运输信息"]);
   });
   it("explains dispatch-specific 409s without displaying arbitrary server messages", () => {
     expect(dispatchFailureText({ code: "INVALID_STATE_TRANSITION", message: "只有已成团锁单的团期可以创建发车批次" }, "通用提示")).toContain("尚未成团锁单");

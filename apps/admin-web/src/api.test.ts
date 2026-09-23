@@ -103,6 +103,19 @@ describe("community admin API", () => {
       expect.any(Object),
     );
   });
+  it("returns the server-reported row count with the filtered order export", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("csv", {
+      status: 200,
+      headers: { "content-type": "text/csv", "x-exported-row-count": "7" },
+    })));
+    const exported = await api.exportOrders({ keyword: "用户", dateType: "CREATED_AT" });
+    expect(exported.rowCount).toBe(7);
+    expect(await exported.blob.text()).toBe("csv");
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/v1/admin/orders/export?keyword=%E7%94%A8%E6%88%B7&dateType=CREATED_AT",
+      expect.any(Object),
+    );
+  });
   it("uses the web-only pickup workbench routes", async () => {
     await api.pickupPlans();
     await api.lookupPickup("plan-1", "ORDER-1");

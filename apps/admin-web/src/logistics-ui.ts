@@ -37,7 +37,10 @@ export function getDeliveryActionLabels(input: {
   canOperate: boolean;
   emergencyProxy: boolean;
   batchStatus?: string;
+  campaignStatus?: string;
 }): string[] {
+  if (["CANCELLED", "COMPLETED"].includes(input.campaignStatus ?? ""))
+    return [];
   const labels: string[] = [];
   if (input.canOperate && input.status === "SITE_CONFIRMED")
     labels.push("登记运输信息");
@@ -57,7 +60,10 @@ export function getDeliveryActionLabels(input: {
 export function getDeliveryNextStep(input: {
   status: string;
   batchStatus?: string;
+  campaignStatus?: string;
 }): string {
+  if (input.campaignStatus === "CANCELLED") return "团期已取消";
+  if (input.campaignStatus === "COMPLETED") return "团期已完成";
   if (input.status === "SITE_CONFIRMED") return "登记运输信息";
   if (input.status === "VEHICLE_BOOKED")
     return input.batchStatus === "IN_TRANSIT"

@@ -40,6 +40,8 @@ export const BUSINESS_ERROR_CODES = [
   "REFUND_AMOUNT_EXCEEDED",
   "HTTPS_REQUIRED",
   "PRODUCTION_MOCK_FORBIDDEN",
+  "INTEGRITY_VIOLATION",
+  "CAPACITY_EXCEEDED",
 ] as const;
 
 export type BusinessErrorCode = (typeof BUSINESS_ERROR_CODES)[number];

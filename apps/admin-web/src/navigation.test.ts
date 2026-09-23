@@ -28,7 +28,7 @@ describe("admin navigation", () => {
   it("gives a super administrator the complete PRD primary navigation once", () => {
     const groups = getAdminNavigation(["SUPER_ADMIN"]);
     expect(groups.map((group) => group.label)).toEqual([
-      "工作台", "商品与团期", "订单与售后", "发货管理", "自提点与区域", "用户与通知", "财务", "系统",
+      "工作台", "商品与营销", "订单与售后", "履约", "自提点与区域", "用户与通知", "财务", "系统",
     ]);
     expect(groups.flatMap(group => group.items.map(item => item.key))).toContain("categories");
     expect(groups.flatMap(group => group.items.map(item => item.key))).toContain("finance-ledger");

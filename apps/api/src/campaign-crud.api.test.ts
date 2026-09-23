@@ -5,12 +5,14 @@ import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
 import { MemoryStore } from './modules/core/store.js';
 import { createAdminCredential } from './modules/auth/admin-auth.js';
+import type { Order } from './modules/core/types.js';
 import type { CommunityCampaignInput } from './modules/fulfillment/community-fulfillment-service.js';
 
 class InspectableStore extends MemoryStore {
   salesOrderReads = 0;
   salesRefundReads = 0;
-  override async listOrders(limit: number) { this.salesOrderReads += 1; return super.listOrders(limit); }
+  overrideOrders: Order[] | null = null;
+  override async listOrders(limit: number) { this.salesOrderReads += 1; return this.overrideOrders?.slice(0, limit) ?? super.listOrders(limit); }
   override async listOrderRefunds(limit: number) { this.salesRefundReads += 1; return super.listOrderRefunds(limit); }
   businessSnapshot() {
     const value = JSON.parse(this.exportState()) as Record<string,unknown>;
@@ -163,6 +165,31 @@ describe('draft campaign CRUD and private consumer directory', () => {
     expect((await call('PATCH',`/api/v1/admin/campaigns/${c.id}`,etaConflict)).statusCode).toBe(409);
     expect((await store.getDeliveryPlanByCampaign(c.id))).toEqual(saved);
   });
+  it.each([
+    ['CANCELLED', 'book-vehicle', 'SITE_CONFIRMED'],
+    ['COMPLETED', 'book-vehicle', 'SITE_CONFIRMED'],
+    ['CANCELLED', 'book-vehicle', 'VEHICLE_BOOKED'],
+    ['COMPLETED', 'book-vehicle', 'VEHICLE_BOOKED'],
+    ['CANCELLED', 'emergency-correction', 'IN_TRANSIT'],
+    ['COMPLETED', 'emergency-correction', 'IN_TRANSIT'],
+  ] as const)('rejects %s campaign transport mutation via %s without writes',async(status,action,planStatus)=>{
+    const c=await create();
+    const campaign=(await store.getCampaign(c.id))!;
+    await store.saveCampaign({...campaign,status});
+    const plan=(await store.getDeliveryPlanByCampaign(c.id))!;
+    await store.saveDeliveryPlan({...plan,status:planStatus});
+    const before=await state(c.id);
+    const response=await call('POST',`/api/v1/admin/delivery-plans/${plan.id}/${action}`,{
+      logisticsPlatform:'测试运输平台',
+      vehicleOrderNo:'TEST-TERMINAL-001',
+      driverName:'测试司机',
+      estimatedArrivalAt:input.estimatedArrivalStartAt,
+      ...(action==='emergency-correction'?{reason:'终态团期拒绝修改测试'}:{}),
+    });
+    expect(response.statusCode,response.body).toBe(409);
+    expect(response.json().code).toBe('INVALID_STATE_TRANSITION');
+    expect(await state(c.id)).toEqual(before);
+  });
   it.each(['PATCH','DELETE'] as const)('serializes %s against opening without changing an opened snapshot',async(method)=>{
     const c = await create();
     const [opened,changed] = await Promise.all([call('POST',`/api/v1/admin/campaigns/${c.id}/open`),call(method,`/api/v1/admin/campaigns/${c.id}`,method==='PATCH'?{...input,title:'竞态修改',version:1}:{version:1})]);
@@ -208,21 +235,23 @@ describe('draft campaign CRUD and private consumer directory', () => {
     expect(response.json().code).toBe('CAMPAIGN_HAS_REFERENCES');
     expect(await state(c.id)).toEqual(before);
   });
-  it('masks consumer list and details, supports stable paging/search and rejects unauthorized roles',async()=>{
+  it('assigns stable user IDs, masks list phones, audits authorized detail views and rejects unauthorized roles',async()=>{
     for (let i=0;i<3;i++) await store.saveUser({id:`consumer-${i}`,wechatOpenId:`never-return-openid-${i}`,phoneNumber:`1380013800${i}`,phoneVerifiedAt:new Date().toISOString(),status:'ACTIVE',createdAt:`2026-09-08T00:00:0${i}.000Z`});
     const queryBefore = store.businessSnapshot();
     const list = await call('GET','/api/v1/admin/consumers?page=1&pageSize=2');
     expect(list.statusCode).toBe(200);
     expect(list.json().data).toMatchObject({total:3,page:1,pageSize:2});
-    expect(list.json().data.items.map((u:{id:string})=>u.id)).toEqual(['consumer-2','consumer-1']);
+    expect(list.json().data.items.map((u:{id:number})=>u.id)).toEqual([1,2]);
     expect(list.body).not.toContain('never-return');
     expect(list.body).not.toContain('138001380');
-    const detail = await call('GET','/api/v1/admin/consumers/consumer-0');
-    expect(detail.json().data).toEqual({id:'consumer-0',maskedPhone:'138****8000',phoneVerified:true,status:'ACTIVE',createdAt:'2026-09-08T00:00:00.000Z',orderCount:0,orders:[]});
+    const afterNumbering = store.businessSnapshot();
+    const detail = await call('GET','/api/v1/admin/consumers/1');
+    expect(detail.json().data).toEqual({id:1,maskedPhone:'138****8000',phoneNumber:'13800138000',phoneVerified:true,status:'ACTIVE',createdAt:'2026-09-08T00:00:00.000Z',orderCount:0,orders:[]});
+    expect((await store.listAuditLogs(100)).some((entry) => entry.action === 'CONSUMER_PHONE_VIEWED' && entry.resourceId === 'consumer-0')).toBe(true);
     expect((await call('GET','/api/v1/admin/consumers?query=13800138001')).json().data.total).toBe(1);
-    expect((await call('GET','/api/v1/admin/consumers/bootstrap')).statusCode).toBe(404);
+    expect((await call('GET','/api/v1/admin/consumers/bootstrap')).statusCode).toBe(400);
     expect((await call('GET','/api/v1/admin/consumers?pageSize=101')).statusCode).toBe(400);
-    expect(store.businessSnapshot()).toEqual(queryBefore);
+    expect(afterNumbering.users).not.toEqual(queryBefore.users);
     const c = await create();
     const before = await state(c.id);
     const noAuth = {} as typeof headers;
@@ -235,15 +264,82 @@ describe('draft campaign CRUD and private consumer directory', () => {
       const change = await app.inject({method:'POST',url:'/api/v1/auth/admin/complete-password-change',payload:{passwordChangeToken:login.json().data.passwordChangeToken,newPassword:'ChangedPassword123'}});
       const roleHeaders = {authorization:`Bearer ${change.json().data.accessToken}`};
       expect((await call('GET','/api/v1/admin/consumers',undefined,roleHeaders)).statusCode).toBe(role==='CUSTOMER_SERVICE'?200:403);
-      expect((await call('GET','/api/v1/admin/consumers/consumer-0',undefined,roleHeaders)).statusCode).toBe(role==='CUSTOMER_SERVICE'?200:403);
+      const detailResponse = await call('GET','/api/v1/admin/consumers/1',undefined,roleHeaders);
+      expect(detailResponse.statusCode).toBe(role==='CUSTOMER_SERVICE'?200:403);
+      if (role === 'CUSTOMER_SERVICE') expect(detailResponse.json().data.phoneNumber).toBe('13800138000');
       if (role !== 'OPERATOR') {
         expect((await call('PATCH',`/api/v1/admin/campaigns/${c.id}`,{...input,version:1},roleHeaders)).statusCode).toBe(403);
         expect((await call('DELETE',`/api/v1/admin/campaigns/${c.id}`,{version:1},roleHeaders)).statusCode).toBe(403);
       }
     }
+    const readOnlyRole = await call('POST','/api/v1/admin/access/roles',{name:'用户基础查询',description:'',scope:'PLATFORM',permissions:['consumers.view'],status:'ACTIVE'});
+    expect(readOnlyRole.statusCode,readOnlyRole.body).toBe(200);
+    const readOnlyStaff = await call('POST','/api/v1/admin/staff',{role:'CUSTOMER_SERVICE',accessRoleId:readOnlyRole.json().data.id,username:'consumer-read-only',phone:'13800000123',pickupPointIds:[],status:'ACTIVE',displayName:'只读客服'});
+    expect(readOnlyStaff.statusCode,readOnlyStaff.body).toBe(201);
+    const readOnlyLogin = await app.inject({method:'POST',url:'/api/v1/auth/admin/login',payload:{username:'consumer-read-only',password:readOnlyStaff.json().data.temporaryPassword}});
+    const readOnlyChange = await app.inject({method:'POST',url:'/api/v1/auth/admin/complete-password-change',payload:{passwordChangeToken:readOnlyLogin.json().data.passwordChangeToken,newPassword:'ChangedPassword123'}});
+    const readOnlyHeaders = {authorization:`Bearer ${readOnlyChange.json().data.accessToken}`};
+    const phoneAuditCount = (await store.listAuditLogs(1000)).filter((entry) => entry.action === 'CONSUMER_PHONE_VIEWED').length;
+    const readOnlyDetail = await call('GET','/api/v1/admin/consumers/1',undefined,readOnlyHeaders);
+    expect(readOnlyDetail.statusCode).toBe(200);
+    expect(readOnlyDetail.json().data).not.toHaveProperty('phoneNumber');
+    expect(readOnlyDetail.json().data.maskedPhone).toBe('138****8000');
+    expect((await call('GET','/api/v1/admin/consumers/1/phone',undefined,readOnlyHeaders)).statusCode).toBe(403);
+    expect((await store.listAuditLogs(1000)).filter((entry) => entry.action === 'CONSUMER_PHONE_VIEWED')).toHaveLength(phoneAuditCount);
+    const contactRole = await call('POST','/api/v1/admin/access/roles',{name:'订单联系查看',description:'',scope:'PLATFORM',permissions:['orders.view','consumers.phone.view'],status:'ACTIVE'});
+    expect(contactRole.statusCode,contactRole.body).toBe(200);
+    const contactStaff = await call('POST','/api/v1/admin/staff',{role:'OPERATOR',accessRoleId:contactRole.json().data.id,username:'order-contact-viewer',phone:'13800000124',pickupPointIds:[],status:'ACTIVE',displayName:'订单联系人'});
+    expect(contactStaff.statusCode,contactStaff.body).toBe(201);
+    const contactLogin = await app.inject({method:'POST',url:'/api/v1/auth/admin/login',payload:{username:'order-contact-viewer',password:contactStaff.json().data.temporaryPassword}});
+    const contactChange = await app.inject({method:'POST',url:'/api/v1/auth/admin/complete-password-change',payload:{passwordChangeToken:contactLogin.json().data.passwordChangeToken,newPassword:'ChangedPassword123'}});
+    const contactHeaders = {authorization:`Bearer ${contactChange.json().data.accessToken}`};
+    const contactPhone = await call('GET','/api/v1/admin/consumers/1/phone',undefined,contactHeaders);
+    expect(contactPhone.statusCode,contactPhone.body).toBe(200);
+    expect(contactPhone.json().data).toEqual({phoneNumber:'13800138000'});
     expect((await call('PATCH',`/api/v1/admin/campaigns/${c.id}`,{...input,version:1},noAuth)).statusCode).toBe(401);
     expect((await call('DELETE',`/api/v1/admin/campaigns/${c.id}`,{version:1},noAuth)).statusCode).toBe(401);
     const after = await state(c.id);
     expect({...after,audit:[]}).toEqual({...before,audit:[]});
+  });
+  it('searches and exports all matching orders using the same filters without exposing full phone numbers', async () => {
+    const campaign = await create();
+    await store.saveUser({ id:'order-customer', wechatOpenId:'order-openid', phoneNumber:'13912345678', status:'ACTIVE', createdAt:'2026-09-01T00:00:00.000Z' });
+    await store.saveOrder({
+      id:'order-search-1',orderNo:'SEARCH-ORDER-1',userId:'order-customer',campaignId:campaign.id,
+      serviceAreaId:input.serviceAreaId,pickupPointId:pointId,deliveryPlanId:campaign.deliveryPlan.id,
+      status:'PENDING_PAYMENT',totalCents:moneyCents(1250),createdAt:'2026-09-09T16:30:00.000Z',
+      expiresAt:'2026-09-10T13:00:00.000Z',paidAt:null,pickedUpAt:null,
+      items:[{orderLineId:null,skuId:input.items[0]!.catalogSkuId,productId:'product-search',name:'测试蔬菜',quantity:1,unitPriceCents:moneyCents(1250),amountCents:moneyCents(1250),fulfilledQuantity:0,pickedUpQuantity:0,exceptionQuantity:0,refundedQuantity:0,refundedAmountCents:moneyCents(0)}],
+    });
+    const query = '/api/v1/admin/orders/search?keyword=1&status=PENDING_PAYMENT&dateType=CREATED_AT&from=2026-09-10&to=2026-09-10&page=1&pageSize=20';
+    const searched = await call('GET',query);
+    expect(searched.statusCode,searched.body).toBe(200);
+    expect(searched.json().data).toMatchObject({total:1,page:1,pageSize:20,items:[{orderNo:'SEARCH-ORDER-1',consumerNumber:1,maskedPhone:'139****5678'}]});
+    const customerDetail = await call('GET','/api/v1/admin/consumers/1');
+    expect(customerDetail.statusCode,customerDetail.body).toBe(200);
+    expect(customerDetail.json().data.orders).toContainEqual(expect.objectContaining({orderNo:'SEARCH-ORDER-1'}));
+    expect(customerDetail.json().data.orders[0]).not.toHaveProperty('id');
+    const exported = await call('GET','/api/v1/admin/orders/export?keyword=1&status=PENDING_PAYMENT&dateType=CREATED_AT&from=2026-09-10&to=2026-09-10');
+    expect(exported.statusCode,exported.body).toBe(200);
+    expect(exported.headers['content-type']).toContain('text/csv');
+    expect(exported.body).toContain('SEARCH-ORDER-1');
+    expect(exported.body).toContain('139****5678');
+    expect(exported.body).not.toContain('13912345678');
+    expect(exported.body.charCodeAt(0)).toBe(0xfeff);
+    expect(exported.headers['x-exported-row-count']).toBe('1');
+    const template = (await store.listOrders(10))[0]!;
+    store.overrideOrders = [{...template,orderNo:'=1+1'}];
+    const formulaExport = await call('GET','/api/v1/admin/orders/export');
+    expect(formulaExport.statusCode).toBe(200);
+    expect(formulaExport.body).toContain("'=1+1");
+    store.overrideOrders = Array.from({length:10_000},(_,index)=>({...template,id:`export-${index}`,orderNo:`EXPORT-${index}`}));
+    const atLimit = await call('GET','/api/v1/admin/orders/export');
+    expect(atLimit.statusCode,atLimit.body).toBe(200);
+    expect(atLimit.headers['x-exported-row-count']).toBe('10000');
+    expect(atLimit.body.split('\r\n')).toHaveLength(10_001);
+    store.overrideOrders = Array.from({length:10_001},(_,index)=>({...template,id:`export-${index}`,orderNo:`EXPORT-${index}`}));
+    const capped = await call('GET','/api/v1/admin/orders/export');
+    expect(capped.statusCode).toBe(413);
+    expect(capped.json().code).toBe('CAPACITY_EXCEEDED');
   });
 });

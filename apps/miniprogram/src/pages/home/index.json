@@ -1,4 +1,7 @@
 {
+  "navigationStyle": "custom",
+  "navigationBarTextStyle": "white",
+  "navigationBarBackgroundColor": "#e94338",
   "navigationBarTitleText": "乡味集",
   "usingComponents": {
     "subscription-reminder": "/components/subscription-reminder/index"

@@ -178,6 +178,7 @@ export interface CommerceStore {
   findUserByWechatOpenId(openId: string): Promise<User | null>;
   getUser(id: string): Promise<User | null>;
   listConsumerUsers(): Promise<User[]>;
+  allocateConsumerPublicNumber(userId: string): Promise<number>;
   saveUser(value: User): Promise<void>;
   savePrivacyConsent(userId: string, documentVersion: string): Promise<void>;
   getPrivacyConsent(
@@ -838,6 +839,36 @@ export class MemoryStore implements CommerceStore {
   }
   public async listConsumerUsers() {
     return clone([...this.data.users.values()].filter(user => user.wechatOpenId !== null && !this.data.staff.has(user.id)));
+  }
+  public async allocateConsumerPublicNumber(userId: string): Promise<number> {
+    const user = this.data.users.get(userId);
+    if (!user || user.wechatOpenId === null || this.data.staff.has(userId))
+      throw new BusinessError(
+        "INVALID_STATE_TRANSITION",
+        "只有消费者账号可以分配用户编号",
+        409,
+      );
+    if (user.consumerNumber !== undefined) {
+      if (!Number.isSafeInteger(user.consumerNumber) || user.consumerNumber < 1)
+        throw new BusinessError("INTEGRITY_VIOLATION", "用户ID无效", 500);
+      return user.consumerNumber;
+    }
+    const sequenceKey = "__codex_system__:consumer-public-number-sequence-v1";
+    const sequence = this.data.idempotency.get(sequenceKey);
+    const storedNext = Number(sequence?.orderId);
+    const maxAssigned = [...this.data.users.values()]
+      .filter((value) => value.wechatOpenId !== null && !this.data.staff.has(value.id))
+      .reduce((maximum, value) => Math.max(maximum, value.consumerNumber ?? 0), 0);
+    const next = Number.isSafeInteger(storedNext) && storedNext > maxAssigned
+      ? storedNext
+      : maxAssigned + 1;
+    if (!Number.isSafeInteger(next) || next < 1 || next >= Number.MAX_SAFE_INTEGER)
+      throw new BusinessError("CAPACITY_EXCEEDED", "用户编号已达到可分配上限", 409);
+    this.data.idempotency.set(sequenceKey, {
+      fingerprint: "consumer-public-number-sequence-v1",
+      orderId: String(next + 1),
+    });
+    return next;
   }
   public async getUser(id: string) {
     return clone(this.data.users.get(id) ?? null);

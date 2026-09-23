@@ -260,6 +260,36 @@ export const orderRequestSchema = z.object({
   pickupPointId: identifierSchema,
   items: z.array(orderLineSchema).min(1).max(100),
 });
+
+export const adminOrderSearchQuerySchema = z.object({
+  keyword: z.string().trim().max(80).default(""),
+  status: z.enum([
+    "PENDING_PAYMENT",
+    "PAID_WAITING_CLOSE",
+    "LOCKED",
+    "ALLOCATING",
+    "IN_TRANSIT",
+    "READY_FOR_PICKUP",
+    "PICKED_UP",
+    "COMPLETED",
+    "CANCELLING",
+    "REFUNDING",
+    "REFUNDED",
+    "CANCELLED",
+  ]).optional(),
+  campaignId: identifierSchema.optional(),
+  pickupPointId: identifierSchema.optional(),
+  dateType: z.enum(["CREATED_AT", "PAID_AT"]).default("CREATED_AT"),
+  from: z.iso.date().optional(),
+  to: z.iso.date().optional(),
+  page: z.coerce.number().int().min(1).max(100_000).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+}).superRefine((value, ctx) => {
+  if (value.from && value.to && value.from > value.to)
+    ctx.addIssue({ code: "custom", path: ["to"], message: "结束日期不能早于开始日期" });
+});
+
+export type AdminOrderSearchQuery = z.infer<typeof adminOrderSearchQuerySchema>;
 export const cancelOrderSchema = z
   .object({ reason: z.string().trim().min(2).max(500).optional() })
   .strict();

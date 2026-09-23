@@ -15,6 +15,7 @@ interface OrderCounts {
   pending: number;
   active: number;
   ready: number;
+  done: number;
   afterSale: number;
 }
 const loadCoordinator = new PageLoadCoordinator();
@@ -34,7 +35,7 @@ Page({
     areaError: "",
     latestRequestId: "",
     orderTotal: 0,
-    counts: { pending: 0, active: 0, ready: 0, afterSale: 0 } as OrderCounts,
+    counts: { pending: 0, active: 0, ready: 0, done: 0, afterSale: 0 } as OrderCounts,
   },
   onShow() {
     loadCoordinator.show();
@@ -77,7 +78,7 @@ Page({
       userName: "微信用户",
       phoneNumber: "",
       orderTotal: 0,
-      counts: { pending: 0, active: 0, ready: 0, afterSale: 0 },
+      counts: { pending: 0, active: 0, ready: 0, done: 0, afterSale: 0 },
     });
     if (!loggedIn) return;
     try {
@@ -93,11 +94,11 @@ Page({
         pending: 0,
         active: 0,
         ready: 0,
-        afterSale: orders
-          .flatMap((item) => item.communityQualityCases ?? [])
-          .filter((item) =>
-            ["REGISTERED", "ACCEPTED", "REFUNDING"].includes(item.status),
-          ).length,
+        done: 0,
+        afterSale: orders.filter((order) =>
+          ["REFUNDING", "REFUNDED", "CANCELLED"].includes(order.status) ||
+          Boolean(order.communityQualityCases?.length),
+        ).length,
       };
       for (const order of orders) {
         if (order.status === "PENDING_PAYMENT") counts.pending += 1;
@@ -108,6 +109,7 @@ Page({
         )
           counts.active += 1;
         else if (order.status === "READY_FOR_PICKUP") counts.ready += 1;
+        else if (["PICKED_UP", "COMPLETED"].includes(order.status)) counts.done += 1;
       }
       if (!loadCoordinator.isCurrent(loadGuard, customerAuth.captureSessionEpoch()) || !customerAuth.isLoggedIn()) return;
       this.setData({ orderTotal: orders.length, counts, userName: profile?.displayName || "微信用户", phoneNumber: profile?.phoneNumber ?? "" });
@@ -125,7 +127,7 @@ Page({
           loading: false,
           error: error.message,
           orderTotal: 0,
-          counts: { pending: 0, active: 0, ready: 0, afterSale: 0 },
+          counts: { pending: 0, active: 0, ready: 0, done: 0, afterSale: 0 },
         });
         navigateToCustomerLogin("profile", "/pages/profile/index");
         return;
@@ -165,7 +167,7 @@ Page({
         loading: false,
         error: "",
         orderTotal: 0,
-        counts: { pending: 0, active: 0, ready: 0, afterSale: 0 },
+        counts: { pending: 0, active: 0, ready: 0, done: 0, afterSale: 0 },
       });
     }
     await logoutPromise;
@@ -183,6 +185,22 @@ Page({
   },
   openPickup() {
     void wx.navigateTo({ url: "/pages/pickup-select/index" });
+  },
+  openPickupLocation() {
+    const point = this.data.pickupPoint;
+    if (point?.latitude == null || point.longitude == null) {
+      void wx.showToast({ title: "该自提点暂未配置导航坐标", icon: "none" });
+      return;
+    }
+    void wx.openLocation({ latitude: point.latitude, longitude: point.longitude, name: point.name, address: point.address });
+  },
+  callPickupPoint() {
+    const phone = this.data.pickupPoint?.contactPhone;
+    if (!phone) {
+      void wx.showToast({ title: "该自提点暂未配置联系电话", icon: "none" });
+      return;
+    }
+    void wx.makePhoneCall({ phoneNumber: phone });
   },
   openMessages() {
     void wx.navigateTo({ url: "/pages/messages/index" });

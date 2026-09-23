@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { BusinessError } from '@hometown/domain';
 import type { CommerceStore } from '../core/store.js';
+import { ensureConsumerPublicNumbers } from '../customers/consumer-directory-service.js';
 import type { User } from '../core/types.js';
 import type { WechatPhoneExchange } from './wechat-phone.js';
 import type { Actor } from './auth.js';
@@ -58,10 +59,15 @@ export class AuthService {
     const token = randomBytes(32).toString('base64url');
     const expiresAt = new Date(Date.now() + this.sessionTtlSeconds * 1_000).toISOString();
     const user = await this.store.transaction(async (store) => {
+      await ensureConsumerPublicNumbers(store);
       let value = await store.findUserByWechatOpenId(openId);
       if (!value) {
         const now = new Date().toISOString();
-        await store.saveUser({ id: randomUUID(), wechatOpenId: openId, status: 'ACTIVE', createdAt: now });
+        const id = randomUUID();
+        const newUser = { id, wechatOpenId: openId, status: 'ACTIVE' as const, createdAt: now };
+        await store.saveUser(newUser);
+        const consumerNumber = await store.allocateConsumerPublicNumber(id);
+        await store.saveUser({ ...newUser, consumerNumber });
         value = await store.findUserByWechatOpenId(openId);
       }
       if (!value || value.status !== 'ACTIVE') throw new BusinessError('FORBIDDEN', '账号当前不可用', 403);

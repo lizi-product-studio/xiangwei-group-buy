@@ -1,6 +1,6 @@
 import { api, customerErrorMessage } from '../../utils/api';
 import { formatMoney } from '../../utils/format';
-import { estimatedArrivalText, formatChinaDateTime, isCampaignPurchasable, shouldShowFloatingCart } from '../../utils/consumer-display';
+import { cutoffCountdown, estimatedArrivalText, formatChinaDateTime, isCampaignPurchasable, shouldShowFloatingCart } from '../../utils/consumer-display';
 import { cartCount as readCartCount } from '../../utils/cart';
 import { addCartLine, readCart, type CartSnapshot } from '../../utils/cart';
 import { resolveProductImageUrl } from '../../utils/product-image';
@@ -19,19 +19,27 @@ interface CampaignView extends CampaignDto {
   soldQuantity: number;
   salesQuantity: number;
   category: string;
+  description: string;
   imageUrl: string | null;
+  imageUrls: string[];
   arrivalText: string;
   unitPriceCents: number;
   stock: number;
 }
 
-interface CategoryItem { value: string; label: string; icon: string; }
+interface CategoryItem { value: string; label: string; icon: string; fallback: string; }
 interface BannerView extends HomepageBannerDto { imageUrl: string; }
+interface HeroCampaign { title: string; cutoffAt: string; cutoffText: string; countdownText: string; arrivalText: string; }
 
-const CATEGORY_ICON_PATHS = [
-  '/assets/category-icon-leaf.png', '/assets/category-icon-grain.png', '/assets/category-icon-beans.png',
-  '/assets/category-icon-ready-food.png', '/assets/category-icon-seasoning.png',
-];
+const categoryIcon = (value: string) => {
+  if (/蔬菜|青菜|绿叶/.test(value)) return '/assets/category-icon-leaf.png';
+  if (/粮油|谷物|主食|米面/.test(value)) return '/assets/category-icon-grain.png';
+  if (/豆制|豆类|豆腐/.test(value)) return '/assets/category-icon-beans.png';
+  if (/熟食|熟制|即食/.test(value)) return '/assets/category-icon-ready-food.png';
+  if (/调味|香料|酱料/.test(value)) return '/assets/category-icon-seasoning.png';
+  return '';
+};
+let countdownTimer: ReturnType<typeof setInterval> | null = null;
 
 Page({
   onShareAppMessage() {
@@ -47,15 +55,35 @@ Page({
     deliveryText: '下单前确认固定自提点，到货时间会持续更新',
     cartCount: 0,
     banners: [] as BannerView[],
+    heroCampaign: null as HeroCampaign | null,
+    countdownText: '',
+    statusBarHeight: 20,
+    menuReserveWidth: 104,
     imageRefreshKey: 0,
     availableAreaCount: 0,
   },
 
   onLoad() {
     if (typeof wx.showShareMenu === "function") wx.showShareMenu({ menus: ["shareAppMessage", "shareTimeline"] });
+    try {
+      const info = typeof wx.getWindowInfo === 'function' ? wx.getWindowInfo() : wx.getSystemInfoSync();
+      const capsule = typeof wx.getMenuButtonBoundingClientRect === 'function' ? wx.getMenuButtonBoundingClientRect() : null;
+      const reserve = capsule ? Math.max(90, info.windowWidth - capsule.left + 12) : 104;
+      this.setData({ statusBarHeight: info.statusBarHeight || 20, menuReserveWidth: reserve });
+    } catch { /* Keep conservative safe-area and capsule spacing on older clients. */ }
   },
-  onShow() { void this.loadCampaigns(); },
+  onShow() {
+    if (countdownTimer) clearInterval(countdownTimer);
+    void this.loadCampaigns();
+    countdownTimer = setInterval(() => this.refreshCountdown(), 1000);
+  },
+  onHide() { if (countdownTimer) clearInterval(countdownTimer); countdownTimer = null; },
+  onUnload() { if (countdownTimer) clearInterval(countdownTimer); countdownTimer = null; },
   onPullDownRefresh() { void this.loadCampaigns().finally(() => wx.stopPullDownRefresh()); },
+  refreshCountdown() {
+    const heroCampaign = this.data.heroCampaign;
+    if (heroCampaign) this.setData({ countdownText: cutoffCountdown(heroCampaign.cutoffAt) });
+  },
 
   async loadCampaigns() {
     this.setData({ loading: true, error: '' });
@@ -70,23 +98,31 @@ Page({
       const campaigns = allCampaigns
         .filter((campaign) => isCampaignPurchasable(campaign) && areaContext.selected && selectedPoint && campaign.serviceAreaId === areaContext.selected.id && campaign.deliveryPlan?.pickupPointId === selectedPoint.id)
         .flatMap((campaign) => campaign.items.map((product) => ({
-          ...campaign, renderKey: `${campaign.id}:${product.skuId}`, skuId: product.skuId, productTitle: product.title, skuName: product.skuName, category: product.category, unitPriceCents: product.unitPriceCents, stock: product.stock,
-          imageUrl: product.imageUrl, origin: product.origin, priceText: formatMoney(product.unitPriceCents), soldQuantity: product.soldQuantity, salesQuantity: product.salesQuantity ?? 0,
+          ...campaign, renderKey: `${campaign.id}:${product.skuId}`, skuId: product.skuId, productTitle: product.title, description: product.description?.trim() ?? '', skuName: product.skuName, category: product.category, unitPriceCents: product.unitPriceCents, stock: product.stock,
+          imageUrl: product.imageUrl, imageUrls: (product.imageUrls?.length ? product.imageUrls : product.imageUrl ? [product.imageUrl] : []).map(url => resolveProductImageUrl(url, getApp<IAppOption>().globalData.apiBaseUrl)).filter((url, index, list) => Boolean(url) && list.indexOf(url) === index).slice(0, 5), origin: product.origin, priceText: formatMoney(product.unitPriceCents), soldQuantity: product.soldQuantity, salesQuantity: product.salesQuantity ?? 0,
           cutoffText: formatChinaDateTime(campaign.cutoffAt, true), dispatchText: formatChinaDateTime(campaign.dispatchAt),
           arrivalText: estimatedArrivalText(campaign) ?? '到货时间待确认',
         })));
       const categories = [...new Set(campaigns.map((item) => item.category))];
       const categoryItems: CategoryItem[] = [
-        { value: '全部', label: '全部', icon: CATEGORY_ICON_PATHS[0]! },
-        ...categories.map((value, index) => ({ value, label: value, icon: CATEGORY_ICON_PATHS[(index + 1) % CATEGORY_ICON_PATHS.length]! })),
+        { value: '全部', label: '全部', icon: '', fallback: '全' },
+        ...categories.map((value) => ({ value, label: value, icon: categoryIcon(value), fallback: value.slice(0, 1) || '类' })),
       ];
+      const activeCampaign = allCampaigns.find((campaign) => isCampaignPurchasable(campaign) && areaContext.selected && selectedPoint && campaign.serviceAreaId === areaContext.selected.id && campaign.deliveryPlan?.pickupPointId === selectedPoint.id);
+      const heroCampaign: HeroCampaign | null = activeCampaign ? {
+        title: activeCampaign.title,
+        cutoffAt: activeCampaign.cutoffAt,
+        cutoffText: formatChinaDateTime(activeCampaign.cutoffAt),
+        countdownText: cutoffCountdown(activeCampaign.cutoffAt),
+        arrivalText: estimatedArrivalText(activeCampaign) ?? '到货时间待确认',
+      } : null;
       const first = campaigns[0];
       const deliveryText = first?.deliveryPlan?.pickupPointId
         ? `截单 ${first.cutoffText} · ${first.arrivalText}`
         : selectedPoint ? '本期好物正在筹备，开团后即可选购' : '请选择方便领取的固定自提点';
       const currentCartCount = readCartCount();
       const activeCategory = categories.includes(this.data.activeCategory) ? this.data.activeCategory : '全部';
-      this.setData({ availableAreaCount: areaContext.areas.length, campaigns: this.filterProducts(campaigns, activeCategory, this.data.searchQuery), allProducts: campaigns, categories, categoryItems, activeCategory, imageRefreshKey: this.data.imageRefreshKey + 1, area: areaContext.selected,pickupPoint:selectedPoint, deliveryText, cartCount: shouldShowFloatingCart(currentCartCount) ? currentCartCount : 0, banners: banners.map((item) => ({ ...item, imageUrl: resolveProductImageUrl(item.imageUrl, getApp<IAppOption>().globalData.apiBaseUrl) })).filter((item) => item.imageUrl) });
+      this.setData({ availableAreaCount: areaContext.areas.length, campaigns: this.filterProducts(campaigns, activeCategory, this.data.searchQuery), allProducts: campaigns, categories, categoryItems, activeCategory, heroCampaign, countdownText: heroCampaign?.countdownText ?? '', imageRefreshKey: this.data.imageRefreshKey + 1, area: areaContext.selected,pickupPoint:selectedPoint, deliveryText, cartCount: shouldShowFloatingCart(currentCartCount) ? currentCartCount : 0, banners: banners.map((item) => ({ ...item, imageUrl: resolveProductImageUrl(item.imageUrl, getApp<IAppOption>().globalData.apiBaseUrl) })).filter((item) => item.imageUrl) });
     } catch (error) {
       this.setData({ error: customerErrorMessage(error, '商品加载失败，请稍后重试') });
     } finally { this.setData({ loading: false }); }
@@ -99,7 +135,27 @@ Page({
   openMessages() { void wx.navigateTo({ url: '/pages/messages/index' }); },
   openOrders() { void wx.navigateTo({ url: '/pages/orders/index' }); },
   openPickup() { void wx.navigateTo({ url: '/pages/pickup-select/index' }); },
+  openPickupLocation() {
+    const point = this.data.pickupPoint;
+    if (point?.latitude == null || point.longitude == null) {
+      void wx.showToast({ title: '该自提点暂未配置导航坐标', icon: 'none' });
+      return;
+    }
+    void wx.openLocation({ latitude: point.latitude, longitude: point.longitude, name: point.name, address: point.address });
+  },
+  callPickupPoint() {
+    const phone = this.data.pickupPoint?.contactPhone;
+    if (!phone) {
+      void wx.showToast({ title: '该自提点暂未配置联系电话', icon: 'none' });
+      return;
+    }
+    void wx.makePhoneCall({ phoneNumber: phone });
+  },
   openCart() { void wx.switchTab({ url: '/pages/cart/index' }); },
+  openCategory() {
+    wx.setStorageSync('categoryFilter', this.data.activeCategory || '全部');
+    void wx.navigateTo({ url: '/pages/category/index' });
+  },
   openBanner(event: WechatMiniprogram.BaseEvent) {
     const banner = this.data.banners[Number(event.currentTarget.dataset.index)] ?? this.data.banners[0];
     if (!banner) return;
@@ -107,7 +163,7 @@ Page({
       void wx.navigateTo({ url: `/pages/campaign/detail?id=${encodeURIComponent(banner.targetValue)}` });
     } else if (banner.targetType === 'CATEGORY') {
       wx.setStorageSync('categoryFilter', banner.targetValue ?? '全部');
-      void wx.switchTab({ url: '/pages/category/index' });
+      void wx.navigateTo({ url: '/pages/category/index' });
     }
   },
   addToCart(event: WechatMiniprogram.BaseEvent) {
@@ -137,7 +193,7 @@ Page({
   },
   filterProducts(products: CampaignView[], category: string, query: string): CampaignView[] {
     const normalized = query.trim().toLowerCase();
-    return products.filter((item) => (category === '全部' || item.category === category) && (!normalized || `${item.productTitle} ${item.skuName} ${item.category}`.toLowerCase().includes(normalized)));
+    return products.filter((item) => (category === '全部' || item.category === category) && (!normalized || `${item.productTitle} ${item.description} ${item.skuName} ${item.category}`.toLowerCase().includes(normalized)));
   },
   onSearchInput(event: WechatMiniprogram.Input) {
     const searchQuery = event.detail.value;

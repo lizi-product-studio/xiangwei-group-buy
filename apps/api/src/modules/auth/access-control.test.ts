@@ -8,7 +8,7 @@ import { buildApp } from "../../app.js";
 import { loadConfig } from "../../config.js";
 import { MemoryStore } from "../core/store.js";
 import { createAdminCredential, AdminAuthService } from "./admin-auth.js";
-import { ALL_PERMISSION_CODES } from "@hometown/api-contracts";
+import { ALL_PERMISSION_CODES, BUILTIN_ACCESS_ROLES, normalizePermissions } from "@hometown/api-contracts";
 import { requireActor } from "./auth.js";
 import { attachAccess, ROUTE_PERMISSIONS } from "./access-control.js";
 import { RoleService } from "./role-service.js";
@@ -32,6 +32,12 @@ async function account(store:MemoryStore,id:string,role:Role,accessRoleId?:strin
   return {authorization:`Bearer ${login.accessToken}`};
 }
 describe("configurable access roles",()=>{
+  it("keeps phone-detail permission separate from the consumer directory while granting it to customer service",()=>{
+    expect(BUILTIN_ACCESS_ROLES.find(role=>role.id==="CUSTOMER_SERVICE")?.permissions).toContain("consumers.phone.view");
+    expect(BUILTIN_ACCESS_ROLES.find(role=>role.id==="OPERATOR")?.permissions).not.toContain("consumers.phone.view");
+    expect(normalizePermissions(["consumers.phone.view"])).toEqual(["consumers.phone.view","orders.view"]);
+    expect(ROUTE_PERMISSIONS["GET /api/v1/admin/consumers/:id/phone"]).toEqual(["consumers.phone.view"]);
+  });
   let app:FastifyInstance|undefined;
   afterEach(async()=>app?.close());
   it("enforces persisted grants on real sessions, denies direct writes and governance, then invalidates revoked sessions",async()=>{

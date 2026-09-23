@@ -112,12 +112,13 @@ describe("consumer auth intent", () => {
     );
     expect(parseAuthIntent('{"source":"orders"}')).toBeNull();
     expect(isTabReturnUrl("/pages/orders/index")).toBe(false);
-    expect(isTabReturnUrl("/pages/category/index")).toBe(true);
+    expect(isTabReturnUrl("/pages/category/index")).toBe(false);
     expect(isTabReturnUrl("/pages/order-detail/index?id=1")).toBe(false);
   });
 
   it("binds each source to a registered route and required parameters", () => {
     expect(isRegisteredMiniProgramPage("/pages/orders/index")).toBe(true);
+    expect(isRegisteredMiniProgramPage("/pages/category/index")).toBe(true);
     expect(isRegisteredMiniProgramPage("/pages/not-registered/index")).toBe(false);
     expect(isValidAuthReturnUrl("orders", "/pages/orders/index")).toBe(true);
     expect(isValidAuthReturnUrl("orders", "/pages/order-detail/index?id=o-1")).toBe(false);

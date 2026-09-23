@@ -43,7 +43,7 @@ export function getAdminPageModule(page: AdminPage): AdminPage {
 
 const mainNavigation: readonly AdminNavigationGroup[] = [
   { key: "dashboard", label: "工作台", items: [{ key: "dashboard", label: "工作台", roles: ["OPERATOR"] }] },
-  { key: "products", label: "商品与团期", items: [
+  { key: "products", label: "商品与营销", items: [
     { key: "products", label: "商品列表", roles: ["OPERATOR"] },
     { key: "categories", label: "分类管理", roles: ["OPERATOR"] },
     { key: "campaigns", label: "团期管理", roles: ["OPERATOR"] },
@@ -54,7 +54,7 @@ const mainNavigation: readonly AdminNavigationGroup[] = [
     { key: "cancellations", label: "取消申请", roles: ["OPERATOR", "CUSTOMER_SERVICE"] },
     { key: "service", label: "售后与异常", roles: ["OPERATOR", "CUSTOMER_SERVICE"] },
   ] },
-  { key: "fulfillment", label: "发货管理", items: [
+  { key: "fulfillment", label: "履约", items: [
     { key: "logistics", label: "发货与运输", roles: ["OPERATOR"] },
     { key: "arrival-exceptions", label: "到货异常处理", roles: ["OPERATOR"] },
   ] },

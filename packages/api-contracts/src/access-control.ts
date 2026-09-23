@@ -4,15 +4,15 @@ export type AccessScope = "PLATFORM" | "PICKUP";
 export interface PermissionDefinition { code: string; label: string; page: string; group: string; scope: AccessScope; protected?: boolean }
 const modules: Array<[string, string, string, string[], AccessScope?]> = [
   ["dashboard", "工作台", "工作台", []],
-  ["products", "商品列表", "商品与团期", ["create", "edit"]],
-  ["categories", "分类管理", "商品与团期", ["manage", "delete"]],
-  ["campaigns", "团期管理", "商品与团期", ["create", "edit", "open", "close", "cancel", "delete", "labels"]],
-  ["homepage-banners", "首页轮播", "商品与团期", ["manage", "delete"]],
+  ["products", "商品列表", "商品与营销", ["create", "edit"]],
+  ["categories", "分类管理", "商品与营销", ["manage", "delete"]],
+  ["campaigns", "团期管理", "商品与营销", ["create", "edit", "open", "close", "cancel", "delete", "labels"]],
+  ["homepage-banners", "首页轮播", "商品与营销", ["manage", "delete"]],
   ["orders", "订单列表", "订单与售后", []],
   ["cancellations", "取消申请", "订单与售后", ["review"]],
   ["service", "售后与异常", "订单与售后", ["intake", "progress", "pickup-view", "accept", "decision", "pickup"]],
-  ["logistics", "发货与运输", "发货管理", ["edit", "dispatch"]],
-  ["arrival-exceptions", "到货异常处理", "发货管理", ["confirm"]],
+  ["logistics", "发货与运输", "履约", ["edit", "dispatch"]],
+  ["arrival-exceptions", "到货异常处理", "履约", ["confirm"]],
   ["pickup-points", "自提点管理", "自提点与区域", ["create", "edit", "delete"]],
   ["areas", "区域管理", "自提点与区域", ["manage"]],
   ["interests", "区域开通意向", "自提点与区域", ["manage"]],
@@ -27,7 +27,10 @@ const modules: Array<[string, string, string, string[], AccessScope?]> = [
   ["pickup-records", "提货记录", "点位工作台", [], "PICKUP"],
 ];
 const labels: Record<string, string> = { intake: "查看待受理申请", progress: "查看退款进度与结案", "pickup-view": "查看逾期领取", view: "查看", create: "新增", edit: "编辑", status: "上下架", manage: "新增与编辑", delete: "删除", open: "开售", close: "截单", cancel: "取消团期", labels: "生成装袋标签", review: "审核取消申请", accept: "受理售后", decision: "处理售后", pickup: "处理逾期领取", dispatch: "创建批次与发车", confirm: "确认", refund: "执行退款", verify: "核销领取" };
-export const PERMISSION_CATALOG: PermissionDefinition[] = modules.flatMap(([page, label, group, actions, scope = "PLATFORM"]) => ["view", ...actions].map(action => ({ code: `${page}.${action}`, label: action === "view" ? `查看${label}` : page === "products" && action === "edit" ? "编辑与上下架" : labels[action]!, page, group, scope })));
+export const PERMISSION_CATALOG: PermissionDefinition[] = [
+  ...modules.flatMap(([page, label, group, actions, scope = "PLATFORM"]) => ["view", ...actions].map(action => ({ code: `${page}.${action}`, label: action === "view" ? `查看${label}` : page === "products" && action === "edit" ? "编辑与上下架" : labels[action]!, page, group, scope }))),
+  { code: "consumers.phone.view", label: "查看完整手机号", page: "orders", group: "用户与通知", scope: "PLATFORM" },
+];
 export const ACCESS_PAGE_LABELS = Object.fromEntries(modules.map(([page, label]) => [page, label]));
 export const PROTECTED_ACCESS_PAGES = ["settings", "roles", "permissions"];
 export const ALL_PERMISSION_CODES = PERMISSION_CATALOG.map(p => p.code);
@@ -41,7 +44,7 @@ const legacyPages: Record<string, string[]> = {
 const legacyNames: Record<string, string> = { OPERATOR: "运营", CUSTOMER_SERVICE: "客服", FINANCE: "财务", PICKUP_MANAGER: "点位负责人" };
 export const BUILTIN_ACCESS_ROLES: AccessRole[] = Object.entries(legacyPages).map(([id, pages]) => ({
   id, name: legacyNames[id]!, description: "由原系统角色迁移，可调整功能权限", scope: id === "PICKUP_MANAGER" ? "PICKUP" : "PLATFORM", status: "ACTIVE", version: 1, builtIn: true, updatedAt: "2026-09-22T00:00:00.000Z",
-  permissions: PERMISSION_CATALOG.filter(p => pages.includes(p.page) && !(id === "CUSTOMER_SERVICE" && ["cancellations.review", "service.progress", "service.decision", "service.pickup-view", "service.pickup"].includes(p.code)) && !(id === "OPERATOR" && ["service.accept", "service.intake"].includes(p.code))).map(p => p.code),
+  permissions: PERMISSION_CATALOG.filter(p => pages.includes(p.page) && (p.code !== "consumers.phone.view" || id === "CUSTOMER_SERVICE") && !(id === "CUSTOMER_SERVICE" && ["cancellations.review", "service.progress", "service.decision", "service.pickup-view", "service.pickup"].includes(p.code)) && !(id === "OPERATOR" && ["service.accept", "service.intake"].includes(p.code))).map(p => p.code),
 }));
 export const accessRoleInputSchema = z.object({
   name: z.string().trim().min(2).max(40), description: z.string().trim().max(200).default(""), scope: z.enum(["PLATFORM", "PICKUP"]),
@@ -55,5 +58,6 @@ export const accessRoleInputSchema = z.object({
 });
 export function normalizePermissions(codes: readonly string[]): string[] {
   const dependencies: Record<string,string> = {"service.accept":"service.intake", "service.decision":"service.progress", "service.pickup":"service.pickup-view"};
-  return [...new Set(codes.flatMap(code => [code, `${code.split(".")[0]}.view`, ...(dependencies[code] ? [dependencies[code]!] : [])]))].sort();
+  const viewDependencies: Record<string,string> = {"consumers.phone.view":"orders.view"};
+  return [...new Set(codes.flatMap(code => [code, viewDependencies[code] ?? `${code.split(".")[0]}.view`, ...(dependencies[code] ? [dependencies[code]!] : [])]))].sort();
 }
