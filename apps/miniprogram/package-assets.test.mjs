@@ -89,9 +89,11 @@ describe('mini-program upload package assets', () => {
     const categoryMarkup = readFileSync(join(sourceRoot, 'pages/category/index.wxml'), 'utf8');
     const detailMarkup = readFileSync(join(sourceRoot, 'pages/campaign/detail.wxml'), 'utf8');
 
-    expect(homeMarkup).toContain('wx:elif="{{item.imageUrls.length === 1}}" class="product-photo product-photo--single"');
+    expect(homeMarkup).toContain('wx:else class="product-photo product-photo--single"');
+    expect(homeMarkup).toContain('src="{{item.imageUrls[0]}}"');
     expect(homeMarkup).toContain('auto-aspect="{{true}}" image-mode="aspectFit" style="height:auto"');
-    expect(homeMarkup).toContain('wx:else><view wx:for="{{item.imageUrls}}"');
+    expect(homeMarkup).not.toContain('wx:for="{{item.imageUrls}}"');
+    expect(detailMarkup).toContain('wx:for="{{gallery}}"');
     expect(homeMarkup).toContain('image-mode="aspectFit"');
     expect(productImageStyles).toContain('.product-image--auto-aspect { height: auto; }');
     expect(categoryMarkup).toContain('image-mode="aspectFit"');
@@ -101,16 +103,12 @@ describe('mini-program upload package assets', () => {
     expect(detailMarkup).not.toContain('/assets/pickup-point.jpg');
   });
 
-  it('sizes one or two real product photos to the card and reserves space for long prices', () => {
+  it('shows only the cover on the home card and reserves space for long prices', () => {
     const homeMarkup = readFileSync(join(sourceRoot, 'pages/home/index.wxml'), 'utf8');
     const homeStyles = readFileSync(join(sourceRoot, 'pages/home/index.wxss'), 'utf8');
 
-    expect(homeMarkup).toContain('product-card__photos--{{item.imageUrls.length}}');
-    expect(homeStyles).toContain('.product-card__photos--1{grid-template-columns:minmax(0,1fr)}');
-    expect(homeStyles).toContain('.product-card__photos--2,.product-card__photos--4{grid-template-columns:repeat(2,minmax(0,1fr))}');
-    expect(homeStyles).toContain('.product-card__photos--3{grid-template-columns:repeat(3,minmax(0,1fr))}');
-    expect(homeStyles).toContain('.product-card__photos--5{grid-template-columns:repeat(4,minmax(0,1fr))}');
-    expect(homeStyles).toContain('.product-card__photos--1 .product-photo--single{height:auto;aspect-ratio:auto}');
+    expect(homeMarkup).toContain('wx:if="{{item.imageUrls.length > 1}}" class="product-photo__count"');
+    expect(homeStyles).toContain('.product-photo--single{position:relative;height:auto;aspect-ratio:auto}');
     expect(homeStyles).toContain('.product-card__price-copy{display:flex;flex:1;min-width:0;flex-direction:column;align-items:flex-start}');
     expect(homeStyles).toContain('overflow-wrap:anywhere');
   });
