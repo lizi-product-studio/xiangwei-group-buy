@@ -55,3 +55,5 @@
 初版 `5418136` 的真实迁移因 MySQL 排序规则冲突失败。工程执行定向修复 `34b797d`，本地整合为 `c5fc16e`，实库定向测试 4/4 通过；独立 QA 随即发现 `_ai_ci` 会把大小写不同的不透明幂等键错误地视作系统序列键并丢弃，标记 UI001-COLLATION-001 阻断。工程执行续修 `1164646`，本地整合为 `e322f76`：精确比较序列键和 user/staff ID，并补历史键与用户 ID 大小写碰撞 fixture。相同隔离 MySQL 8.4 上 `REQUIRE_INTEGRATION_TESTS=true`、`MIGRATION_TEST_DATABASE_URL` 指向临时库，执行 `pnpm --filter @hometown/api exec vitest run src/modules/core/consumer-public-number-migration.test.ts`，4/4 通过（两条真实迁移/重放用例均执行，非 skip）。独立 QA 对冻结 `e322f76` 只读增量复审通过，关闭大小写碰撞阻断；UI-002/003/004 沿用此前同代码与依赖的有效审核。
 
 主负责人本机完整小程序 Vitest：39 files、169/169 tests PASS。后台以内存 API 和本地 Vite 在浏览器实看订单页与发货页：订单页有时间、状态、团期、自提点和关键词筛选及按筛选导出入口；发货页无可发货团期时显示空态。此为内存数据的视觉/入口核对，不能替代真实业务数据浏览器 E2E 或微信真机。测试结束已停止本地 API/Vite。本记录更新时 GitHub、正式服务器、微信上传/发布仍须分别核对，不以本地候选或实库测试代替上线。
+
+用户实测上传 5 张商品图后，首页卡片拼图占据大幅页面。按用户决定，首页只显示商品图片数组首张封面，卡片提示可进入详情查看全部；详情页既有最多 5 张轮播及点图预览保留。改动仅 `apps/miniprogram/src/pages/home/index.wxml` 与 `index.wxss`，提交 `bd304fc`；首页及详情定向测试 7/7、miniprogram typecheck、差异检查通过。此修正尚未取得五张真实图片的新模拟器截图，不能把先前单图视觉复查充作本次五图验收。
