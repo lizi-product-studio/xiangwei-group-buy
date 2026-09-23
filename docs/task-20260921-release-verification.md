@@ -30,7 +30,7 @@
 - 生产只读核实：API `hometown-api:e0bbdce`，后台 `/var/www/hometown-admin-d533ba5`，readiness 200；API/MySQL/Redis 均健康。Docker API 日志每份10MB、最多3份；Nginx每日轮转10份。
 - 主线程候选 `infra/nginx.host-api.conf` 与线上仅差8行脱敏日志配置，2026-09-21隔离 `nginx -t -c /tmp/xiangwei-nginx-validation-20260921.conf` 成功，尚未 reload。该文件 SHA256 `6d79c1df0246a5b6d716ddf0baebbb67eec2db0f2b036dcb0812a6577618c5b2`。
 - 用户确认当前小程序“已发布”；这不等于本轮修复已发布或头像隐私声明已验证。微信公众平台网页被工具站点安全策略阻止访问，不绕过；需人工完成平台核实。
-- 本机无Docker CLI。用户2026-09-21提供百度云实例截图，结合“可以去测试服务器跑”授权，将旧百度云180.76.100.156用作本轮测试机，替代原记录“不连接旧机”在本轮测试范围内的限制；生产目标不变。SSH已核实实例instance-u64whg6i，Docker无运行中容器、16GB磁盘空闲、2.6GB内存可用。执行者为独立测试环境唯一写入人；新目录/网络/数据库/卷，保留旧readiness/staging容器和数据，不做真实支付。Quality CI仍按发布基线执行。
+- 本机无Docker CLI。用户2026-09-21提供百度云实例截图，结合“可以去测试服务器跑”授权，将 180.76.100.156 用作本轮测试机；生产目标不变。SSH已核实实例instance-u64whg6i，Docker无运行中容器、16GB磁盘空闲、2.6GB内存可用。执行者为独立测试环境唯一写入人；新目录/网络/数据库/卷，保留旧readiness/staging容器和数据，不做真实支付。Quality CI仍按发布基线执行。当前服务器用途以根目录 `AGENTS.md` 第 3.1 节为准。
 
 ## 发布边界
 

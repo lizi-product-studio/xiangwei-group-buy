@@ -6,7 +6,7 @@
 
 ## 线上与仓库版本
 
-生产仍运行已验收批次 A：GitHub 提交 `a904ad98135e790ad9828750dc2de50e538ec7c1`，源码树 `cb446f96639bcfe0ca4782233f5f5a2f698a3d12`。API 镜像 `sha256:f494d34d44ab05baf7aa0377d14ab75a4ac80f1819ed3d3d840d374fa65a8fbf`，后台静态目录 `/var/www/hometown-admin-a904ad9`。生产目标 `192.144.136.205`，API https://liziqi.icu，后台 https://admin.liziqi.icu，点位工作台 https://saas.liziqi.icu。不得连接旧百度云服务器。
+当时生产运行已验收批次 A：GitHub 提交 `a904ad98135e790ad9828750dc2de50e538ec7c1`，源码树 `cb446f96639bcfe0ca4782233f5f5a2f698a3d12`。API 镜像 `sha256:f494d34d44ab05baf7aa0377d14ab75a4ac80f1819ed3d3d840d374fa65a8fbf`，后台静态目录 `/var/www/hometown-admin-a904ad9`。当时生产目标 `192.144.136.205`，API https://liziqi.icu，后台 https://admin.liziqi.icu，点位工作台 https://saas.liziqi.icu。当前服务器用途以根目录 `AGENTS.md` 第 3.1 节为准。
 
 A 已修复两类 P1：待处理队列先筛选再分页，避免旧待办被固定 500 条截断；历史退款使用精确订单关联，缺少订单/明细/分配关系时禁止计算和执行。队列组件还处理重复请求及迟到响应。产品测试 466 PASS，其中真实 MySQL/Redis 8/8，无跳过；最终受影响 E2E 5/5 PASS，独立发布后验 PASS。不是全量 E2E 单次全绿：历史失败保留在修复记录。根 `pnpm check` 仍有 prototypes 中 21 项 lint 问题，未通过删除或忽略掩盖。
 
