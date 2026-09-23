@@ -10,7 +10,7 @@
 
 写入权：固定工程执行（GPT-6 Luna high，按用户最新要求）只写 API、api-contracts 和必要迁移；主负责人只写 admin-web、miniprogram、本文。固定质量审核只读复核冻结版本。无人授权清库、真实交易或修改凭据。服务器沿用正式环境持续发布授权，微信上传/发布另记。
 
-状态：商品内容本地实现完成，固定 GPT-6 Luna high 独立 QA 已复核冻结版本 `1aaacd24047abd58f56a76f3f59cd14c39e61988`，未发现阻塞问题。PC-01 和 MEDIA-001 已修复；MEDIA-002 低风险边界见下文。尚未同步 GitHub、执行远端 CI、服务器部署或微信上传发布。后加售后页面整理单独验证，不冒充该冻结版本的独立 QA 结论。
+状态（2026-09-23）：商品内容已实现，固定 GPT-6 Luna high 独立 QA 已复核冻结版本 `1aaacd24047abd58f56a76f3f59cd14c39e61988`，未发现阻塞问题。PC-01 和 MEDIA-001 已修复；MEDIA-002 低风险边界见下文。后加售后页面整理为主负责人定向自验，未冒充前述冻结版本的独立 QA。GitHub、CI、正式服务器发布和微信开发版上传状态见下方发布记录；微信公众平台正式版尚未提审或发布。
 
 验证（本机 Node 运行时，API/UI 测试使用隔离内存数据及模拟支付）：
 - 后端：契约 build/test 28/28、API 定向 38/38、通知 at-most-once/throughput 26/26、API typecheck/相关 ESLint/diff-check 通过；执行者提供提交对应证据。
@@ -26,9 +26,16 @@
 - MEDIA-001 已关闭：自定义商品角色曾可编辑商品却不能上传详情图。`5dff360abcdba36096b73b68204822e383ea7ce9` 修为按 products.create/products.edit 任一实际权限允许，纯查看角色拒绝；定向 10/10 通过。
 - 配额/磁盘空间补测 `f4cb1184674142099f72b8fe53816e715580b418`：与权限相关用例合计 19/19；配额/空间不足返回 507、无文件残留且释放并发名额，恢复容量可继续上传。
 - MEDIA-002 非阻塞限制：磁盘配额检查未做跨进程原子预留，并发边界可能小幅超出配置配额/预留余量；不能描述成严格原子额度。自动回收与多进程原子配额未在本轮实现。
-- Nginx 新增详情图片 11MB 请求上限并关闭上传请求预缓存，避免代理默认 1MB 截断长图。使用线上同版本二进制对隔离临时配置 nginx -t 通过，未 reload 正式配置；候选配置 SHA256 为 `45c1899105a344cbfd95cd9bd3fb8a666d13c94f6c9ade627946fff40c34d767`。
+- Nginx 新增详情图片 11MB 请求上限并关闭上传请求预缓存，避免代理默认 1MB 截断长图。发布前使用线上同版本二进制对隔离临时配置 `nginx -t` 通过；候选配置 SHA256 为 `45c1899105a344cbfd95cd9bd3fb8a666d13c94f6c9ade627946fff40c34d767`，正式切换结果见下方发布记录。
 
-外部阻断：当前工具无 GitHub 内置连接器，本机无 gh，非交互只读 ls-remote 认证失败；已向用户提出连接 GitHub 插件的选项，未反复触发认证。正式服务器只读确认可用，未作生产写入。CI/发布须继续核验，不能用本地模拟测试代替。
+## 2026-09-23 发布记录
+
+- GitHub 内置连接器已连接，仓库 `lizi-product-studio/xiangwei-group-buy` 的 `main` 快进至远端提交 `76c064533aa3d2597b0258cd34d07dc2c1e5b5d1`。该提交与本地发布源码 `f7bc6b724e7934678deb562b266d2d8dd5486c94` 同一源码树 `53b3332c5d7edbcc1154b37458095665f9532ac3`；未使用命令行 push。后续本地 `d9072dcbd24f6a8774e0a4833001c5195d292b54` 仅改 AGENTS.md，不属于本次运行产物。
+- GitHub Actions [run 35806917291](https://github.com/lizi-product-studio/xiangwei-group-buy/actions/runs/35806917291) `completed/success`；scope、checks、browser、API/admin images 与 verify 均通过。测试机按受限资源串行构建相同源码树的 API 与后台静态产物，构建回执和源码摘要保留于 `/root/release-product-76c0645/`。
+- 正式目标 `housekeeping-server / 192.144.136.205` 已切换：API 镜像 `sha256:c527b2852b48018035ff7c84f607d79af2709855ca6aa8385a912c017aa2a591`，后台目标 `/var/www/hometown-admin-f7bc6b7`，Nginx 配置 SHA256 `45c1899105a344cbfd95cd9bd3fb8a666d13c94f6c9ade627946fff40c34d767`。部署结果 `PASS`，备份、回滚源与产物证据保留于正式机 `/root/xiangwei-product-release-20260923/`；未执行迁移、清库、真实支付或退款。
+- 发布后独立核对：API 容器健康，`/health/ready` 的五项依赖均 `ok`；`admin.liziqi.icu` 与 `saas.liziqi.icu` 公网页面哈希均等于后台构建回执，运行 API 镜像及后台符号链接等于发布计划。
+- 微信开发者工具 CLI 使用本仓库 `apps/miniprogram`、AppID `wxdf7048276cc079f5` 上传开发版 `1.0.20260923` 成功，包体 950,852 字节。**这不是微信公众平台正式发布**；平台页面被电脑操作工具的站点限制拦截，无法代用户提审或发布，当前用户侧版本未核实。真实账号登录、支付、订阅触达及隐私指引仍须在对应渠道验收。
+- 本次生成的本机 API 镜像压缩包与源码 tar 已删；测试机只删除本轮可复建的构建目录和本轮镜像标签，保留回执、构建日志、源码包和后台产物包。正式机保留部署包与数据库备份供恢复使用。
 
 ## 2026-09-23 补充反馈：售后队列与客服去向
 
