@@ -44,18 +44,12 @@ describe("catalog net sales", () => {
 
   it("uses one bulk refund read instead of one lookup per order", async () => {
     class CountingStore extends MemoryStore {
-      public orderReads = 0;
-      public refundReads = 0;
-      public perOrderRefundReads = 0;
-      public override async listOrders(limit: number) { this.orderReads += 1; return super.listOrders(limit); }
-      public override async listOrderRefunds(limit: number) { this.refundReads += 1; return super.listOrderRefunds(limit); }
-      public override async getOrderRefundByOrder(id: string) { this.perOrderRefundReads += 1; return super.getOrderRefundByOrder(id); }
+      public aggregateReads = 0;
+      public override async getNetSalesQuantities(campaignId?: string) { this.aggregateReads += 1; return super.getNetSalesQuantities(campaignId); }
     }
     const store = new CountingStore(false);
     for (let index = 0; index < 20; index += 1) await store.saveOrder(order(`order-${index}`, "COMPLETED", 1));
     await calculateNetSalesQuantities(store);
-    expect(store.orderReads).toBe(1);
-    expect(store.refundReads).toBe(1);
-    expect(store.perOrderRefundReads).toBe(0);
+    expect(store.aggregateReads).toBe(1);
   });
 });

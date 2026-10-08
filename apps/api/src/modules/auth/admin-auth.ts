@@ -255,20 +255,24 @@ export class AdminAuthService {
     return this.login(challengeUsername, newPassword);
   }
 
-  public async authenticate(authorization: string | undefined): Promise<Actor | null> {
+  public async authenticate(
+    authorization: string | undefined,
+    scopedStore: CommerceStore = this.store,
+    onRevokedSession?: (tokenHash: string) => void,
+  ): Promise<Actor | null> {
     if (!authorization?.startsWith("Bearer ")) return null;
     const token = authorization.slice(7).trim();
     if (token.length < 32 || token.length > 128) return null;
     const tokenHash = sessionTokenHash(token);
-    const session = await this.store.getActiveAuthSession(tokenHash);
+    const session = await scopedStore.getActiveAuthSession(tokenHash);
     if (!session) return null;
     // Consumer and employee tokens share storage. Leave consumer sessions for
     // the WeChat authenticator instead of revoking them as invalid employees.
     if (session.roles.length === 1 && session.roles[0] === "USER") return null;
     const [user, credential, staff] = await Promise.all([
-      this.store.getUser(session.userId),
-      this.store.findAdminCredentialByUserId(session.userId),
-      this.store.getInternalStaff(session.userId),
+      scopedStore.getUser(session.userId),
+      scopedStore.findAdminCredentialByUserId(session.userId),
+      scopedStore.getInternalStaff(session.userId),
     ]);
     const currentVersion = credential?.authorizationVersion ?? 0;
     const isCurrent = Boolean(
@@ -285,7 +289,8 @@ export class AdminAuthService {
         staff.authorizationVersion === currentVersion,
     );
     if (!isCurrent) {
-      await this.store.deleteAuthSession(tokenHash);
+      if (onRevokedSession) onRevokedSession(tokenHash);
+      else await scopedStore.deleteAuthSession(tokenHash);
       return null;
     }
     return {

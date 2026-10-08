@@ -1,7 +1,7 @@
 import { api, customerErrorMessage } from "../../utils/api";
 import { formatMoney } from "../../utils/format";
 import { estimatedArrivalText, formatChinaDateTime, isCampaignPurchasable } from "../../utils/consumer-display";
-import { addCartLine, cartCount as readCartCount, readCart, type CartSnapshot } from "../../utils/cart";
+import { addCartLine, cartCount as readCartCount, type CartSnapshot } from "../../utils/cart";
 import { loadServiceAreaContext, type ServiceAreaSelection } from "../../utils/service-area";
 import { loadPickupPoints, type PickupPointSelection } from "../../utils/pickup-point";
 
@@ -51,9 +51,10 @@ Page({
     this.setData({ loading: true, error: "" });
     try {
       const context = await loadServiceAreaContext();
-      const [campaigns, pointContext] = await Promise.all([
+      const [campaigns, pointContext, configuredCategories] = await Promise.all([
         api.listCampaigns(),
         context.selected ? loadPickupPoints(context.selected.id) : Promise.resolve({ points: [], selected: null }),
+        api.listProductCategories().catch(() => null),
       ]);
       const pickupPoint = pointContext.selected;
       const products = campaigns
@@ -75,7 +76,9 @@ Page({
           cutoffText: formatChinaDateTime(campaign.cutoffAt, true),
           arrivalText: estimatedArrivalText(campaign) ?? "到货时间待确认",
         })));
-      const categories = ["全部", ...new Set(products.map((item) => item.category))];
+      const categories = ["全部", ...(configuredCategories === null
+        ? [...new Set(products.map((item) => item.category))]
+        : configuredCategories.map((item) => item.name))];
       const requested = wx.getStorageSync<string>("categoryFilter");
       const activeCategory = requested && categories.includes(requested) ? requested : "全部";
       if (requested) wx.removeStorageSync("categoryFilter");
@@ -95,14 +98,9 @@ Page({
   addToCart(event: WechatMiniprogram.BaseEvent) {
     const item = this.data.allProducts.find((candidate) => candidate.renderKey === event.currentTarget.dataset.key);
     if (!item || !this.data.area || !this.data.pickupPoint) return;
-    const base: Omit<CartSnapshot, "items" | "updatedAt"> = { campaignId: item.id, campaignTitle: item.title, serviceAreaId: item.serviceAreaId, serviceAreaName: this.data.area.name, pickupPointId: this.data.pickupPoint.id, pickupPointName: this.data.pickupPoint.name, pickupPointAddress: this.data.pickupPoint.address };
-    const existing = readCart();
-    if (existing && (existing.campaignId !== base.campaignId || existing.pickupPointId !== base.pickupPointId)) {
-      void wx.showModal({ title: "购物车属于其他团期", content: `当前购物车是“${existing.campaignTitle}”，请先结算或清空后再加入本期商品。`, showCancel: false });
-      return;
-    }
-    const cart = addCartLine(base, { skuId: item.skuId, title: item.productTitle, skuName: item.skuName, imageUrl: item.imageUrl, unitPriceCents: item.unitPriceCents, quantity: 1, maxQuantity: Math.max(1, item.stock - item.soldQuantity) });
-    this.setData({ cartCount: readCartCount(cart) });
+    const base: Omit<CartSnapshot, "items" | "updatedAt"> = { campaignId: item.id, campaignTitle: item.title, serviceAreaId: item.serviceAreaId, serviceAreaName: this.data.area.name, pickupPointId: this.data.pickupPoint.id, pickupPointName: this.data.pickupPoint.name, pickupPointAddress: this.data.pickupPoint.address, cutoffAt: item.cutoffAt, arrivalText: item.arrivalText };
+    addCartLine(base, { skuId: item.skuId, title: item.productTitle, skuName: item.skuName, imageUrl: item.imageUrl, unitPriceCents: item.unitPriceCents, quantity: 1, maxQuantity: Math.max(1, item.stock - item.soldQuantity) });
+    this.setData({ cartCount: readCartCount() });
     void wx.showToast({ title: "已加入购物车", icon: "success" });
   },
   openCart() { void wx.switchTab({ url: "/pages/cart/index" }); },

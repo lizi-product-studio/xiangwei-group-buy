@@ -29,6 +29,25 @@ export type AdminNavigationGroup = {
   items: readonly AdminNavigationItem[];
 };
 
+const adminPages = new Set<AdminPage>([
+  "dashboard", "products", "campaigns", "orders", "logistics", "pickup-points", "consumers",
+  "service", "governance", "finance", "audit", "settings", "point-workbench", "categories",
+  "areas", "cancellations", "arrival-exceptions", "finance-records", "finance-ledger",
+  "interests", "point-pickup", "pickup-records", "homepage-banners", "roles", "permissions",
+]);
+
+export function resolveAdminPageFromSearch(
+  search: string,
+  roles: readonly string[],
+  permissions: readonly string[] | undefined,
+  fallback: AdminPage | null,
+): AdminPage | null {
+  const requested = new URLSearchParams(search).get("page");
+  if (requested && adminPages.has(requested as AdminPage) && isAllowedAdminPage(roles, requested as AdminPage, permissions))
+    return requested as AdminPage;
+  return fallback && isAllowedAdminPage(roles, fallback, permissions) ? fallback : getDefaultAdminPage(roles, permissions);
+}
+
 const globalRoles = ["OPERATOR", "SUPER_ADMIN", "FINANCE", "CUSTOMER_SERVICE"];
 
 export function getAdminPageModule(page: AdminPage): AdminPage {
@@ -108,6 +127,7 @@ export function getAdminNavigation(
     ].map(group => ({...group, items: group.items.filter(item => permissions === undefined || !["settings", "roles", "permissions"].includes(item.key) && permissions.includes(`${item.key}.view`))})) .filter(group => group.items.length > 0) as AdminNavigationGroup[];
   }
   const isSuperAdmin = roles.includes("SUPER_ADMIN");
+  const permissionFor = (page: AdminPage) => `${page}.view`;
   return mainNavigation
     .map((group) => ({
       key: group.key,
@@ -115,7 +135,7 @@ export function getAdminNavigation(
       items: group.items
         .filter(
           (item) =>
-            isSuperAdmin || (permissions === undefined ? item.roles.some((role) => roles.includes(role)) : !["settings", "roles", "permissions"].includes(item.key) && permissions.includes(`${item.key}.view`)),
+            isSuperAdmin || (permissions === undefined ? item.roles.some((role) => roles.includes(role)) : !["settings", "roles", "permissions"].includes(item.key) && permissions.includes(permissionFor(item.key))),
         ),
     }))
     .filter((group) => group.items.length > 0);

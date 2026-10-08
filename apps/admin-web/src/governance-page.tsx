@@ -11,7 +11,6 @@ import {
   Select,
   Space,
   Spin,
-  Table,
   Tag,
   Typography,
 } from "antd";
@@ -79,18 +78,20 @@ type PendingInterestAction =
 
 export function GovernancePage({
   notifications,
-  interests,
   loading,
   error,
   reload,
+  canViewNotifications,
+  canViewInterests,
   canHandleNotifications,
   canHandleInterests,
 }: {
   notifications: Notification[];
-  interests: ServiceAreaInterest[];
   loading: boolean;
   error: string | null;
   reload: () => Promise<void>;
+  canViewNotifications: boolean;
+  canViewInterests: boolean;
   canHandleNotifications: boolean;
   canHandleInterests: boolean;
 }) {
@@ -99,6 +100,7 @@ export function GovernancePage({
     useState<PendingNotificationAction | null>(null);
   const [interestAction, setInterestAction] =
     useState<PendingInterestAction | null>(null);
+  const [interestRefreshToken, setInterestRefreshToken] = useState(0);
   const [submitting, setSubmitting] = useState(false);
 
   const retry = async () => {
@@ -147,7 +149,8 @@ export function GovernancePage({
         note: interestAction.note,
       });
       setInterestAction(null);
-      await refreshAfterMutation(reload, message, "区域开通意向已更新");
+      setInterestRefreshToken((version) => version + 1);
+      message.success("区域开通意向已更新");
     } catch (caught) {
       void message.error(adminErrorNotice(caught));
     } finally {
@@ -160,11 +163,11 @@ export function GovernancePage({
       <header className="section-header">
         <div>
           <Typography.Title level={2}>
-            {canHandleInterests ? "区域开通意向" : "通知处理"}
+            {canViewInterests ? "区域开通意向" : "通知处理"}
           </Typography.Title>
           <Typography.Paragraph type="secondary">
-            {canHandleInterests
-              ? "登记区域开通需求与联系结果；记录意向不代表服务已开通。"
+            {canViewInterests
+              ? `登记区域开通需求与联系结果；记录意向不代表服务已开通。${canHandleInterests ? "" : " 当前账号仅可查看。"}`
               : "处理未成功送达的订单提醒，并记录可复核的联系结果。"}
           </Typography.Paragraph>
         </div>
@@ -183,7 +186,7 @@ export function GovernancePage({
         />
       )}
 
-      {canHandleNotifications && <section aria-label="通知人工处理队列">
+      {canViewNotifications && <section aria-label="通知人工处理队列">
         <Typography.Title level={4}>通知人工处理</Typography.Title>
         <Alert
           type="info"
@@ -211,7 +214,7 @@ export function GovernancePage({
                   <Typography.Text type="secondary">已人工完成</Typography.Text>
                 ) : (
                   <Space wrap>
-                    {value.status === "MANUAL_REQUIRED" && (
+                    {canHandleNotifications && value.status === "MANUAL_REQUIRED" && (
                       <Button
                         disabled={submitting}
                         onClick={() =>
@@ -229,7 +232,7 @@ export function GovernancePage({
                         微信可能已送达，请勿再次系统发送
                       </Typography.Text>
                     )}
-                    <Button
+                    {canHandleNotifications && <Button
                       type="primary"
                       disabled={submitting}
                       onClick={() =>
@@ -237,7 +240,7 @@ export function GovernancePage({
                       }
                     >
                       人工完成
-                    </Button>
+                    </Button>}
                   </Space>
                 ),
             },
@@ -271,12 +274,14 @@ export function GovernancePage({
         </Typography.Paragraph>
       </Modal>
 
-      {canHandleInterests && <section aria-label="区域开通意向">
+      {canViewInterests && <section aria-label="区域开通意向">
         <Typography.Title level={4}>区域开通意向</Typography.Title>
-        <Table
+        <OperationsQueueTable
           rowKey="id"
-          dataSource={interests}
           locale={{ emptyText: "暂无区域开通意向" }}
+          loadPage={api.serviceAreaInterestsPage}
+          refreshToken={interestRefreshToken}
+          statuses={["NEW", "CONTACTED", "CLOSED"]}
           columns={[
             { title: "区域", dataIndex: "regionText" },
             { title: "联系人", dataIndex: "contactName" },
@@ -289,7 +294,7 @@ export function GovernancePage({
               title: "操作",
               render: (_, value: ServiceAreaInterest) => {
                 const next = value.status === "NEW" ? "CONTACTED" : value.status === "CONTACTED" ? "CLOSED" : null;
-                return next ? (
+                return next && canHandleInterests ? (
                   <Button
                     type="primary"
                     disabled={submitting}
@@ -297,8 +302,10 @@ export function GovernancePage({
                   >
                     {next === "CONTACTED" ? "登记已联系" : "关闭意向"}
                   </Button>
-                ) : (
+                ) : value.status === "CLOSED" ? (
                   <Typography.Text type="secondary">已关闭</Typography.Text>
+                ) : (
+                  <Typography.Text type="secondary">—</Typography.Text>
                 );
               },
             },

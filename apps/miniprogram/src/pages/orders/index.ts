@@ -19,8 +19,11 @@ interface OrdersCache {
   epoch: number;
   generation: number;
   items: OrderView[];
+  hasMore: boolean;
+  nextCursor: { createdAt: string; id: string } | null;
 }
 let cachedOrders: OrdersCache | null = null;
+let loadingMoreOrders = false;
 const loadCoordinator = new PageLoadCoordinator();
 function inFilter(order: OrderView, filter: string): boolean {
   if (filter === "PENDING") return order.status === "PENDING_PAYMENT";
@@ -55,6 +58,9 @@ Page({
     loading: true,
     error: "",
     activeFilter: "ALL",
+    hasMore: false,
+    loadingMore: false,
+    loadMoreError: "",
   },
   async onShow() {
     loadCoordinator.show();
@@ -66,7 +72,8 @@ Page({
     // account may change while this tab is kept alive, so rendering the old
     // rows during loading would leak the previous account's orders.
     cachedOrders = null;
-    this.setData({ loading: true, error: "", activeFilter, orders: [] });
+    loadingMoreOrders = false;
+    this.setData({ loading: true, error: "", activeFilter, orders: [], hasMore: false, loadingMore: false, loadMoreError: "" });
     if (!customerAuth.isLoggedIn()) {
       this.setData({
         loading: false,
@@ -76,15 +83,8 @@ Page({
       return;
     }
     try {
-      const [orders, campaigns] = await Promise.all([
-        api.listOrders(),
-        api.listCampaigns().catch(() => []),
-      ]);
-      const imageMap = new Map(
-        campaigns.flatMap((campaign) =>
-          campaign.items.map((item) => [item.skuId, item.imageUrl] as const),
-        ),
-      );
+      const page = await api.listOrdersPage(20, undefined, activeFilter);
+      const orders = page.items;
       if (!loadCoordinator.isCurrent(loadGuard, customerAuth.captureSessionEpoch()) || !customerAuth.isLoggedIn()) return;
       const items = orders.map((order) => {
         const delivery = deliveryText(order.deliveryPlan);
@@ -102,12 +102,12 @@ Page({
             .map((item) => `${item.name} × ${item.quantity}`)
             .join("、"),
           imageUrl: firstSkuId
-            ? (imageMap.get(firstSkuId) ?? "")
+            ? (order.items.find((item) => item.skuId === firstSkuId)?.imageUrl ?? "")
             : "",
         };
       });
-      cachedOrders = { epoch: loadGuard.epoch, generation: loadGuard.generation, items };
-      this.setData({ orders: items.filter((order) => inFilter(order, activeFilter)) });
+      cachedOrders = { epoch: loadGuard.epoch, generation: loadGuard.generation, items, hasMore: page.hasMore, nextCursor: page.nextCursor };
+      this.setData({ orders: items.filter((order) => inFilter(order, activeFilter)), hasMore: page.hasMore });
     } catch (error) {
       const ownExpiry = error instanceof AuthExpiredError &&
         error.sessionWasCleared &&
@@ -130,28 +130,89 @@ Page({
   },
   onHide() { loadCoordinator.hide(); },
   onUnload() { loadCoordinator.unload(); },
-  changeFilter(event: WechatMiniprogram.BaseEvent) {
-    const activeFilter = event.currentTarget.dataset.filter as string;
+  async loadMore() {
     const cache = cachedOrders;
-    const cacheGuard = cache && {
-      epoch: cache.epoch,
-      generation: cache.generation,
-      isActive: true as const,
-    };
-    if (
-      !cache ||
-      !cacheGuard ||
-      !customerAuth.isLoggedIn() ||
-      !loadCoordinator.isCurrent(cacheGuard, customerAuth.captureSessionEpoch())
-    ) {
-      cachedOrders = null;
-      this.setData({ activeFilter, orders: [] });
+    if (!cache || !cache.hasMore || !cache.nextCursor || loadingMoreOrders || !customerAuth.isLoggedIn()) return;
+    const guard = { epoch: cache.epoch, generation: cache.generation, isActive: true as const };
+    if (!loadCoordinator.isCurrent(guard, customerAuth.captureSessionEpoch())) return;
+    loadingMoreOrders = true;
+    this.setData({ loadingMore: true, loadMoreError: "" });
+    try {
+      const page = await api.listOrdersPage(20, cache.nextCursor, this.data.activeFilter);
+      if (!loadCoordinator.isCurrent(guard, customerAuth.captureSessionEpoch()) || cachedOrders !== cache || !customerAuth.isLoggedIn()) return;
+      const deliveryItems = await Promise.all(page.items.map(async (order) => {
+        const delivery = deliveryText(order.deliveryPlan);
+        const firstSkuId = order.items[0]?.skuId;
+        return {
+          ...order,
+          total: formatMoney(order.totalCents),
+          createdText: formatDateTime(order.createdAt),
+          statusText: orderStatusCopy(order.status).text,
+          statusTone: orderStatusTone(order.status),
+          canPickup: order.status === "READY_FOR_PICKUP",
+          deliveryName: delivery.name,
+          deliveryAddress: delivery.address,
+          itemSummary: order.items.map((item) => `${item.name} × ${item.quantity}`).join("、"),
+          imageUrl: firstSkuId ? (order.items.find((item) => item.skuId === firstSkuId)?.imageUrl ?? "") : "",
+        };
+      }));
+      const combined = [...cache.items, ...deliveryItems];
+      const unique = [...new Map(combined.map((order) => [order.id, order])).values()];
+      const next: OrdersCache = { ...cache, items: unique, hasMore: page.hasMore, nextCursor: page.nextCursor };
+      cachedOrders = next;
+      this.setData({ orders: unique.filter((order) => inFilter(order, this.data.activeFilter)), hasMore: page.hasMore });
+    } catch (error) {
+      this.setData({ loadMoreError: customerErrorMessage(error, "加载更多订单失败") });
+    } finally {
+      loadingMoreOrders = false;
+      const latest = cachedOrders;
+      if (latest && loadCoordinator.isCurrent({ epoch: latest.epoch, generation: latest.generation, isActive: true }, customerAuth.captureSessionEpoch()))
+        this.setData({ loadingMore: false });
+    }
+  },
+  async changeFilter(event: WechatMiniprogram.BaseEvent) {
+    const activeFilter = event.currentTarget.dataset.filter as string;
+    const guard = loadCoordinator.begin(customerAuth.captureSessionEpoch());
+    cachedOrders = null;
+    loadingMoreOrders = false;
+    this.setData({ activeFilter, loading: true, error: "", orders: [], hasMore: false, loadingMore: false, loadMoreError: "" });
+    if (!customerAuth.isLoggedIn()) {
+      this.setData({ loading: false, error: "登录后可查看你的订单与领取进度" });
       return;
     }
-    this.setData({
-      activeFilter,
-      orders: cache.items.filter((order) => inFilter(order, activeFilter)),
-    });
+    try {
+      const page = await api.listOrdersPage(20, undefined, activeFilter);
+      if (!loadCoordinator.isCurrent(guard, customerAuth.captureSessionEpoch()) || !customerAuth.isLoggedIn()) return;
+      const items = await Promise.all(page.items.map(async (order) => {
+        const delivery = deliveryText(order.deliveryPlan);
+        const firstSkuId = order.items[0]?.skuId;
+        return {
+          ...order,
+          total: formatMoney(order.totalCents),
+          createdText: formatDateTime(order.createdAt),
+          statusText: orderStatusCopy(order.status).text,
+          statusTone: orderStatusTone(order.status),
+          canPickup: order.status === "READY_FOR_PICKUP",
+          deliveryName: delivery.name,
+          deliveryAddress: delivery.address,
+          itemSummary: order.items.map((item) => `${item.name} × ${item.quantity}`).join("、"),
+          imageUrl: firstSkuId ? (order.items.find((item) => item.skuId === firstSkuId)?.imageUrl ?? "") : "",
+        };
+      }));
+      cachedOrders = { epoch: guard.epoch, generation: guard.generation, items, hasMore: page.hasMore, nextCursor: page.nextCursor };
+      this.setData({ orders: items, hasMore: page.hasMore });
+    } catch (error) {
+      if (!loadCoordinator.isCurrent(guard, customerAuth.captureSessionEpoch())) return;
+      if (error instanceof AuthExpiredError) {
+        cachedOrders = null;
+        this.setData({ orders: [], loading: false, error: customerErrorMessage(error, "登录状态已失效") });
+        navigateToCustomerLogin("orders", "/pages/orders/index");
+        return;
+      }
+      this.setData({ error: customerErrorMessage(error, "订单加载失败，请稍后重试") });
+    } finally {
+      if (loadCoordinator.isCurrent(guard, customerAuth.captureSessionEpoch())) this.setData({ loading: false });
+    }
   },
   openOrder(event: WechatMiniprogram.BaseEvent) {
     void wx.navigateTo({

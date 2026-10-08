@@ -4,13 +4,15 @@ import { attachAccess } from "../auth/access-control.js";
 import { randomUUID } from "node:crypto";
 import mysql, { type Pool, type PoolConnection, type RowDataPacket } from "mysql2/promise";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { moneyCents } from "@hometown/domain";
 import { runWithInternalWriteActor } from "../auth/internal-write-context.js";
 import { MysqlStore } from "./mysql-store.js";
 import { MemoryStore } from "./store.js";
-import type { User } from "./types.js";
+import type { Order, User } from "./types.js";
 
 const databaseUrl = process.env.INTEGRATION_DATABASE_URL;
 const required = process.env.REQUIRE_INTEGRATION_TESTS === "true";
+const requireEntityStore = process.env.REQUIRE_ENTITY_STORE_INTEGRATION_TESTS === "true";
 const user = (id = randomUUID()): User => ({
   id,
   wechatOpenId: null,
@@ -79,6 +81,25 @@ describe.skipIf(!databaseUrl)("MysqlStore real isolated aggregate scopes", () =>
     expect(await new AdminAuthService(second,3600).authenticate(`Bearer ${login.accessToken}`)).toBeNull();
   });
 
+  it("persists an access-role deletion tombstone across aggregate reload and store reopen", async () => {
+    const id = randomUUID();
+    const actor = { userId: `integration-root-${id}`, roles: ["SUPER_ADMIN"] as ["SUPER_ADMIN"] };
+    const input = { name: `待删除岗位${id.slice(0, 8)}`, description: "", scope: "PLATFORM", permissions: ["products.view"], status: "ACTIVE" };
+    const role = await new RoleService(first).save(null, input, actor, `create-${id}`);
+    await new RoleService(first).delete(role.id, actor, `delete-${id}`);
+
+    expect(await second.getAccessRole(role.id)).toBeNull();
+    expect(await second.listAccessRoles()).not.toContainEqual(expect.objectContaining({ id: role.id }));
+    const reopened = MysqlStore.create(databaseUrl!);
+    try {
+      expect(await reopened.getAccessRole(role.id)).toBeNull();
+      const state = JSON.parse(String((await stored())!.payload)) as { deletedAccessRoleIds: string[] };
+      expect(state.deletedAccessRoleIds).toContain(role.id);
+    } finally {
+      await reopened.close();
+    }
+  });
+
   it("loads one plain SELECT for repeated/nested reads and never persists", async () => {
     const value = { ...user(), wechatOpenId: `snapshot-${randomUUID()}` };
     await first.saveUser(value);
@@ -102,7 +123,11 @@ describe.skipIf(!databaseUrl)("MysqlStore real isolated aggregate scopes", () =>
       });
       expect(acquisition).toHaveBeenCalledTimes(1);
       const queries = querySpies.flatMap(spy => spy.mock.calls.map(call => String(call[0])));
-      expect(queries).toEqual(["SELECT payload FROM community_product_state WHERE id=1"]);
+      expect(queries.filter(query => query === "SELECT payload FROM community_product_state WHERE id=1")).toHaveLength(1);
+      expect(queries.filter(query => query === "SELECT mode FROM community_entity_store_state WHERE id=1")).toHaveLength(1);
+      expect(queries).toHaveLength(2);
+      expect(queries.some(query => /\b(?:INSERT|UPDATE|DELETE|REPLACE)\b/i.test(query))).toBe(false);
+      expect(queries.some(query => /\bFOR\s+UPDATE\b/i.test(query))).toBe(false);
       expect(await stored()).toEqual(before);
     } finally {
       querySpies.forEach(spy => spy.mockRestore());
@@ -169,6 +194,55 @@ describe.skipIf(!databaseUrl)("MysqlStore real isolated aggregate scopes", () =>
     expect(await first.getUser(b.id)).toEqual(b);
   });
 
+  it.runIf(requireEntityStore)("rejects a business-key collision without overwriting the primary-key row", async () => {
+    expect(await first.getPersistenceMode()).toBe("ENTITY");
+    const openId = `entity-unique-${randomUUID()}`;
+    const original = { ...user(), wechatOpenId: openId };
+    const conflicting = { ...user(), wechatOpenId: openId };
+    try {
+      await first.saveUser(original);
+      await expect(first.saveUser(conflicting)).rejects.toMatchObject({ code: "INTEGRITY_VIOLATION" });
+      expect(await first.getUser(original.id)).toEqual(original);
+      expect(await first.getUser(conflicting.id)).toBeNull();
+    } finally {
+      await control.execute("DELETE FROM community_entity_records WHERE collection='users' AND entity_key=?", [original.id]);
+    }
+  });
+
+  it.runIf(requireEntityStore)("keeps SQL order search equivalent to MemoryStore substring search", async () => {
+    expect(await first.getPersistenceMode()).toBe("ENTITY");
+    const id = randomUUID();
+    const userId = `entity-search-user-${id}`;
+    const orderId = `entity-search-order-${id}`;
+    const createdAt = new Date().toISOString();
+    const customer: User = {
+      id: userId, wechatOpenId: `entity-search-openid-${id}`, consumerNumber: 987654,
+      phoneNumber: "13800123456", phoneVerifiedAt: createdAt, displayName: "张三水果站%_账号",
+      status: "ACTIVE", createdAt,
+    };
+    const order: Order = {
+      id: orderId, orderNo: `ORDER-Needle-%_-${id}`, userId, campaignId: `campaign-${id}`,
+      serviceAreaId: `area-${id}`, pickupPointId: `point-${id}`, deliveryPlanId: `plan-${id}`,
+      status: "COMPLETED", totalCents: moneyCents(1500), items: [], createdAt,
+      expiresAt: createdAt, paidAt: createdAt, pickedUpAt: createdAt,
+    };
+    const memory = new MemoryStore(false);
+    try {
+      await memory.saveUser(customer);
+      await memory.saveOrder(order);
+      await first.saveUser(customer);
+      await first.saveOrder(order);
+      for (const keyword of ["needle", "水站", "三", "0123", "%_"]) {
+        const expected = await memory.searchOrders({ keyword, page: 1, pageSize: 10 });
+        const actual = await first.searchOrders({ keyword, page: 1, pageSize: 10 });
+        expect(actual.items.map((value) => value.id)).toEqual(expected.items.map((value) => value.id));
+        expect(actual.total).toBe(expected.total);
+      }
+    } finally {
+      await control.execute("DELETE FROM community_entity_records WHERE (collection='orders' AND entity_key=?) OR (collection='users' AND entity_key=?)", [orderId, userId]);
+    }
+  });
+
   it("rolls back writes and reuses the locked snapshot for nested transactions", async () => {
     const value = user();
     await expect(first.transaction(async scoped => {
@@ -205,6 +279,41 @@ describe.skipIf(!databaseUrl)("MysqlStore real isolated aggregate scopes", () =>
     expect(await first.getAuthSession(tokenHash)).toBeNull();
     const after = JSON.parse(String((await stored())!.payload)) as { sessions: Array<[string, unknown]> };
     expect(after.sessions.some(([key]) => key === tokenHash)).toBe(false);
+  });
+
+  it("reads pickup windows without changing aggregate updated_at", async () => {
+    const orderId = `pickup-read-${randomUUID()}`;
+    await first.saveCommunityPickupWindow({
+      orderId, deliveryPlanId: `plan-${orderId}`, arrivedAt: "2026-09-28T00:00:00.000Z",
+      deadlineAt: "2026-09-29T00:00:00.000Z", status: "ACTIVE", extensionCount: 0,
+      extendedBy: null, extendedAt: null, dispositionBy: null, dispositionAt: null,
+      dispositionNote: null, refundExceptionId: null, lossExceptionId: null,
+    });
+    const before = await stored();
+    await first.readSnapshot(async scoped => {
+      expect(await scoped.getCommunityPickupWindow(orderId)).toMatchObject({ orderId, status: "ACTIVE" });
+    });
+    expect(await stored()).toEqual(before);
+  });
+
+  it("cleans expired authentication entries in a bounded transaction without deleting live entries", async () => {
+    const id = randomUUID();
+    const expiredSession = `expired-session-${id}`;
+    const liveSession = `live-session-${id}`;
+    const expiredPassword = `expired-password-${id}`;
+    const livePassword = `live-password-${id}`;
+    await first.saveAuthSession({ tokenHash: expiredSession, userId: `user-${id}`, roles: ["USER"], authorizationVersion: 0, expiresAt: "2000-01-01T00:00:00.000Z" });
+    await first.saveAuthSession({ tokenHash: liveSession, userId: `user-${id}`, roles: ["USER"], authorizationVersion: 0, expiresAt: "2999-01-01T00:00:00.000Z" });
+    await first.savePasswordChangeToken({ tokenHash: expiredPassword, userId: `staff-${id}`, authorizationVersion: 1, expiresAt: "2000-01-01T00:00:00.000Z", createdAt: "1999-01-01T00:00:00.000Z" });
+    await first.savePasswordChangeToken({ tokenHash: livePassword, userId: `staff-${id}`, authorizationVersion: 1, expiresAt: "2999-01-01T00:00:00.000Z", createdAt: "2026-09-28T00:00:00.000Z" });
+    const expired = await first.readSnapshot(scoped => scoped.listExpiredAuthenticationData("2026-09-28T00:00:00.000Z", 2));
+    expect(expired).toEqual({ sessions: [expiredSession], passwordChangeTokens: [expiredPassword] });
+    await first.transaction(scoped => scoped.deleteExpiredAuthenticationData("2026-09-28T00:00:00.000Z", expired.sessions, expired.passwordChangeTokens));
+    const payload = JSON.parse(String((await stored())!.payload)) as { sessions: Array<[string, unknown]>; passwordChangeTokens: Array<[string, unknown]> };
+    expect(payload.sessions.map(([hash]) => hash)).toContain(liveSession);
+    expect(payload.sessions.map(([hash]) => hash)).not.toContain(expiredSession);
+    expect(payload.passwordChangeTokens.map(([hash]) => hash)).toContain(livePassword);
+    expect(payload.passwordChangeTokens.map(([hash]) => hash)).not.toContain(expiredPassword);
   });
 
   it("pure active-session reads reject expiry, revocation and other users without persisting", async () => {

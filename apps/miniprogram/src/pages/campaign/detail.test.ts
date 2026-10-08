@@ -10,6 +10,9 @@ type CampaignDetailPage = {
   data: Record<string, unknown>;
   setData?: (patch: Record<string, unknown>) => void;
   onLoad: (options: Record<string, string | undefined>) => void;
+  onShow: () => void;
+  onHide: () => void;
+  changeQuantity: (event: { currentTarget: { dataset: { step: number } } }) => void;
   retryLoad: () => void;
 };
 
@@ -127,5 +130,40 @@ describe("campaign detail loading", () => {
     expect(definition.data.campaign).toMatchObject({ id: campaign.id });
     expect(definition.data.error).toBe("");
     expect(definition.data.loading).toBe(false);
+  });
+
+  it("restarts an interrupted initial load on return without resetting the selected quantity", async () => {
+    const first = deferred<CampaignDto>();
+    const second = deferred<CampaignDto>();
+    const campaign: CampaignDto = {
+      id: "campaign-1", title: "社区团购测试团期", serviceAreaId: "area-1", deliveryPlan: null, pickupPoint: null,
+      cutoffAt: "2099-01-01T00:00:00.000Z", dispatchAt: "2099-01-01T01:00:00.000Z",
+      estimatedArrivalStartAt: "2099-01-02T00:00:00.000Z", estimatedArrivalEndAt: "2099-01-02T06:00:00.000Z",
+      paidQuantity: 0, failureAction: "CANCEL_AND_REFUND", minTotalQuantity: 1,
+      items: [{ skuId: "sku-1", title: "应季蔬菜", category: "蔬菜", origin: "本地", skuName: "一份",
+        imageUrl: "/one.webp", salesQuantity: 0, unitPriceCents: 100, stock: 10, soldQuantity: 0 }], status: "CANCELLED",
+    };
+    const { api } = await import("../../utils/api");
+    const callBaseline = vi.mocked(api.getCampaign).mock.calls.length;
+    vi.mocked(api.getCampaign).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    let definition: CampaignDetailPage | undefined;
+    vi.stubGlobal("Page", (value: CampaignDetailPage) => { definition = value; return value; });
+    await import("./detail");
+    if (!definition) throw new Error("campaign detail page was not registered");
+    definition.setData = (patch) => Object.assign(definition!.data, patch);
+
+    definition.onLoad.call(definition, { id: campaign.id, skuId: "sku-1" });
+    definition.onShow.call(definition);
+    definition.changeQuantity.call(definition, { currentTarget: { dataset: { step: 2 } } });
+    expect(definition.data.quantity).toBe(3);
+    definition.onHide.call(definition);
+    definition.onShow.call(definition);
+    expect(api.getCampaign).toHaveBeenCalledTimes(callBaseline + 2);
+
+    second.resolve(campaign);
+    for (let index = 0; index < 8; index += 1) await Promise.resolve();
+    first.resolve({ ...campaign, title: "旧响应" });
+    for (let index = 0; index < 8; index += 1) await Promise.resolve();
+    expect(definition.data).toMatchObject({ campaign: { title: "社区团购测试团期" }, quantity: 3, total: "3.00", loading: false });
   });
 });

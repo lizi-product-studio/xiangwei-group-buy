@@ -74,10 +74,13 @@ post("admin/catalog/skus", "products.create"); post("admin/product-images", "pro
 route("POST", "admin/product-detail-images", "products.create", "products.edit");
 get("admin/campaigns", "campaigns.view", "orders.view", "logistics.view", "arrival-exceptions.view", "homepage-banners.view");
 post("admin/campaigns", "campaigns.create"); route("PATCH", "admin/campaigns/:id", "campaigns.edit"); route("DELETE", "admin/campaigns/:id", "campaigns.delete");
+post("admin/campaign-groups", "campaigns.create"); route("PATCH", "admin/campaign-groups/:id", "campaigns.edit");
+post("admin/campaign-groups/:id/postpone", "campaigns.edit");
 for (const action of ["open", "close", "cancel"]) post(`admin/campaigns/:id/${action}`, `campaigns.${action}`);
 get("admin/campaigns/:id/cancel-impact", "campaigns.cancel"); post("admin/campaigns/:id/postpone", "campaigns.edit");
 get("admin/campaigns/:id/packing-labels", "campaigns.labels", "logistics.view");
 get("admin/orders", "orders.view");
+get("admin/orders/:id", "orders.view");
 get("admin/orders/search", "orders.view");
 get("admin/orders/export", "orders.view");
 get("admin/delivery-plans", "logistics.view", "arrival-exceptions.view"); post("admin/delivery-plans/:id/book-vehicle", "logistics.edit");
@@ -90,6 +93,7 @@ get("admin/quality-cases", "service.view", "finance.view"); post("admin/quality-
 get("admin/fulfillment-exceptions", "service.view", "finance.view"); post("admin/fulfillment-exceptions/:id/refund", "finance.refund");
 get("admin/community/pickup-windows", "service.pickup-view", "finance.view"); post("admin/community/orders/:id/pickup-extension", "service.pickup"); post("admin/community/orders/:id/pickup-disposition", "service.pickup"); post("admin/community/orders/:id/pickup-refund", "finance.refund");
 get("admin/finance/refunds", "finance.view", "finance-records.view"); get("admin/finance/ledger", "finance-ledger.view");
+post("admin/finance/refunds/:type/:id/check", "finance.refund"); post("admin/finance/refunds/:type/:id/retry", "finance.refund");
 get("admin/consumers", "consumers.view"); get("admin/consumers/:id", "consumers.view");
 get("admin/consumers/:id/phone", "consumers.phone.view");
 get("admin/service-area-interests", "interests.view"); post("admin/service-area-interests/:id/status", "interests.manage");

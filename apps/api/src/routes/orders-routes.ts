@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import {
   cancelOrderSchema,
   identifierSchema,
+  multiOrderCheckoutSchema,
   adminOrderSearchQuerySchema,
   orderRequestSchema,
 } from "@hometown/api-contracts";
@@ -14,6 +15,17 @@ import { buildOrderDeliveryViews } from "../modules/orders/order-read-model.js";
 import type { OrderService } from "../modules/orders/order-service.js";
 import type { PaymentService } from "../modules/payments/payment-service.js";
 import { ensureConsumerPublicNumbers } from "../modules/customers/consumer-directory-service.js";
+import { z } from "zod";
+
+const consumerOrderPageQuerySchema = z.object({
+  pageSize: z.coerce.number().int().min(1).max(50).default(20),
+  cursorAt: z.iso.datetime({ offset: true }).optional(),
+  cursorId: identifierSchema.optional(),
+  filter: z.enum(["ALL", "PENDING", "ACTIVE", "DONE", "READY", "AFTER"]).default("ALL"),
+}).superRefine((value, context) => {
+  if (Boolean(value.cursorAt) !== Boolean(value.cursorId))
+    context.addIssue({ code: "custom", path: [value.cursorAt ? "cursorId" : "cursorAt"], message: "订单分页游标不完整" });
+});
 
 type Audit = (
   request: FastifyRequest,
@@ -50,13 +62,23 @@ export function registerOrderRoutes(
     audit,
     rejectCommunityExternalEvidence,
   } = dependencies;
-  const views = (values: Order[]) => buildOrderDeliveryViews(store, values);
+  const views = async (values: Order[]) => {
+    const rows = await buildOrderDeliveryViews(store, values);
+    return Promise.all(rows.map(async (row) => {
+      const batch = await store.getCheckoutBatchByOrder(row.id);
+      return batch ? {
+        ...row,
+        checkoutBatch: { id: batch.id, totalCents: batch.totalCents, orderCount: batch.orderIds.length, status: batch.status, expiresAt: batch.expiresAt },
+      } : row;
+    }));
+  };
   const adminViews = async (values: Order[]) => {
+    await ensureConsumerPublicNumbers(store);
     const [rows, campaigns, points, users] = await Promise.all([
       views(values),
       store.listCampaigns(),
       store.listPickupPoints(),
-      ensureConsumerPublicNumbers(store),
+      store.getUsersByIds([...new Set(values.map((value) => value.userId))]),
     ]);
     const campaignById = new Map(campaigns.map((campaign) => [campaign.id, campaign]));
     const pointById = new Map(points.map((point) => [point.id, point]));
@@ -113,16 +135,94 @@ export function registerOrderRoutes(
     return reply.status(201).send({ data: order });
   });
 
+  app.post("/api/v1/order-checkouts", async (request, reply) => {
+    const actor = requireActor(request, ["USER", "SUPER_ADMIN"]);
+    const key = request.headers["idempotency-key"];
+    if (typeof key !== "string" || key.length < 8 || key.length > 128)
+      throw new BusinessError("VALIDATION_ERROR", "Idempotency-Key 长度必须为 8 到 128 个字符");
+    const input = multiOrderCheckoutSchema.parse(request.body);
+    const checkout = await orders.createBatch(actor.userId, input, key);
+    return reply.status(201).send({ data: checkout });
+  });
+
+  app.get("/api/v1/order-checkouts/:id", async (request) => {
+    const actor = requireActor(request, ["USER", "SUPER_ADMIN"]);
+    const id = identifierSchema.parse((request.params as { id: string }).id);
+    return store.readSnapshot(async (snapshot) => {
+      const checkoutBatch = await snapshot.getCheckoutBatch(id);
+      // Do not reveal whether another customer's batch exists.
+      if (!checkoutBatch || checkoutBatch.userId !== actor.userId)
+        throw new BusinessError("RESOURCE_NOT_FOUND", "结算批次不存在", 404);
+
+      const childOrders = await Promise.all(
+        checkoutBatch.orderIds.map((orderId) => snapshot.getOrder(orderId)),
+      );
+      if (childOrders.some((order) => !order || order.userId !== actor.userId))
+        throw new BusinessError("FINANCIAL_INCONSISTENT", "结算批次子订单映射异常", 500);
+
+      const serverTime = await snapshot.databaseNow();
+      const orderViews = await buildOrderDeliveryViews(snapshot, childOrders as Order[], serverTime);
+      const expired = checkoutBatch.status === "PENDING_PAYMENT"
+        && Date.parse(serverTime) >= Date.parse(checkoutBatch.expiresAt);
+      return {
+        data: {
+          checkoutBatch: {
+            id: checkoutBatch.id,
+            status: checkoutBatch.status,
+            totalCents: checkoutBatch.totalCents,
+            expiresAt: checkoutBatch.expiresAt,
+            expired,
+            serverTime,
+          },
+          orders: orderViews.map((order) => ({
+            id: order.id,
+            status: order.status,
+            totalCents: order.totalCents,
+            expiresAt: order.expiresAt,
+            paidAt: order.paidAt,
+            pickupPointId: order.deliveryPlan?.pickupPointId ?? null,
+            pickupPointName: order.deliveryPlan?.siteName ?? "自提点信息暂不可用",
+            pickupPointAddress: order.deliveryPlan?.address ?? "",
+          })),
+        },
+      };
+    });
+  });
+
   app.get("/api/v1/orders", async (request) => {
     const actor = requireActor(request, ["USER", "SUPER_ADMIN"]);
+    const rawQuery = request.query as Record<string, unknown>;
+    if (rawQuery.pageSize !== undefined || rawQuery.cursorAt !== undefined || rawQuery.cursorId !== undefined || rawQuery.filter !== undefined) {
+      const query = consumerOrderPageQuerySchema.parse(rawQuery);
+      const statusesByFilter: Record<typeof query.filter, readonly string[] | undefined> = {
+        ALL: undefined,
+        PENDING: ["PENDING_PAYMENT"],
+        ACTIVE: ["PAID_WAITING_CLOSE", "LOCKED", "ALLOCATING", "IN_TRANSIT"],
+        DONE: ["PICKED_UP", "COMPLETED"],
+        READY: ["READY_FOR_PICKUP"],
+        AFTER: ["REFUNDING", "REFUNDED", "CANCELLED"],
+      };
+      const page = await store.searchOrders({
+        userId: actor.userId,
+        page: 1,
+        pageSize: query.pageSize,
+        ...(statusesByFilter[query.filter] ? { statuses: statusesByFilter[query.filter] } : {}),
+        ...(query.filter === "AFTER" ? { includeCommunityQualityCases: true } : {}),
+        ...(query.cursorAt ? { beforeCreatedAt: query.cursorAt, beforeId: query.cursorId } : {}),
+      });
+      return { data: { items: await views(page.items), hasMore: page.hasMore ?? false, nextCursor: page.nextCursor } };
+    }
     return { data: await views(await store.listOrdersByUser(actor.userId)) };
   });
 
   app.get("/api/v1/orders/:id", async (request) => {
     const actor = requireActor(request, ["USER", "SUPER_ADMIN"]);
     const id = identifierSchema.parse((request.params as { id: string }).id);
-    const order = await orders.getForUser(id, actor.userId);
-    return { data: (await views([order]))[0]! };
+    return store.readSnapshot(async (snapshot) => {
+      const order = await orders.getForUser(id, actor.userId, snapshot);
+      const serverTime = await snapshot.databaseNow();
+      return { data: { ...(await buildOrderDeliveryViews(snapshot, [order], serverTime))[0]!, serverTime } };
+    });
   });
 
   app.post("/api/v1/orders/:id/cancel", async (request) => {
@@ -138,6 +238,11 @@ export function registerOrderRoutes(
     );
     const input = cancelOrderSchema.parse(request.body ?? {});
     if (before.status === "PENDING_PAYMENT") {
+      const paid = await payments.reconcileBeforeCancellation(id, actor.userId);
+      if (paid) {
+        const current = await orders.getForUser(id, actor.userId);
+        return { data: (await views([current]))[0]! };
+      }
       const after = await orders.cancelPending(id, actor.userId);
       if (before.status !== after.status)
         await audit(
@@ -180,53 +285,36 @@ export function registerOrderRoutes(
     return { data: await adminViews(orders) };
   });
 
+  app.get("/api/v1/admin/orders/:id", async (request) => {
+    requireActor(request, ["OPERATOR", "FINANCE", "CUSTOMER_SERVICE", "SUPER_ADMIN"]);
+    const id = identifierSchema.parse((request.params as { id: string }).id);
+    const order = await store.getOrder(id);
+    if (!order) throw new BusinessError("RESOURCE_NOT_FOUND", "订单不存在", 404);
+    return { data: (await adminViews([order]))[0]! };
+  });
+
   const searchAdminOrders = async (query: ReturnType<typeof adminOrderSearchQuerySchema.parse>) => {
-    const [allOrders, users] = await Promise.all([
-      store.listOrders(Number.MAX_SAFE_INTEGER),
-      ensureConsumerPublicNumbers(store),
-    ]);
-    const userById = new Map(users.map((user) => [user.id, user]));
-    const keyword = query.keyword.toLocaleLowerCase("zh-CN");
-    return allOrders
-      .filter((order) => {
-        if (query.status && order.status !== query.status) return false;
-        if (query.campaignId && order.campaignId !== query.campaignId) return false;
-        if (query.pickupPointId && order.pickupPointId !== query.pickupPointId) return false;
-        if (query.from || query.to) {
-          const date = query.dateType === "PAID_AT" ? order.paidAt : order.createdAt;
-          if (!date) return false;
-          const timestamp = Date.parse(date);
-          const start = query.from ? Date.parse(`${query.from}T00:00:00+08:00`) : Number.NEGATIVE_INFINITY;
-          const end = query.to ? Date.parse(`${query.to}T23:59:59.999+08:00`) : Number.POSITIVE_INFINITY;
-          if (timestamp < start || timestamp > end) return false;
-        }
-        if (keyword) {
-          const user = userById.get(order.userId);
-          const candidates = [
-            order.orderNo,
-            String(user?.consumerNumber ?? ""),
-            user?.phoneNumber ?? "",
-            user?.displayName ?? "",
-          ];
-          if (!candidates.some((value) => value.toLocaleLowerCase("zh-CN").includes(keyword)))
-            return false;
-        }
-        return true;
-      })
-      .sort((left, right) =>
-        right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id),
-      );
+    return store.searchOrders({
+      status: query.status,
+      campaignId: query.campaignId,
+      pickupPointId: query.pickupPointId,
+      keyword: query.keyword,
+      dateType: query.dateType,
+      from: query.from ? new Date(`${query.from}T00:00:00+08:00`).toISOString() : undefined,
+      to: query.to ? new Date(`${query.to}T23:59:59.999+08:00`).toISOString() : undefined,
+      page: query.page,
+      pageSize: query.pageSize,
+    });
   };
 
   app.get("/api/v1/admin/orders/search", async (request) => {
     requireActor(request, ["OPERATOR", "FINANCE", "CUSTOMER_SERVICE", "SUPER_ADMIN"]);
     const query = adminOrderSearchQuerySchema.parse(request.query);
     const matching = await searchAdminOrders(query);
-    const start = (query.page - 1) * query.pageSize;
     return {
       data: {
-        items: await adminViews(matching.slice(start, start + query.pageSize)),
-        total: matching.length,
+        items: await adminViews(matching.items),
+        total: matching.total,
         page: query.page,
         pageSize: query.pageSize,
       },
@@ -238,13 +326,28 @@ export function registerOrderRoutes(
     const query = adminOrderSearchQuerySchema.parse(request.query);
     const matching = await searchAdminOrders(query);
     const maxExportRows = 10_000;
-    if (matching.length > maxExportRows)
+    if (matching.total > maxExportRows)
       throw new BusinessError(
         "CAPACITY_EXCEEDED",
         `筛选结果超过单次导出上限 ${maxExportRows} 笔，请缩小筛选范围后重试`,
         413,
       );
-    const rows = await adminViews(matching);
+    const orders = [...matching.items];
+    const pages = Math.ceil(matching.total / matching.pageSize);
+    for (let page = 2; page <= pages; page += 1) {
+      orders.push(...(await store.searchOrders({
+        status: query.status,
+        campaignId: query.campaignId,
+        pickupPointId: query.pickupPointId,
+        keyword: query.keyword,
+        dateType: query.dateType,
+        from: query.from ? new Date(`${query.from}T00:00:00+08:00`).toISOString() : undefined,
+        to: query.to ? new Date(`${query.to}T23:59:59.999+08:00`).toISOString() : undefined,
+        page,
+        pageSize: matching.pageSize,
+      })).items);
+    }
+    const rows = await adminViews(orders);
     const csvCell = (value: unknown) => {
       const text = String(value ?? "");
       const safe = /^[\t\r\n ]*[=+@-]/.test(text) ? `'${text}` : text;

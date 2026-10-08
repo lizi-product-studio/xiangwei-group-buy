@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { OrderRequest } from "@hometown/api-contracts";
+import type { MultiOrderCheckoutRequest, OrderRequest } from "@hometown/api-contracts";
 import {
   BusinessError,
   moneyCents,
@@ -10,7 +10,7 @@ import {
 import type { CampaignService } from "../campaigns/campaign-service.js";
 import { isDeliveryPlanReadyForSale } from "../campaigns/sellability.js";
 import type { CommerceStore } from "../core/store.js";
-import type { Order, OrderItem } from "../core/types.js";
+import type { CheckoutBatch, Order, OrderItem } from "../core/types.js";
 
 /** Capture the campaign's product identity; never rebuild history from catalog. */
 export function orderItemSnapshotName(title: string, skuName: string): string {
@@ -25,7 +25,7 @@ export class OrderService {
     private readonly store: CommerceStore,
     private readonly campaigns: CampaignService,
   ) {}
-  private fingerprint(input: OrderRequest): string {
+  private fingerprint(input: unknown): string {
     return createHash("sha256").update(JSON.stringify(input)).digest("hex");
   }
   public async preview(
@@ -109,6 +109,7 @@ export class OrderService {
         skuId,
         productId: item.productId,
         name: orderItemSnapshotName(item.title, item.skuName),
+        imageUrl: item.imageUrl,
         quantity,
         unitPriceCents: item.retailPriceCents,
         amountCents,
@@ -199,6 +200,75 @@ export class OrderService {
       return (await store.getOrder(id))!;
     });
   }
+  public async createBatch(
+    userId: string,
+    input: MultiOrderCheckoutRequest,
+    idempotencyKey: string,
+  ): Promise<{ checkoutBatch: CheckoutBatch; orders: Order[] }> {
+    return this.store.transaction(async (store) => {
+      const fingerprint = this.fingerprint(input.groups);
+      const existing = await store.getIdempotencyForUpdate(userId, idempotencyKey);
+      if (existing) {
+        if (existing.fingerprint !== fingerprint || !existing.checkoutBatchId)
+          throw new BusinessError("IDEMPOTENCY_CONFLICT", "同一幂等键不能用于不同订单内容", 409);
+        const checkoutBatch = await store.getCheckoutBatchForUpdate(existing.checkoutBatchId);
+        if (!checkoutBatch) throw new BusinessError("FINANCIAL_INCONSISTENT", "结算批次映射缺失", 500);
+        const orders = await Promise.all(checkoutBatch.orderIds.map((id) => store.getOrder(id)));
+        if (orders.some((order) => !order)) throw new BusinessError("FINANCIAL_INCONSISTENT", "结算批次子订单缺失", 500);
+        return { checkoutBatch, orders: orders as Order[] };
+      }
+
+      const previews = await Promise.all(input.groups.map((group) => this.preview(userId, group, store)));
+      for (const preview of previews)
+        for (const item of preview.items)
+          if (!(await store.reserveCampaignInventory(preview.campaignId, item.skuId, item.quantity)))
+            throw new BusinessError("SKU_STOCK_INSUFFICIENT", `${item.name} 库存不足`, 409);
+
+      const now = Date.now();
+      const campaigns = await Promise.all(previews.map((preview) => this.campaigns.get(preview.campaignId, store)));
+      const expiresAt = new Date(Math.min(now + 15 * 60_000, ...campaigns.map((campaign) => Date.parse(campaign.cutoffAt)))).toISOString();
+      const checkoutId = randomUUID();
+      const outTradeNo = `HB${now}${checkoutId.replaceAll("-", "").slice(0, 8).toUpperCase()}`;
+      const orders: Order[] = [];
+      for (const preview of previews) {
+        const id = randomUUID();
+        const order: Order = {
+          id,
+          orderNo: `HT${now}${id.replaceAll("-", "").slice(0, 8).toUpperCase()}`,
+          ...preview,
+          createdAt: new Date(now).toISOString(),
+          expiresAt,
+          paidAt: null,
+          pickedUpAt: null,
+        };
+        await store.saveOrder(order);
+        await store.saveOrderLines(order.id, order.items.map((item) => ({
+          id: randomUUID(), catalogSkuId: item.skuId, productId: item.productId,
+          title: item.name, skuName: item.name, quantity: item.quantity,
+          unitPriceCents: Number(item.unitPriceCents), amountCents: Number(item.amountCents),
+          imageUrl: item.imageUrl ?? null,
+        })));
+        orders.push((await store.getOrder(id))!);
+      }
+      const checkoutBatch: CheckoutBatch = {
+        id: checkoutId,
+        outTradeNo,
+        userId,
+        orderIds: orders.map((order) => order.id),
+        totalCents: sumMoney(orders.map((order) => order.totalCents)),
+        status: "PENDING_PAYMENT",
+        expiresAt,
+        createdAt: new Date(now).toISOString(),
+      };
+      await store.saveCheckoutBatch(checkoutBatch);
+      await store.saveIdempotency(userId, idempotencyKey, {
+        fingerprint,
+        orderId: orders[0]!.id,
+        checkoutBatchId: checkoutBatch.id,
+      });
+      return { checkoutBatch, orders };
+    });
+  }
   public async expirePendingOrders(limit = 100): Promise<number> {
     let expired = 0;
     for (const candidate of await this.store.listExpiredPendingOrders(
@@ -213,6 +283,12 @@ export class OrderService {
           Date.parse(order.expiresAt) > Date.now()
         )
           return;
+        const checkoutBatch = await store.getCheckoutBatchByOrder(order.id);
+        if (checkoutBatch && checkoutBatch.status !== "PAID") {
+          const cancelled = await this.cancelBatchPendingOrders(store, checkoutBatch);
+          expired += cancelled;
+          return;
+        }
         if (await this.cancelPendingOrder(store, order)) expired += 1;
       });
     return expired;
@@ -227,6 +303,12 @@ export class OrderService {
           "仅待支付订单可以直接取消",
           409,
         );
+      const checkoutBatch = await store.getCheckoutBatchByOrder(order.id);
+      if (checkoutBatch?.status === "PENDING_PAYMENT") {
+        if (!(await this.cancelBatchPendingOrders(store, checkoutBatch)))
+          throw new BusinessError("CONCURRENT_MODIFICATION", "订单状态已变化", 409);
+        return (await store.getOrder(id))!;
+      }
       if (!(await this.cancelPendingOrder(store, order)))
         throw new BusinessError(
           "CONCURRENT_MODIFICATION",
@@ -275,6 +357,10 @@ export class OrderService {
     store: CommerceStore,
     order: Order,
   ): Promise<boolean> {
+    const payment = await store.getPaymentByOrderForUpdate(order.id);
+    const databaseNow = Date.parse(await store.databaseNow());
+    if (payment?.initiationClaimToken && !payment.clientPayload && payment.initiationLeaseUntil && Date.parse(payment.initiationLeaseUntil) > databaseNow)
+      throw new BusinessError("CONCURRENT_MODIFICATION", "支付凭据仍在创建，暂不能释放订单库存", 409);
     if (!(await store.cancelPendingOrder(order.id))) return false;
     for (const item of order.items)
       if (
@@ -289,11 +375,41 @@ export class OrderService {
           "取消订单释放库存失败",
           500,
         );
-    const payment = await store.getPaymentByOrder(order.id);
     if (payment?.status === "CREATED") {
       payment.status = "FAILED";
+      payment.initiationLeaseUntil = null;
+      payment.initiationClaimToken = null;
       await store.savePayment(payment);
     }
     return true;
+  }
+  private async cancelBatchPendingOrders(store: CommerceStore, batch: CheckoutBatch): Promise<number> {
+    if (batch.status === "PAID") return 0;
+    const lockedBatch = await store.getCheckoutBatchForUpdate(batch.id);
+    if (!lockedBatch || lockedBatch.status === "PAID") return 0;
+    const batchPayment = await store.getPaymentBatchForUpdate(lockedBatch.id);
+    const databaseNow = Date.parse(await store.databaseNow());
+    if (batchPayment?.initiationClaimToken && !batchPayment.clientPayload && batchPayment.initiationLeaseUntil && Date.parse(batchPayment.initiationLeaseUntil) > databaseNow)
+      throw new BusinessError("CONCURRENT_MODIFICATION", "合并支付凭据仍在创建，暂不能释放订单库存", 409);
+    const orders = await Promise.all(lockedBatch.orderIds.map((id) => store.getOrderForUpdate(id)));
+    if (orders.some((order) => !order || !["PENDING_PAYMENT", "CANCELLED"].includes(order.status))) return 0;
+    let cancelled = 0;
+    for (const order of orders as Order[]) {
+      if (order.status === "CANCELLED") continue;
+      if (!(await this.cancelPendingOrder(store, order)))
+        throw new BusinessError("CONCURRENT_MODIFICATION", "结算批次中的订单状态已变化", 409);
+      order.status = "CANCELLED";
+      await store.saveOrderStatus(order);
+      cancelled += 1;
+    }
+    lockedBatch.status = "CANCELLED";
+    await store.saveCheckoutBatch(lockedBatch);
+    if (batchPayment?.status === "CREATED") {
+      batchPayment.status = "FAILED";
+      batchPayment.initiationLeaseUntil = null;
+      batchPayment.initiationClaimToken = null;
+      await store.savePaymentBatch(batchPayment);
+    }
+    return cancelled;
   }
 }

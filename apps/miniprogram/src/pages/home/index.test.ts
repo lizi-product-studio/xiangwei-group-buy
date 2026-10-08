@@ -11,12 +11,13 @@ type HomePage = {
 };
 
 const listCampaigns = vi.fn();
+const listProductCategories = vi.fn();
 const openLocation = vi.fn();
 const makePhoneCall = vi.fn();
 const showToast = vi.fn();
 
 vi.mock('../../utils/api', () => ({
-  api: { listCampaigns },
+  api: { listCampaigns, listProductCategories },
   customerErrorMessage: (error: unknown) =>
     error instanceof Error && error.message.includes('HTTP')
       ? '服务暂时不可用，请稍后重试'
@@ -39,8 +40,9 @@ vi.mock('../../utils/cart', () => ({
 }));
 vi.mock('../../utils/consumer-display', () => ({
   estimatedArrivalText: vi.fn(() => '09月02日 08:00'),
-  formatChinaDateTime: vi.fn(() => '09月01日 12:00'),
+  formatChinaDateTime: vi.fn((value: string) => value.startsWith('2099-09-03') ? '09月03日 12:00' : '09月01日 12:00'),
   cutoffCountdown: vi.fn(() => '剩余测试倒计时'),
+  campaignProgressPercent: (paid: number, minimum: number) => minimum <= 0 ? 100 : Math.min(100, Math.round((Math.max(0, paid) / minimum) * 100)),
   isCampaignPurchasable: vi.fn(() => true),
   shouldShowFloatingCart: vi.fn(() => false),
 }));
@@ -49,6 +51,7 @@ describe('home remote-service recovery', () => {
   beforeEach(() => {
     vi.resetModules();
     listCampaigns.mockReset();
+    listProductCategories.mockReset().mockResolvedValue([{ id: 'vegetables', name: '蔬菜', iconKey: 'leaf' }, { id: 'fresh', name: '鲜食', iconKey: 'basket' }]);
     openLocation.mockReset();
     makePhoneCall.mockReset();
     showToast.mockReset();
@@ -171,6 +174,17 @@ describe('home remote-service recovery', () => {
     expect(page.data.pickupPoint).toMatchObject({ name: '后台改名后的自提点', address: '最新地址' });
   });
 
+  it('shows enabled backend categories even before they have products in this campaign', async () => {
+    listCampaigns.mockResolvedValueOnce([]);
+    listProductCategories.mockResolvedValueOnce([{ id: 'fruit', name: '水果', iconKey: 'fruit' }, { id: 'tools', name: '工具', iconKey: 'tools' }]);
+    const page = await loadPage();
+    await page.loadCampaigns.call(page);
+    expect(page.data.allProducts).toEqual([]);
+    expect(page.data.categoryItems).toMatchObject([
+      { value: '全部' }, { value: '水果' }, { value: '工具' },
+    ]);
+  });
+
   it('uses live descriptions, real category icons, and the selected point campaign schedule in the home view', async () => {
     listCampaigns.mockResolvedValueOnce([campaign]);
     const page = await loadPage();
@@ -178,9 +192,9 @@ describe('home remote-service recovery', () => {
 
     expect((page.data.allProducts as Array<{ description: string }>)[0]?.description).toBe('雨后采收，口感清甜。');
     expect(page.data.categoryItems).toMatchObject([
-      { value: '全部', icon: '', fallback: '全' },
+      { value: '全部', icon: '/assets/category-icon-all.png' },
       { value: '蔬菜', icon: '/assets/category-icon-leaf.png' },
-      { value: '鲜食', icon: '', fallback: '鲜' },
+      { value: '鲜食', icon: '/assets/category-icon-basket.png' },
     ]);
     expect(page.data.heroCampaign).toMatchObject({
       title: '应季蔬菜团',
@@ -189,6 +203,30 @@ describe('home remote-service recovery', () => {
       arrivalText: '09月02日 08:00',
     });
     expect(page.data.countdownText).toBe('剩余测试倒计时');
+  });
+
+  it('keeps campaigns at the same pickup point in separate period groups with independent schedules and progress', async () => {
+    const secondCampaign = {
+      ...campaign,
+      id: 'campaign-2',
+      title: '鲜食专场 · 第03期',
+      cutoffAt: '2099-09-03T00:00:00.000Z',
+      estimatedArrivalStartAt: '2099-09-04T00:00:00.000Z',
+      estimatedArrivalEndAt: '2099-09-04T06:00:00.000Z',
+      paidQuantity: 8,
+      minTotalQuantity: 5,
+      items: [campaign.items[1]!],
+    } as CampaignDto;
+    listCampaigns.mockResolvedValueOnce([campaign, secondCampaign]);
+    const page = await loadPage();
+
+    await page.loadCampaigns.call(page);
+
+    expect(page.data.campaignGroups).toMatchObject([
+      { id: 'campaign-1', title: '应季蔬菜团', cutoffText: '09月01日 12:00', paidQuantity: 0, minimumQuantity: 1, products: [{ skuId: 'sku-1' }, { skuId: 'sku-2' }] },
+      { id: 'campaign-2', title: '鲜食专场 · 第03期', cutoffText: '09月03日 12:00', paidQuantity: 8, minimumQuantity: 5, products: [{ skuId: 'sku-2' }] },
+    ]);
+    expect(page.data.campaignGroups).toHaveLength(2);
   });
 
   it('refreshes image bindings when switching a filtered category back to all products', async () => {

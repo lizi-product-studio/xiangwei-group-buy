@@ -1,4 +1,5 @@
 import type { CampaignStatus, MoneyCents, OrderStatus } from "@hometown/domain";
+import type { ProductCategoryIconKey } from "@hometown/api-contracts";
 
 export interface CampaignItem {
   catalogSkuId: string;
@@ -19,6 +20,8 @@ export interface CampaignItem {
 
 export interface Campaign {
   id: string;
+  /** Logical activity id. Omitted for legacy single-point campaigns. */
+  campaignGroupId?: string;
   title: string;
   serviceAreaId: string;
   cutoffAt: string;
@@ -35,11 +38,26 @@ export interface Campaign {
   createdAt: string;
 }
 
+export interface CampaignGroup {
+  id: string;
+  title: string;
+  cutoffAt: string;
+  groupingMode: "PER_POINT" | "ALL_POINTS";
+  minTotalQuantity: number;
+  failureAction: "CANCEL_AND_REFUND" | "POSTPONE";
+  status: CampaignStatus | "PARTIAL";
+  campaignIds: string[];
+  postponementCount: number;
+  version: number;
+  createdAt: string;
+}
+
 export interface OrderItem {
   orderLineId: string | null;
   skuId: string;
   productId: string;
   name: string;
+  imageUrl?: string | null;
   quantity: number;
   unitPriceCents: MoneyCents;
   amountCents: MoneyCents;
@@ -65,6 +83,18 @@ export interface Order {
   expiresAt: string;
   paidAt: string | null;
   pickedUpAt: string | null;
+}
+
+/** One atomic checkout containing independently fulfillable child orders. */
+export interface CheckoutBatch {
+  id: string;
+  outTradeNo: string;
+  userId: string;
+  orderIds: string[];
+  totalCents: MoneyCents;
+  status: "PENDING_PAYMENT" | "PAID" | "CANCELLED";
+  expiresAt: string;
+  createdAt: string;
 }
 
 export interface CatalogSku {
@@ -95,6 +125,7 @@ export interface CatalogSku {
 export interface ProductCategory {
   id: string;
   name: string;
+  iconKey: ProductCategoryIconKey;
   sortOrder: number;
   status: "ACTIVE" | "INACTIVE";
   createdAt: string;
@@ -291,6 +322,21 @@ export interface Payment {
   initiationClaimToken: string | null;
   createdAt: string;
   succeededAt: string | null;
+  checkoutBatchId?: string | null;
+}
+export interface PaymentBatch {
+  id: string;
+  checkoutBatchId: string;
+  provider: "mock" | "wechat";
+  providerPaymentId: string | null;
+  status: "CREATED" | "SUCCEEDED" | "REFUNDING" | "REFUNDED" | "FAILED";
+  amountCents: MoneyCents;
+  clientPayload: Record<string, string> | null;
+  providerContext: Record<string, unknown> | null;
+  initiationLeaseUntil: string | null;
+  initiationClaimToken: string | null;
+  createdAt: string;
+  succeededAt: string | null;
 }
 /**
  * `CREATED`/`FAILED` remain readable for historical snapshots. New writes use
@@ -320,6 +366,10 @@ export interface RefundRecoveryFields {
   recoveryVersion?: number;
   /** Total provider submit/query calls consumed by automatic recovery. */
   recoveryAttempts?: number;
+  /** Last explicit staff query result; only NOT_FOUND/FAILED permit manual resubmission. */
+  manualProviderStatus?: RefundStatus | "NOT_FOUND" | "CLOSED" | "ABNORMAL" | null;
+  /** Manual re-submission is deliberately limited to one confirmed NOT_FOUND recovery. */
+  manualRetryAttempts?: number;
 }
 export type OrderRefund = RefundRecoveryFields & {
   id: string;
@@ -420,6 +470,7 @@ export interface OrderLine {
   orderId: string;
   orderNo?: string | null;
   catalogSkuId: string;
+  imageUrl?: string | null;
   quantity: number;
   unitPriceCents: MoneyCents;
   amountCents: MoneyCents;
@@ -592,6 +643,8 @@ export interface LedgerLine {
 }
 export interface LedgerTransaction {
   id: string;
+  /** Unique business action within an event type (for example one pickup receipt). */
+  postingKey?: string;
   referenceType: "ORDER" | "FULFILLMENT_EXCEPTION";
   referenceId: string;
   eventType:

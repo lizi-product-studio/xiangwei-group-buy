@@ -201,7 +201,11 @@ Page({
       if (!current()) return;
       void wx.showModal({ title: '暂时无法提交', content: customerErrorMessage(error, '开通意向暂时无法提交，请稍后重试'), showCancel: false });
     } finally {
-      if (current()) this.setData({ submitting: false });
+      // Refreshing the list starts a new coordinator generation, but it is
+      // still part of this successful submission. Clear the button state on
+      // the same live identity even when that refresh owns the new generation.
+      if (actionCoordinator.isAvailable() && customerAuth.captureSessionEpoch() === action.epoch)
+        this.setData({ submitting: false });
     }
   },
 

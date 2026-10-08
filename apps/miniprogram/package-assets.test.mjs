@@ -63,11 +63,15 @@ describe('mini-program upload package assets', () => {
     const homeMarkup = readFileSync(join(sourceRoot, 'pages/home/index.wxml'), 'utf8');
     const largeArtwork = ['hero-sorghum-field.jpg'];
     const categoryIcons = [
+      'category-icon-all.png',
+      'category-icon-basket.png',
       'category-icon-leaf.png',
       'category-icon-grain.png',
       'category-icon-beans.png',
       'category-icon-ready-food.png',
       'category-icon-seasoning.png',
+      'category-icon-fruit.png',
+      'category-icon-tools.png',
     ];
 
     for (const filename of largeArtwork) {
@@ -79,7 +83,11 @@ describe('mini-program upload package assets', () => {
     expect(homeMarkup).not.toContain('/assets/hero-sorghum-field.png');
 
     for (const filename of categoryIcons) {
-      expect(statSync(join(sourceRoot, 'assets', filename)).size).toBeLessThan(20 * 1024);
+      const assetPath = join(sourceRoot, 'assets', filename);
+      const asset = readFileSync(assetPath);
+      expect(statSync(assetPath).size).toBeLessThan(20 * 1024);
+      expect(asset.readUInt32BE(16)).toBe(120);
+      expect(asset.readUInt32BE(20)).toBe(120);
     }
   });
 
@@ -90,7 +98,8 @@ describe('mini-program upload package assets', () => {
     const detailMarkup = readFileSync(join(sourceRoot, 'pages/campaign/detail.wxml'), 'utf8');
 
     expect(homeMarkup).toContain('wx:else class="product-photo product-photo--single"');
-    expect(homeMarkup).toContain('src="{{item.imageUrls[0]}}"');
+    expect(homeMarkup).toContain('src="{{product.imageUrls[0]}}"');
+    expect(homeMarkup).toContain('class="ui-view home"');
     expect(homeMarkup).toContain('auto-aspect="{{true}}" image-mode="aspectFit" style="height:auto"');
     expect(homeMarkup).not.toContain('wx:for="{{item.imageUrls}}"');
     expect(detailMarkup).toContain('wx:for="{{gallery}}"');
@@ -107,7 +116,7 @@ describe('mini-program upload package assets', () => {
     const homeMarkup = readFileSync(join(sourceRoot, 'pages/home/index.wxml'), 'utf8');
     const homeStyles = readFileSync(join(sourceRoot, 'pages/home/index.wxss'), 'utf8');
 
-    expect(homeMarkup).toContain('wx:if="{{item.imageUrls.length > 1}}" class="product-photo__count"');
+    expect(homeMarkup).toContain('wx:if="{{product.imageUrls.length > 1}}" class="product-photo__count"');
     expect(homeStyles).toContain('.product-photo--single{position:relative;height:auto;aspect-ratio:auto}');
     expect(homeStyles).toContain('.product-card__price-copy{display:flex;flex:1;min-width:0;flex-direction:column;align-items:flex-start}');
     expect(homeStyles).toContain('overflow-wrap:anywhere');

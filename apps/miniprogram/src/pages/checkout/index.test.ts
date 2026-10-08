@@ -11,12 +11,18 @@ type RequestOption = {
 type CheckoutPageInstance = {
   data: Record<string, unknown>;
   setData: (patch: Record<string, unknown>) => void;
+  loadMultiCheckout: (loadGuard: unknown) => Promise<void>;
+  submitMultiOrder: () => Promise<void>;
 };
 
 type CheckoutPageDefinition = {
   data: Record<string, unknown>;
+  onLoad: (this: CheckoutPageInstance, options: Record<string, string | undefined>) => void;
   loadCheckout: (this: CheckoutPageInstance) => Promise<void>;
+  loadMultiCheckout: (this: CheckoutPageInstance, loadGuard: unknown) => Promise<void>;
+  submitMultiOrder: (this: CheckoutPageInstance) => Promise<void>;
   submitOrder: (this: CheckoutPageInstance) => Promise<void>;
+  backToCart: (this: CheckoutPageInstance) => void;
 };
 
 function validCampaign() {
@@ -88,12 +94,13 @@ describe("checkout page guest/auth handoff", () => {
   });
 
   async function loadPage(
-    options: { createFailure?: boolean; paymentFailure?: boolean } = {},
+    options: { createFailure?: boolean; paymentFailure?: boolean; multiCheckout?: boolean; mixedMultiCheckout?: boolean } = {},
   ) {
     const campaign = validCampaign();
     const requests: RequestOption[] = [];
     const navigateTo = vi.fn(() => Promise.resolve());
     const redirectTo = vi.fn(() => Promise.resolve());
+    const switchTab = vi.fn(() => Promise.resolve());
     const showModal = vi.fn(() => Promise.resolve({ confirm: true }));
     const app = {
       globalData: {
@@ -111,13 +118,22 @@ describe("checkout page guest/auth handoff", () => {
       removeStorageSync: (key: string) => storage.delete(key),
       navigateTo,
       redirectTo,
+      switchTab,
       showModal,
       showToast: vi.fn(() => Promise.resolve()),
       request: vi.fn((request: RequestOption) => {
         requests.push(request);
         const path = request.url.replace(app.globalData.apiBaseUrl, "");
-        if (path === "/api/v1/campaigns/campaign-1") {
-          request.success?.({ statusCode: 200, data: { data: campaign } });
+        if (path.startsWith("/api/v1/campaigns/")) {
+          const pathParts = path.split("/");
+          const campaignId = pathParts[pathParts.length - 1]!;
+          request.success?.({ statusCode: 200, data: { data: {
+            ...campaign,
+            id: campaignId,
+            title: campaignId === "campaign-2" ? "第二个团期 · 标题较长用于检查换行" : campaign.title,
+            minTotalQuantity: campaignId === "campaign-2" ? 7 : 3,
+            failureAction: campaignId === "campaign-2" ? "POSTPONE" as const : "CANCEL_AND_REFUND" as const,
+          } } });
         } else if (path === "/api/v1/service-areas") {
           request.success?.({ statusCode: 200, data: { data: [{
             id: "area-1",
@@ -162,6 +178,25 @@ describe("checkout page guest/auth handoff", () => {
             pickedUpAt: null,
             items: [],
           } } });
+        } else if (request.method === "POST" && path === "/api/v1/order-checkouts") {
+          const data = request.data as { groups: Array<{ campaignId: string; serviceAreaId: string; pickupPointId: string; items: Array<{ skuId: string; quantity: number }> }> };
+          request.success?.({ statusCode: 201, data: { data: {
+            checkoutBatch: { id: "batch-1", status: "PENDING_PAYMENT", totalCents: 2580, expiresAt: "2099-01-01T00:15:00.000Z" },
+            orders: data.groups.map((group, index) => ({
+              id: `batch-order-${index + 1}`,
+              orderNo: `BATCH-${index + 1}`,
+              campaignId: group.campaignId,
+              serviceAreaId: group.serviceAreaId,
+              pickupPointId: group.pickupPointId,
+              status: "PENDING_PAYMENT",
+              totalCents: 2580,
+              items: group.items.map((item) => ({ ...item, unitPriceCents: 1290, amountCents: item.quantity * 1290 })),
+            })),
+          } } });
+        } else if (path === "/api/v1/order-checkouts/batch-1/pay") {
+          request.success?.({ statusCode: 200, data: { data: { provider: "mock", status: "READY", clientPayload: {} } } });
+        } else if (path === "/api/v1/order-checkouts/batch-1/pay/mock-confirm") {
+          request.success?.({ statusCode: 200, data: { data: { status: "PAID" } } });
         } else if (path === "/api/v1/orders/order-1/pay") {
           if (options.paymentFailure) {
             request.fail?.({ errMsg: "payment provider unavailable" });
@@ -193,8 +228,20 @@ describe("checkout page guest/auth handoff", () => {
       setData(patch: Record<string, unknown>) {
         Object.assign(this.data, patch);
       },
+      loadMultiCheckout(loadGuard: unknown) { return page.loadMultiCheckout.call(instance, loadGuard as never); },
+      submitMultiOrder() { return page.submitMultiOrder.call(instance); },
     };
-    storage.set("checkoutDraft", validDraft());
+    if (options.multiCheckout) {
+      const group = { ...validDraft(), source: "cart" as const, updatedAt: 12 };
+      const second = options.mixedMultiCheckout ? { ...group, campaignId: "campaign-2", campaignTitle: "旧标题", updatedAt: 13 } : null;
+      const groups = second ? [group, second] : [group];
+      storage.set("standardCart", { version: 2, groups });
+      storage.set("multiCheckoutDraft", { groups, sourceCartGroups: groups.map(value => ({ campaignId: value.campaignId, pickupPointId: value.pickupPointId, updatedAt: value.updatedAt })), updatedAt: 12 });
+      page.onLoad.call(instance, { source: "multi" });
+    } else {
+      storage.set("checkoutDraft", validDraft());
+      page.onLoad.call(instance, {});
+    }
     storage.set("selectedServiceArea", {
       id: "area-1",
       regionCode: "5101",
@@ -221,6 +268,7 @@ describe("checkout page guest/auth handoff", () => {
       requests,
       navigateTo,
       redirectTo,
+      switchTab,
       showModal,
       page,
       instance,
@@ -252,6 +300,45 @@ describe("checkout page guest/auth handoff", () => {
     });
   });
 
+  it("keeps an invalidated checkout recoverable through the cart without deleting its contents", async () => {
+    const { page, instance, switchTab } = await loadPage();
+    const draft = storage.get("checkoutDraft");
+    storage.delete("checkoutDraft");
+    storage.set("standardCart", draft);
+    await page.loadCheckout.call(instance);
+    expect(instance.data.error).toBe("结算商品已失效，请返回购物车重新选择");
+    expect(storage.has("standardCart")).toBe(true);
+
+    page.backToCart.call(instance);
+    expect(switchTab).toHaveBeenCalledWith({ url: "/pages/cart/index" });
+    expect(storage.has("standardCart")).toBe(true);
+  });
+
+  it("returns to cart from the normal multi-checkout entry and keeps cart contents", async () => {
+    const cartEntry = await loadPage({ multiCheckout: true });
+    await cartEntry.page.loadCheckout.call(cartEntry.instance);
+    await settle();
+    cartEntry.page.backToCart.call(cartEntry.instance);
+    expect(cartEntry.switchTab).toHaveBeenCalledWith({ url: "/pages/cart/index" });
+    expect(storage.has("standardCart")).toBe(true);
+  });
+
+  it("returns to cart from a direct checkout entry without relying on a page stack", async () => {
+    const directEntry = await loadPage();
+    await directEntry.page.loadCheckout.call(directEntry.instance);
+    await settle();
+    directEntry.page.backToCart.call(directEntry.instance);
+    expect(directEntry.switchTab).toHaveBeenCalledWith({ url: "/pages/cart/index" });
+    expect(storage.has("checkoutDraft")).toBe(true);
+  });
+
+  it("blocks return navigation while order/payment submission is processing", async () => {
+    const { page, instance, switchTab } = await loadPage();
+    instance.data.submitting = true;
+    page.backToCart.call(instance);
+    expect(switchTab).not.toHaveBeenCalled();
+  });
+
   it("restores the draft after login and only submits on the second tap", async () => {
     const { page, instance, requests, redirectTo, showModal } = await loadPage();
     await page.loadCheckout.call(instance);
@@ -269,11 +356,11 @@ describe("checkout page guest/auth handoff", () => {
     expect(writes.filter((request) => request.url.endsWith("/api/v1/orders"))).toHaveLength(1);
     expect(writes.filter((request) => request.url.endsWith("/pay"))).toHaveLength(1);
     expect(writes.filter((request) => request.url.endsWith("/pay/mock-confirm"))).toHaveLength(1);
-    expect(showModal).toHaveBeenCalledWith(expect.objectContaining({ title: "订单已提交" }));
-    expect(redirectTo).toHaveBeenCalledWith({ url: "/pages/order-detail/index?id=order-1" });
+    expect(showModal).not.toHaveBeenCalled();
+    expect(redirectTo).toHaveBeenCalledWith(expect.objectContaining({ url: "/pages/payment-result/index?resource=order&id=order-1&outcome=returned" }));
   });
 
-  it("keeps the created order and draft when payment fails, then opens that order", async () => {
+  it("keeps the created order, checkout draft and cart after an uncertain payment initiation", async () => {
     const { page, instance, requests, redirectTo, showModal } = await loadPage({
       paymentFailure: true,
     });
@@ -290,15 +377,38 @@ describe("checkout page guest/auth handoff", () => {
     expect(requests.filter((request) => request.method === "POST" && request.url.endsWith("/pay/mock-confirm"))).toHaveLength(0);
     expect(storage.has("checkoutDraft")).toBe(true);
     expect(storage.has("standardCart")).toBe(true);
-    expect(showModal).toHaveBeenCalledWith(
-      expect.objectContaining({
-        title: "订单已创建，支付暂未完成",
-        showCancel: true,
-        confirmText: "查看订单",
-        cancelText: "稍后处理",
-      }),
-    );
-    expect(redirectTo).toHaveBeenCalledWith({ url: "/pages/order-detail/index?id=order-1" });
+    expect(showModal).not.toHaveBeenCalled();
+    expect(redirectTo).toHaveBeenCalledWith(expect.objectContaining({ url: "/pages/payment-result/index?resource=order&id=order-1&outcome=uncertain" }));
+  });
+
+  it("shows each multi-checkout group's own threshold and failure action", async () => {
+    const { page, instance } = await loadPage({ multiCheckout: true, mixedMultiCheckout: true });
+    await page.loadCheckout.call(instance);
+    await settle();
+    const groups = instance.data.groups as Array<{ minimumQuantity: number; failureRuleText: string; campaignTitle: string }>;
+    expect(groups.map(value => [value.minimumQuantity, value.failureRuleText])).toEqual([
+      [3, expect.stringContaining("全额退款")],
+      [7, expect.stringContaining("延期一次")],
+    ]);
+    expect(groups[1]?.campaignTitle).toBe("第二个团期 · 标题较长用于检查换行");
+  });
+
+  it("carries the original cart version across multi-checkout draft revalidation", async () => {
+    const { page, instance, redirectTo } = await loadPage({ multiCheckout: true });
+    await page.loadCheckout.call(instance);
+    await settle();
+    const revalidatedDraft = storage.get("multiCheckoutDraft") as { groups: Array<{ updatedAt: number }>; sourceCartGroups: Array<{ updatedAt: number }> };
+    expect(revalidatedDraft.groups[0]?.updatedAt).not.toBe(12);
+    expect(revalidatedDraft.sourceCartGroups).toEqual([{ campaignId: "campaign-1", pickupPointId: "point-1", updatedAt: 12 }]);
+
+    storage.set("hometown-demo-customer-session", true);
+    await page.submitOrder.call(instance);
+    await settle();
+
+    expect(redirectTo).toHaveBeenCalledWith(expect.objectContaining({ url: "/pages/payment-result/index?resource=checkout&id=batch-1&outcome=returned" }));
+    expect(storage.get("payment-result-context:checkout:batch-1")).toMatchObject({
+      cartGroups: [{ campaignId: "campaign-1", pickupPointId: "point-1", updatedAt: 12 }],
+    });
   });
 
   it("uses a creation-specific recoverable message and no order redirect when creation fails", async () => {

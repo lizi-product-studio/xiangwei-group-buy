@@ -33,48 +33,85 @@ function watchBrowser(page: Page, expectedInvalidation = () => false): string[] 
   return failures;
 }
 
-test("登录密码显隐可键盘操作，429 按 Retry-After 倒计时恢复", async ({ page }) => {
-  let releaseLogin!: () => void;
-  const loginGate = new Promise<void>((resolve) => {
-    releaseLogin = resolve;
-  });
-  await page.route("**/api/v1/auth/admin/login", async (route) => {
-    await loginGate;
-    await route.fulfill({
-      status: 429,
-      headers: { "content-type": "application/json", "retry-after": "2" },
-      body: JSON.stringify({
-        code: "LOGIN_RATE_LIMITED",
-        message: "登录尝试过于频繁，请稍后再试",
-      }),
+for (const entry of [
+  { hostname: "admin.liziqi.icu", role: "SUPER_ADMIN" },
+  { hostname: "saas.liziqi.icu", role: "PICKUP_MANAGER" },
+] as const) {
+  test(`${entry.hostname} 密码显隐可键盘操作，连续输错后可立即正确登录`, async ({ page, request }) => {
+    const suffix = `${Date.now()}${Math.floor(Math.random() * 10_000)}`;
+    let pickupPointIds: string[] = [];
+    if (entry.role === "PICKUP_MANAGER") {
+      const area = await post<{ id: string }>(request, "/api/v1/admin/service-areas", { regionCode: "110101" });
+      const point = await post<{ id: string }>(request, "/api/v1/admin/pickup-points", {
+        photoUrl: await fixturePhoto(request), serviceAreaId: area.id,
+        name: `登录重试点 ${suffix}`, address: "东城区登录验收点", businessHours: "09:00–20:00",
+        pickupInstructions: "出示领取码", longitude: 116.41, latitude: 39.92,
+        contactName: "点位负责人", contactPhone: "13800138009", capacityPerDay: 10,
+      });
+      pickupPointIds = [point.id];
+    }
+    const staffUsername = `retry.${entry.role.toLowerCase()}.${suffix}`;
+    const staff = await post<{ temporaryPassword: string }>(request, "/api/v1/admin/staff", {
+      displayName: `登录重试 ${entry.role}`, username: staffUsername, phone: `136${suffix.slice(-8)}`,
+      role: entry.role, pickupPointIds,
     });
+    let releaseLogin!: () => void;
+    const loginGate = new Promise<void>((resolve) => { releaseLogin = resolve; });
+    // Render both host-specific entry screens from the isolated local app.
+    // Every browser HTTP request is forwarded locally; HMR sockets stay closed.
+    await page.routeWebSocket("**", socket => socket.close());
+    await page.route("**/*", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname === "/api/v1/auth/admin/login") await loginGate;
+      const response = await route.fetch({ url: new URL(`${url.pathname}${url.search}`, adminBase).href });
+      await route.fulfill({ response });
+    });
+    await page.goto(`http://${entry.hostname}/`);
+    await expect(page.getByRole("heading", { name: entry.role === "PICKUP_MANAGER" ? "点位负责人登录" : "乡味集 · 运营管理后台", level: 2, exact: true })).toBeVisible();
+    const username = page.getByLabel("账号");
+    const password = page.getByLabel("密码", { exact: true });
+    const visibility = page.getByRole("button", { name: "显示凭据内容" });
+    const login = page.getByRole("button", { name: /登\s*录/ });
+    await username.focus();
+    await page.keyboard.press("Tab");
+    await expect(password).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(visibility).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(login).toBeFocused();
+    await visibility.focus();
+    await page.keyboard.press("Enter");
+    await expect(password).toHaveAttribute("type", "text");
+    await page.getByRole("button", { name: "隐藏凭据内容" }).press("Enter");
+    await expect(password).toHaveAttribute("type", "password");
+    await username.fill(staffUsername);
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      await password.fill("incorrect browser password");
+      const failed = page.waitForResponse(response => new URL(response.url()).pathname === "/api/v1/auth/admin/login" && response.request().method() === "POST");
+      const submitted = login.click();
+      if (attempt === 0) {
+        await expect(visibility).toBeDisabled();
+        await expect(page.getByRole("button", { name: /忘记密码/ })).toBeDisabled();
+        releaseLogin();
+      }
+      await submitted;
+      expect((await failed).status()).toBe(401);
+      await expect(page.getByRole("alert")).toContainText("账号或密码不正确");
+      await expect(page.getByRole("alert")).not.toContainText(/分钟|秒后|15 分/);
+      await expect(login).toBeEnabled();
+      await expect(password).toBeEnabled();
+      await expect(password).toHaveValue("");
+    }
+    await password.fill(staff.temporaryPassword);
+    await login.click();
+    await expect(page.getByRole("heading", { name: "请先设置新密码" })).toBeVisible();
+    await page.getByLabel("新密码", { exact: true }).fill("retry browser new password");
+    await page.getByLabel("确认新密码").fill("retry browser new password");
+    await page.getByRole("button", { name: "保存新密码" }).click();
+    await expect(page.getByRole("button", { name: "打开账号菜单" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: entry.role === "PICKUP_MANAGER" ? "到货确认" : "运营工作台", exact: true })).toBeVisible();
   });
-  await page.goto("/");
-  const username = page.getByLabel("账号");
-  const password = page.getByLabel("密码");
-  const visibility = page.getByRole("button", { name: "显示凭据内容" });
-  const login = page.getByRole("button", { name: /登\s*录/ });
-  await username.focus();
-  await page.keyboard.press("Tab");
-  await expect(password).toBeFocused();
-  await page.keyboard.press("Tab");
-  await expect(visibility).toBeFocused();
-  await page.keyboard.press("Tab");
-  await expect(login).toBeFocused();
-  await username.fill("rate.limit.admin");
-  await password.fill("rate limit password");
-  const responsePending = login.click();
-  await expect(visibility).toBeDisabled();
-  await expect(page.getByRole("button", { name: /忘记密码/ })).toBeDisabled();
-  releaseLogin();
-  await responsePending;
-  await expect(page.getByRole("alert")).toContainText("登录尝试过于频繁，请在 0 分");
-  await expect(login).toBeDisabled();
-  await expect(login).toHaveCSS("background-color", "rgb(215, 219, 224)");
-  await login.hover();
-  await expect(login).toHaveCSS("background-color", "rgb(215, 219, 224)");
-  await expect(login).toBeEnabled({ timeout: 4_000 });
-});
+}
 
 async function findStaffRow(page: Page, displayName: string) {
   const row = page.getByRole("row").filter({ hasText: displayName });
@@ -462,14 +499,14 @@ test("同一标签切换账号会清空旧工作区，客服和财务刷新只�
     },
   );
   expect(paid.status(), await paid.text()).toBeLessThan(300);
-  const ledgerResponse = await request.fetch(`${apiBase}/api/v1/admin/finance/ledger`, {
+  const ledgerResponse = await request.fetch(`${apiBase}/api/v1/admin/finance/ledger?referenceId=${encodeURIComponent(order.id)}`, {
     headers: superHeaders,
   });
   expect(ledgerResponse.status(), await ledgerResponse.text()).toBe(200);
-  const externalLedger = (await ledgerResponse.json()).data as Array<{
+  const externalLedger = (await ledgerResponse.json()).data as { items: Array<{
     referenceId: string;
-  }>;
-  const externalEntry = externalLedger.find((entry) => entry.referenceId === order.id);
+  }> };
+  const externalEntry = externalLedger.items.find((entry) => entry.referenceId === order.id);
   expect(externalEntry).toBeTruthy();
   const financeBeforeRefresh = financeReads.filter(url => url.includes("/finance/ledger")).length;
   const refundsBeforeRefresh = financeReads.filter(url => url.includes("/finance/refunds")).length;

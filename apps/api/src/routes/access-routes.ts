@@ -9,11 +9,18 @@ export function registerAccessRoutes(app: FastifyInstance, store: CommerceStore)
   app.get("/api/v1/admin/dashboard", async request => {
     requireActor(request, ["OPERATOR", "SUPER_ADMIN"]);
     return store.readSnapshot(async snapshot => {
-      const [areas,points,campaigns,orders]=await Promise.all([snapshot.listServiceAreas(),snapshot.listPickupPoints(),snapshot.listCampaigns(),snapshot.listOrders(Number.MAX_SAFE_INTEGER)]);
+      const [areas,points,campaigns,pendingOrders,paidWaitingClose,fulfillment,readyForPickup,refunding]=await Promise.all([
+        snapshot.listServiceAreas(), snapshot.listPickupPoints(), snapshot.listCampaigns(),
+        snapshot.countOrdersByStatus(undefined, ["COMPLETED", "CANCELLED", "REFUNDED"]),
+        snapshot.countOrdersByStatus(["PAID_WAITING_CLOSE"]),
+        snapshot.countOrdersByStatus(["LOCKED", "ALLOCATING", "IN_TRANSIT"]),
+        snapshot.countOrdersByStatus(["READY_FOR_PICKUP"]),
+        snapshot.countOrdersByStatus(["REFUNDING"]),
+      ]);
       const activeCampaigns=campaigns.filter(c=>!["COMPLETED","CANCELLED"].includes(c.status));
-      return {data:{activeAreas:areas.filter(a=>a.orderEnabled).length,activePoints:points.filter(p=>p.status==="ACTIVE").length,activeCampaigns:activeCampaigns.length,pendingOrders:orders.filter(o=>!["COMPLETED","CANCELLED","REFUNDED"].includes(o.status)).length,
+      return {data:{activeAreas:areas.filter(a=>a.orderEnabled).length,activePoints:points.filter(p=>p.status==="ACTIVE").length,activeCampaigns:activeCampaigns.length,pendingOrders,
         campaigns:activeCampaigns.sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,5).map(c=>({id:c.id,title:c.title,cutoffAt:c.cutoffAt,status:c.status})),
-        stages:[{label:"待履约",statuses:["PAID_WAITING_CLOSE"]},{label:"备货与运输",statuses:["LOCKED","ALLOCATING","IN_TRANSIT"]},{label:"待领取",statuses:["READY_FOR_PICKUP"]},{label:"退款处理中",statuses:["REFUNDING"]}].map(s=>({label:s.label,count:orders.filter(o=>s.statuses.includes(o.status)).length}))
+        stages:[{label:"待履约",count:paidWaitingClose},{label:"备货与运输",count:fulfillment},{label:"待领取",count:readyForPickup},{label:"退款处理中",count:refunding}]
       }};
     });
   });

@@ -154,11 +154,9 @@ export function registerFulfillmentRoutes(
   app.get("/api/v1/pickup/records", async (request) => {
     const actor = requireActor(request, ["PICKUP_MANAGER"]);
     const query = pickupRecordQuerySchema.parse(request.query);
-    const [assignments, points, receipts, orders, campaigns, staff] = await Promise.all([
+    const [assignments, points, campaigns, staff] = await Promise.all([
       store.listStaffPickupPointAssignments(actor.userId),
       store.listPickupPoints(),
-      store.listCommunityPickupReceipts(),
-      store.listOrders(Number.MAX_SAFE_INTEGER),
       store.listCampaigns(),
       store.listInternalStaff(),
     ]);
@@ -173,7 +171,8 @@ export function registerFulfillmentRoutes(
         )
         .map((point) => [point.id, point]),
     );
-    const orderById = new Map(orders.map((order) => [order.id, order]));
+    const pickupIds = [...pointById.keys()];
+    const receiptPage = await store.listPickupReceiptOrderPage(pickupIds, query.orderNo, query.page, query.pageSize);
     const campaignById = new Map(
       campaigns.map((campaign) => [campaign.id, campaign]),
     );
@@ -181,10 +180,7 @@ export function registerFulfillmentRoutes(
       staff.map((member) => [member.userId, member]),
     );
     const rows = [];
-    for (const receipt of receipts) {
-      const order = orderById.get(receipt.orderId);
-      if (!order || !pointById.has(order.pickupPointId)) continue;
-      if (query.orderNo && !order.orderNo.includes(query.orderNo)) continue;
+    for (const { receipt, order } of receiptPage.items) {
       const campaign = campaignById.get(order.campaignId);
       const verifier = staffById.get(receipt.verifierId);
       const point = pointById.get(order.pickupPointId)!;
@@ -205,11 +201,9 @@ export function registerFulfillmentRoutes(
         })),
       });
     }
-    const total = rows.length;
-    const start = (query.page - 1) * query.pageSize;
     return {
-      data: rows.slice(start, start + query.pageSize),
-      pagination: { total, page: query.page, pageSize: query.pageSize },
+      data: rows,
+      pagination: { total: receiptPage.total, page: query.page, pageSize: query.pageSize },
     };
   });
 }

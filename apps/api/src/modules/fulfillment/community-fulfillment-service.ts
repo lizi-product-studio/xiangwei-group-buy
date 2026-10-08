@@ -4,6 +4,7 @@ import { BusinessError, moneyCents, transitionOrder } from "@hometown/domain";
 import type { CommunityStore } from "./community-store.js";
 import type {
   Campaign,
+  CampaignGroup,
   CampaignItem,
   CommunityAllocationDraft,
   CommunityDeliveryConfirmation,
@@ -28,6 +29,24 @@ export type CommunityCampaignInput = {
     catalogSkuId: string;
     retailPriceCents: number;
     sellableQuantity: number;
+  }>;
+};
+export type CommunityCampaignGroupInput = {
+  title: string;
+  cutoffAt: string;
+  groupingMode: "PER_POINT" | "ALL_POINTS";
+  minTotalQuantity: number;
+  failureAction: "CANCEL_AND_REFUND" | "POSTPONE";
+  points: Array<{
+    pickupPointId: string;
+    dispatchAt: string;
+    estimatedArrivalStartAt: string | null;
+    estimatedArrivalEndAt: string | null;
+  }>;
+  items: Array<{
+    catalogSkuId: string;
+    retailPriceCents: number;
+    stockByPoint: Array<{ pickupPointId: string; sellableQuantity: number }>;
   }>;
 };
 export type CommunityArrivalInput = {
@@ -111,6 +130,7 @@ export class CommunityFulfillmentService {
     const campaign = await store.getCampaignForUpdate(id);
     if (!campaign) throw new BusinessError("RESOURCE_NOT_FOUND", "团期不存在", 404);
     if (campaign.status !== "DRAFT") throw new BusinessError("CAMPAIGN_NOT_DRAFT", "仅从未开售的草稿团期可以编辑或删除", 409);
+    if (campaign.campaignGroupId) throw new BusinessError("INVALID_STATE_TRANSITION", "多点活动必须从活动分组入口统一编辑或删除", 409);
     if (campaign.version !== version) throw new BusinessError("CAMPAIGN_VERSION_CONFLICT", "团期已被修改，请刷新后重新操作", 409);
     const plan = await store.getDeliveryPlanByCampaign(id);
     if (await store.hasCampaignBusinessReferences(id))
@@ -250,6 +270,194 @@ export class CommunityFulfillmentService {
         { campaign, items },
       );
       return campaign;
+    });
+  }
+
+  public async createCampaignGroup(
+    input: CommunityCampaignGroupInput,
+    actorId: string,
+    requestId: string,
+  ): Promise<{ group: CampaignGroup; campaigns: Campaign[] }> {
+    return this.store.transaction(async (store) => {
+      const now = this.now();
+      const areas = new Map((await store.listServiceAreas()).map((area) => [area.id, area]));
+      const points = new Map((await store.listPickupPoints()).map((point) => [point.id, point]));
+      const skus = new Map<string, Awaited<ReturnType<CommunityStore["getCatalogSku"]>>>();
+      for (const item of input.items) {
+        const sku = await store.getCatalogSku(item.catalogSkuId);
+        if (!sku || sku.status !== "ACTIVE" || sku.product.status !== "ACTIVE")
+          throw new BusinessError("RESOURCE_NOT_FOUND", "商品不存在或已停用", 404, { catalogSkuId: item.catalogSkuId });
+        skus.set(item.catalogSkuId, sku);
+      }
+      const group: CampaignGroup = {
+        id: randomUUID(), title: input.title, cutoffAt: input.cutoffAt,
+        groupingMode: input.groupingMode,
+        minTotalQuantity: input.minTotalQuantity, failureAction: input.failureAction,
+        status: "DRAFT", campaignIds: [], postponementCount: 0, version: 1, createdAt: now,
+      };
+      const campaigns: Campaign[] = [];
+      for (const pointInput of input.points) {
+        const point = points.get(pointInput.pickupPointId);
+        const area = point ? areas.get(point.serviceAreaId) : null;
+        if (!point || point.status !== "ACTIVE" || !area || area.status !== "ENABLED" || !area.orderEnabled)
+          throw new BusinessError("RESOURCE_NOT_FOUND", "所选服务区域或自提点不可用", 404, { pickupPointId: pointInput.pickupPointId });
+        const items: CampaignItem[] = input.items.map((requested) => {
+          const sku = skus.get(requested.catalogSkuId);
+          const stock = requested.stockByPoint.find((entry) => entry.pickupPointId === point.id);
+          if (!sku || !stock) throw new BusinessError("VALIDATION_ERROR", "各点商品库存配置不完整", 400);
+          return {
+            catalogSkuId: sku.id, productId: sku.productId, title: sku.product.title,
+            category: sku.product.category, skuName: sku.name, origin: sku.product.origin,
+            imageUrl: sku.product.imageUrl,
+            imageUrls: sku.product.imageUrls?.length ? sku.product.imageUrls : (sku.product.imageUrl ? [sku.product.imageUrl] : []),
+            description: sku.product.description ?? "", detailImageUrls: sku.product.detailImageUrls ?? [],
+            salesQuantity: sku.product.salesQuantity ?? 0, retailPriceCents: moneyCents(requested.retailPriceCents),
+            sellableQuantity: stock.sellableQuantity, reservedQuantity: 0,
+          };
+        });
+        const campaign: Campaign = {
+          id: randomUUID(), campaignGroupId: group.id, title: input.title,
+          serviceAreaId: point.serviceAreaId, cutoffAt: input.cutoffAt,
+          dispatchAt: pointInput.dispatchAt,
+          estimatedArrivalStartAt: pointInput.estimatedArrivalStartAt,
+          estimatedArrivalEndAt: pointInput.estimatedArrivalEndAt,
+          minTotalQuantity: input.minTotalQuantity, failureAction: input.failureAction,
+          items, status: "DRAFT", version: 1, createdAt: now,
+        };
+        await store.saveCampaign(campaign);
+        await store.replaceCampaignItems(campaign.id, items);
+        await store.saveDeliveryPlan({
+          id: randomUUID(), campaignId: campaign.id, serviceAreaId: point.serviceAreaId,
+          pickupPointId: point.id, status: "SITE_CONFIRMED", siteName: point.name,
+          address: point.address, arrivalStartAt: pointInput.estimatedArrivalStartAt,
+          arrivalEndAt: pointInput.estimatedArrivalEndAt, contactName: point.contactName,
+          contactPhone: point.contactPhone, vehicleOrderNo: null, driverName: null,
+          driverPhone: null, vehiclePlate: null, logisticsPlatform: null,
+          estimatedArrivalAt: null, remark: null, confirmedAt: now, bookedAt: null,
+          dispatchedAt: null, arrivedAt: null, createdAt: now, updatedAt: now,
+        });
+        group.campaignIds.push(campaign.id);
+        campaigns.push(campaign);
+      }
+      await store.saveCampaignGroup(group);
+      await this.audit(store, actorId, requestId, "COMMUNITY_CAMPAIGN_GROUP_CREATED", "CAMPAIGN_GROUP", group.id, null, { group, campaigns });
+      return { group, campaigns };
+    });
+  }
+
+  public async updateCampaignGroup(
+    groupId: string,
+    expectedVersion: number,
+    input: CommunityCampaignGroupInput,
+    actorId: string,
+    requestId: string,
+  ): Promise<{ group: CampaignGroup; campaigns: Campaign[] }> {
+    return this.store.transaction(async (store) => {
+      const group = await store.getCampaignGroup(groupId);
+      if (!group) throw new BusinessError("RESOURCE_NOT_FOUND", "活动分组不存在", 404);
+      if (group.version !== expectedVersion) throw new BusinessError("CAMPAIGN_VERSION_CONFLICT", "活动分组已被修改，请刷新后重新编辑", 409);
+      if (group.status !== "DRAFT") throw new BusinessError("CAMPAIGN_NOT_DRAFT", "仅未开售的多点活动可以编辑", 409);
+      const currentRows = await Promise.all(group.campaignIds.map((id) => store.getCampaignForUpdate(id)));
+      if (currentRows.length < 2 || currentRows.some((campaign) => !campaign || campaign.campaignGroupId !== group.id || campaign.status !== "DRAFT"))
+        throw new BusinessError("FINANCIAL_INCONSISTENT", "活动分组中的团期映射或状态异常", 500);
+      const currentCampaigns = currentRows as Campaign[];
+      for (const campaign of currentCampaigns) {
+        const plan = await store.getDeliveryPlanByCampaign(campaign.id);
+        if (await store.hasCampaignBusinessReferences(campaign.id) || (plan && plan.status !== "SITE_CONFIRMED"))
+          throw new BusinessError("CAMPAIGN_HAS_REFERENCES", "活动已有订单或运输记录，不能编辑多点配置", 409);
+      }
+      const currentByPoint = new Map<string, { campaign: Campaign; plan: Awaited<ReturnType<CommunityStore["getDeliveryPlanByCampaign"]>> }>();
+      for (const campaign of currentCampaigns) {
+        const plan = await store.getDeliveryPlanByCampaign(campaign.id);
+        if (plan) currentByPoint.set(plan.pickupPointId, { campaign, plan });
+      }
+      const areas = new Map((await store.listServiceAreas()).map((area) => [area.id, area]));
+      const pointsById = new Map((await store.listPickupPoints()).map((point) => [point.id, point]));
+      const skus = new Map<string, NonNullable<Awaited<ReturnType<CommunityStore["getCatalogSku"]>>>>();
+      for (const item of input.items) {
+        const sku = await store.getCatalogSku(item.catalogSkuId);
+        if (!sku || sku.status !== "ACTIVE" || sku.product.status !== "ACTIVE")
+          throw new BusinessError("RESOURCE_NOT_FOUND", "商品不存在或已停用", 404, { catalogSkuId: item.catalogSkuId });
+        skus.set(item.catalogSkuId, sku);
+      }
+      const before = structuredClone(group);
+      const campaigns: Campaign[] = [];
+      const retained = new Set<string>();
+      for (const pointInput of input.points) {
+        const point = pointsById.get(pointInput.pickupPointId);
+        const area = point ? areas.get(point.serviceAreaId) : null;
+        if (!point || point.status !== "ACTIVE" || !area || area.status !== "ENABLED" || !area.orderEnabled)
+          throw new BusinessError("RESOURCE_NOT_FOUND", "所选服务区域或自提点不可用", 404, { pickupPointId: pointInput.pickupPointId });
+        const existing = currentByPoint.get(point.id);
+        const campaignId = existing?.campaign.id ?? randomUUID();
+        const now = this.now();
+        const items: CampaignItem[] = input.items.map((requested) => {
+          const sku = skus.get(requested.catalogSkuId)!;
+          const stock = requested.stockByPoint.find((entry) => entry.pickupPointId === point.id);
+          if (!stock) throw new BusinessError("VALIDATION_ERROR", "各点商品库存配置不完整", 400);
+          return {
+            catalogSkuId: sku.id, productId: sku.productId, title: sku.product.title,
+            category: sku.product.category, skuName: sku.name, origin: sku.product.origin,
+            imageUrl: sku.product.imageUrl,
+            imageUrls: sku.product.imageUrls?.length ? sku.product.imageUrls : (sku.product.imageUrl ? [sku.product.imageUrl] : []),
+            description: sku.product.description ?? "", detailImageUrls: sku.product.detailImageUrls ?? [],
+            salesQuantity: sku.product.salesQuantity ?? 0, retailPriceCents: moneyCents(requested.retailPriceCents),
+            sellableQuantity: stock.sellableQuantity, reservedQuantity: 0,
+          };
+        });
+        const campaign: Campaign = {
+          id: campaignId, campaignGroupId: group.id, title: input.title,
+          serviceAreaId: point.serviceAreaId, cutoffAt: input.cutoffAt,
+          dispatchAt: pointInput.dispatchAt,
+          estimatedArrivalStartAt: pointInput.estimatedArrivalStartAt,
+          estimatedArrivalEndAt: pointInput.estimatedArrivalEndAt,
+          minTotalQuantity: input.minTotalQuantity, failureAction: input.failureAction,
+          items, status: "DRAFT", version: existing ? existing.campaign.version + 1 : 1,
+          createdAt: existing?.campaign.createdAt ?? now,
+        };
+        if (existing) {
+          if (!(await store.updateCampaign(campaign, existing.campaign.version)) )
+            throw new BusinessError("CAMPAIGN_VERSION_CONFLICT", "活动点位团期已被修改", 409);
+          const plan = existing.plan!;
+          await store.saveDeliveryPlan({
+            ...plan, serviceAreaId: point.serviceAreaId, pickupPointId: point.id,
+            siteName: point.name, address: point.address,
+            arrivalStartAt: pointInput.estimatedArrivalStartAt,
+            arrivalEndAt: pointInput.estimatedArrivalEndAt, updatedAt: now,
+          });
+        } else {
+          await store.saveCampaign(campaign);
+          await store.saveDeliveryPlan({
+            id: randomUUID(), campaignId: campaign.id, serviceAreaId: point.serviceAreaId,
+            pickupPointId: point.id, status: "SITE_CONFIRMED", siteName: point.name,
+            address: point.address, arrivalStartAt: pointInput.estimatedArrivalStartAt,
+            arrivalEndAt: pointInput.estimatedArrivalEndAt, contactName: point.contactName,
+            contactPhone: point.contactPhone, vehicleOrderNo: null, driverName: null,
+            driverPhone: null, vehiclePlate: null, logisticsPlatform: null,
+            estimatedArrivalAt: null, remark: null, confirmedAt: now, bookedAt: null,
+            dispatchedAt: null, arrivedAt: null, createdAt: now, updatedAt: now,
+          });
+        }
+        await store.replaceCampaignItems(campaign.id, items);
+        retained.add(campaign.id);
+        campaigns.push(campaign);
+      }
+      for (const campaign of currentCampaigns) {
+        if (retained.has(campaign.id)) continue;
+        if (!await store.deleteDraftCampaign(campaign.id, campaign.version))
+          throw new BusinessError("CAMPAIGN_VERSION_CONFLICT", "移除自提点失败，活动已被其他操作更新", 409);
+      }
+      const expected = group.version;
+      Object.assign(group, {
+        title: input.title, cutoffAt: input.cutoffAt,
+        groupingMode: input.groupingMode, minTotalQuantity: input.minTotalQuantity,
+        failureAction: input.failureAction, campaignIds: campaigns.map((campaign) => campaign.id),
+        version: expected + 1,
+      });
+      if (!(await store.updateCampaignGroup(group, expected)) )
+        throw new BusinessError("CAMPAIGN_VERSION_CONFLICT", "活动分组已被修改", 409);
+      await this.audit(store, actorId, requestId, "COMMUNITY_CAMPAIGN_GROUP_UPDATED", "CAMPAIGN_GROUP", group.id, before, { group, campaigns });
+      return { group, campaigns };
     });
   }
 

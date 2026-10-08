@@ -1,5 +1,6 @@
 import type {
   Campaign,
+  CampaignGroup,
   CommunityAllocationDraft,
   CampaignItem,
   CommunityDeliveryConfirmation,
@@ -25,6 +26,10 @@ export interface CommunityStore {
   listPickupPoints(serviceAreaId?: string): Promise<PickupPoint[]>;
   getCatalogSku(id: string): Promise<CatalogSku | null>;
   saveCampaign(campaign: Campaign): Promise<void>;
+  listCampaignGroups(): Promise<CampaignGroup[]>;
+  getCampaignGroup(id: string): Promise<CampaignGroup | null>;
+  saveCampaignGroup(value: CampaignGroup): Promise<void>;
+  updateCampaignGroup(value: CampaignGroup, expectedVersion: number): Promise<boolean>;
   updateCampaign(campaign: Campaign, expectedVersion: number): Promise<boolean>;
   deleteDraftCampaign(id: string, expectedVersion: number): Promise<boolean>;
   hasCampaignBusinessReferences(id: string): Promise<boolean>;

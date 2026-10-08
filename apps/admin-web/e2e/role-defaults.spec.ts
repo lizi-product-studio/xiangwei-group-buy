@@ -192,7 +192,7 @@ test("后台框架提供高对比账号入口、可展开分组和运营可读�
   await session.page.screenshot({ path: testInfo.outputPath("account-menu.png") });
   await account.click();
   await expect(accountIdentity).toBeHidden();
-  const operationsGroup = session.page.getByRole("menuitem", { name: "商品与团期", exact: true });
+  const operationsGroup = session.page.getByRole("menuitem", { name: "商品与营销", exact: true });
   const operationsSubmenu = operationsGroup.locator("xpath=..");
   await operationsGroup.click();
   await expect(operationsGroup).toHaveAttribute("aria-expanded", "false");

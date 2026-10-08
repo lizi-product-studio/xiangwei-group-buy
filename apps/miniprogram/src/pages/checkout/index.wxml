@@ -1,5 +1,31 @@
 <view class="ui-view checkout">
-  <view wx:if="{{loading}}" class="ui-view rule-card">正在核对商品、库存和收货区域…</view>
-  <view wx:elif="{{error}}" class="ui-view rule-card checkout-error"><text class="ui-text">暂时不能结算</text><text class="ui-text">{{error}}</text><button class="ui-button secondary-button" bindtap="loadCheckout">重新核对</button></view>
-  <block wx:else><view class="ui-view pickup-card" bindtap="openPickup"><text class="ui-text section-label">固定自提点</text><view class="pickup-photo"><product-image src="{{pickupPoint.photoUrl || ''}}" label="自提点照片" /></view><text class="ui-text pickup-card__name">{{pickupPoint.name}}</text><text class="ui-text pickup-card__address">{{pickupPoint.address}}</text><text wx:if="{{pickupPoint.businessHours}}" class="ui-text pickup-card__address">营业时间：{{pickupPoint.businessHours}}</text><text wx:if="{{pickupPoint.pickupInstructions}}" class="ui-text pickup-card__address">领取提示：{{pickupPoint.pickupInstructions}}</text><text class="ui-text pickup-card__address">{{deliveryNote}}</text><text class="ui-text pickup-card__change">查看 ›</text></view><view class="ui-view order-card"><view class="ui-view order-card__merchant">{{draft.campaignTitle}}</view><view wx:for="{{items}}" wx:key="skuId" class="ui-view order-card__goods"><view class="ui-image order-card__image"><product-image src="{{item.imageUrl || ''}}" /></view><view class="ui-view"><text class="ui-text">{{item.title}}</text><text class="ui-text">{{item.skuName}}</text></view><view class="ui-view"><text class="ui-text money">{{item.priceText}}</text><text class="ui-text">× {{item.quantity}}</text></view></view><view class="ui-view amount-line"><text class="ui-text">商品小计</text><text class="ui-text money">{{total}}</text></view><view class="ui-view amount-line"><text class="ui-text">集中配送</text><text class="ui-text">按团期统一安排</text></view></view><view class="ui-view rule-card"><text class="ui-text">成团说明</text><text class="ui-text">{{unformedRuleText}}</text></view><view class="ui-view checkout-bar"><view class="ui-view"><text class="ui-text">合计</text><text class="ui-text money">{{total}}</text></view><button class="ui-button {{submitting ? 'ui-disabled' : ''}} primary-button" loading="{{submitting}}" disabled="{{submitting}}" bindtap="submitOrder">{{submitting ? '正在下单' : '确认并支付'}}</button></view></block>
+  <view class="checkout-topbar"><button class="ui-button checkout-back {{submitting ? 'ui-disabled' : ''}}" disabled="{{submitting}}" bindtap="backToCart">‹ 返回购物车</button><text wx:if="{{submitting}}" class="checkout-processing">正在处理订单与支付，请勿重复提交</text></view>
+  <view wx:if="{{loading}}" class="ui-view rule-card">正在逐组核对价格、库存、截单时间和自提点…</view>
+  <view wx:elif="{{error}}" class="ui-view rule-card checkout-error"><text class="ui-text">暂时不能结算</text><text class="ui-text">{{error}}</text><text class="ui-text checkout-error__recovery">购物车内容会保留；可返回调整商品或点位后再试。</text><button class="ui-button secondary-button" bindtap="loadCheckout">重新核对</button></view>
+  <block wx:elif="{{mode === 'multi'}}">
+    <view class="batch-intro"><text class="batch-intro__title">确认多处自提</text><text>将生成 {{groups.length}} 张独立订单，分别固定团期和领取地点；付款前系统会再次核验。</text></view>
+    <view wx:for="{{groups}}" wx:key="groupKey" class="ui-view batch-order-card">
+      <view class="batch-order-head"><text>订单 {{index + 1}}</text><text>{{item.pickupPointName}}</text></view>
+      <text class="batch-campaign">{{item.campaignTitle}}</text>
+      <view class="batch-group-rule"><text>成团门槛：本团需达到 {{item.minimumQuantity}} 件</text><text>{{item.failureRuleText}}</text></view>
+      <text class="batch-location">{{item.pickupPointAddress}}</text>
+      <text class="batch-arrival">预计领取：{{item.arrivalText}}</text>
+      <text class="batch-cutoff">截单：{{item.cutoffText}}</text>
+      <view wx:if="{{item.priceChanged}}" class="batch-price-changed">商品价格已更新，请确认当前金额</view>
+      <view wx:for="{{item.items}}" wx:for-item="line" wx:key="skuId" class="ui-view order-card__goods">
+        <view class="ui-image order-card__image"><product-image src="{{line.imageUrl || ''}}" /></view>
+        <view class="ui-view batch-line-copy"><text class="ui-text">{{line.title}}</text><text class="ui-text">{{line.skuName}} × {{line.quantity}}</text></view>
+        <text class="ui-text money">{{line.amountText}}</text>
+      </view>
+      <view class="batch-order-total"><text>本组小计</text><text class="money">{{item.total}}</text></view>
+    </view>
+    <view class="ui-view rule-card batch-payment-note"><text class="ui-text">一次微信付款 · 多张订单</text><text class="ui-text">支付后可分别查看每张订单的提货码；退款、取消和履约按订单单独处理。</text></view>
+    <view class="ui-view checkout-bar"><view class="ui-view"><text class="ui-text">{{groups.length}} 组 · 合计</text><text class="ui-text money">{{total}}</text></view><button class="ui-button {{submitting ? 'ui-disabled' : ''}} primary-button" loading="{{submitting}}" disabled="{{submitting}}" bindtap="submitOrder">{{submitting ? '正在核对并付款' : '确认并一次付款'}}</button></view>
+  </block>
+  <block wx:else>
+    <view class="ui-view pickup-card" bindtap="openPickup"><text class="ui-text section-label">固定自提点</text><view class="pickup-photo"><product-image src="{{pickupPoint.photoUrl || ''}}" label="自提点照片" /></view><text class="ui-text pickup-card__name">{{pickupPoint.name}}</text><text class="ui-text pickup-card__address">{{pickupPoint.address}}</text><text wx:if="{{pickupPoint.businessHours}}" class="ui-text pickup-card__address">营业时间：{{pickupPoint.businessHours}}</text><text wx:if="{{pickupPoint.pickupInstructions}}" class="ui-text pickup-card__address">领取提示：{{pickupPoint.pickupInstructions}}</text><text class="ui-text pickup-card__address">{{deliveryNote}}</text><text class="ui-text pickup-card__change">查看 ›</text></view>
+    <view class="ui-view order-card"><view class="ui-view order-card__merchant">{{draft.campaignTitle}}</view><view wx:for="{{items}}" wx:key="skuId" class="ui-view order-card__goods"><view class="ui-image order-card__image"><product-image src="{{item.imageUrl || ''}}" /></view><view class="ui-view"><text class="ui-text">{{item.title}}</text><text class="ui-text">{{item.skuName}}</text></view><view class="ui-view"><text class="ui-text money">{{item.priceText}}</text><text class="ui-text">× {{item.quantity}}</text></view></view><view class="ui-view amount-line"><text class="ui-text">商品小计</text><text class="ui-text money">{{total}}</text></view><view class="ui-view amount-line"><text class="ui-text">集中配送</text><text class="ui-text">按团期统一安排</text></view></view>
+    <view class="ui-view rule-card"><text class="ui-text">成团说明</text><text class="ui-text">{{unformedRuleText}}</text></view>
+    <view class="ui-view checkout-bar"><view class="ui-view"><text class="ui-text">合计</text><text class="ui-text money">{{total}}</text></view><button class="ui-button {{submitting ? 'ui-disabled' : ''}} primary-button" loading="{{submitting}}" disabled="{{submitting}}" bindtap="submitOrder">{{submitting ? '正在下单' : '确认并支付'}}</button></view>
+  </block>
 </view>

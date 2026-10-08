@@ -1,0 +1,33 @@
+<view class="ui-view payment-result">
+  <view wx:if="{{refreshing && !orders.length}}" class="ui-view payment-result__loading"><view class="payment-result__spinner"/><text>正在向平台核对订单状态…</text></view>
+  <block wx:else>
+    <view class="ui-view payment-result__hero state-{{status}}">
+      <view class="payment-result__mark">{{status === 'PAID' ? '✓' : status === 'CHECKING' || status === 'UNAVAILABLE' ? '…' : '!'}}</view>
+      <text class="ui-text payment-result__title">{{title}}</text>
+      <text class="ui-text payment-result__message">{{message}}</text>
+    </view>
+
+    <view wx:if="{{error}}" class="ui-view payment-result__error"><text>{{error}}</text></view>
+
+    <view wx:if="{{orders.length}}" class="ui-view payment-result__summary">
+      <view class="ui-view payment-result__total"><text>本次订单金额</text><text class="money">{{amountText}}</text></view>
+      <view class="payment-result__separator"/>
+      <view wx:for="{{orders}}" wx:key="id" class="ui-view payment-result__order" data-id="{{item.id}}" bindtap="openOrder">
+        <view class="ui-view payment-result__order-heading"><text>订单 {{index + 1}}</text><text>{{item.statusText}}</text></view>
+        <text class="ui-text payment-result__point">{{item.pickupPointName}}</text>
+        <text wx:if="{{item.pickupPointAddress}}" class="ui-text payment-result__address">{{item.pickupPointAddress}}</text>
+        <view class="ui-view payment-result__order-foot"><text>本单金额 {{item.amountText}}</text><text class="ui-text payment-result__detail-link">查看订单 ›</text></view>
+      </view>
+    </view>
+
+    <view wx:if="{{status === 'PAID'}}" class="ui-view payment-result__hint">订单详情中可查看对应的提货信息。</view>
+
+    <view class="ui-view payment-result__actions">
+      <button wx:if="{{status === 'CHECKING' || status === 'UNAVAILABLE'}}" class="ui-button primary-button" loading="{{refreshing}}" disabled="{{refreshing}}" bindtap="refreshStatus">{{refreshing ? '正在查询' : '刷新支付状态'}}</button>
+      <button wx:if="{{canRetry}}" class="ui-button primary-button" loading="{{retrying}}" disabled="{{retrying}}" bindtap="retryPayment">{{retrying ? '正在继续支付' : '继续支付原订单'}}</button>
+      <button wx:if="{{status === 'PAID' || status === 'CLOSED' || status === 'EXPIRED' || status === 'FAILED' || status === 'CANCELLED' || status === 'UNAVAILABLE'}}" class="ui-button secondary-button" bindtap="openOrders">查看订单</button>
+      <button wx:if="{{canReturnToCart}}" class="ui-button text-button" bindtap="openCart">返回购物车</button>
+      <button wx:if="{{!loggedIn}}" class="ui-button primary-button" bindtap="openLogin">手机号快捷登录</button>
+    </view>
+  </block>
+</view>

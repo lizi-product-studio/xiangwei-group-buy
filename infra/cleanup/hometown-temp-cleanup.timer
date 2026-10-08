@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly reviewed hometown temporary file cleanup
+
+[Timer]
+OnCalendar=Mon *-*-* 04:15:00 Asia/Shanghai
+RandomizedDelaySec=5m
+Persistent=true
+Unit=hometown-temp-cleanup.service
+
+[Install]
+WantedBy=timers.target

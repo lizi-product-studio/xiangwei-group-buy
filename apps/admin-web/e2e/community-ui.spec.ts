@@ -628,7 +628,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
     `${apiBase}/api/v1/orders/${normal.order.id}`,
     { headers: customerActorHeaders },
   );
-  expect((await completedPickupOrder.json()).data.status).toBe("PICKED_UP");
+  expect((await completedPickupOrder.json()).data.status).toBe("COMPLETED");
 
   await page.getByRole("button", { name: "打开账号菜单" }).click();
   await page.getByRole("menuitem", { name: "退出登录" }).click();
@@ -956,11 +956,17 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
       (window) => window.orderId === expiryOrders[1]!.id,
     )?.status,
   ).toBe("CLOSED");
-  const refundState = await request.fetch(`${apiBase}/api/v1/admin/finance/refunds`, {
+  const refundState = await request.fetch(`${apiBase}/api/v1/admin/finance/refunds?reference=${encodeURIComponent(emergency.order.id)}`, {
     headers: superHeaders,
   });
   expect(refundState.status(), await refundState.text()).toBe(200);
-  const partialRefunds = (await refundState.json()).data.partial as Array<{ orderId: string }>;
-  expect(partialRefunds.filter((refund) => refund.orderId === emergency.order.id)).toHaveLength(1);
+  const refundPage = (await refundState.json()).data as {
+    items: Array<{ orderId: string; refundType: "FULL" | "PARTIAL"; amountCents: number; status: string }>;
+    total: number;
+  };
+  expect(refundPage.total).toBe(1);
+  expect(refundPage.items).toEqual([
+    expect.objectContaining({ orderId: emergency.order.id, refundType: "PARTIAL", amountCents: 1880, status: "SUCCEEDED" }),
+  ]);
   expect(browserFailures).toEqual([]);
 });

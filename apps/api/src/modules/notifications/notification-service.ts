@@ -241,12 +241,20 @@ export class NotificationService {
     if (notification.deliveryClaimToken !== claimToken) return;
     // These reads are entirely local prerequisites. A failure here is known to
     // be before submission, so it may safely return to the human retry queue.
-    const order = await this.store.getOrder(notification.orderId);
-    const plan = order
-      ? await this.store.getDeliveryPlan(order.deliveryPlanId)
-      : null;
-    const user = await this.store.getUser(notification.userId);
-    if (!order || !plan || !user || order.userId !== user.id) {
+    const prerequisites = await this.store.readSnapshot(async (store) => {
+      const order = await store.getOrder(notification.orderId);
+      const plan = order ? await store.getDeliveryPlan(order.deliveryPlanId) : null;
+      const user = await store.getUser(notification.userId);
+      if (!order || !plan || !user || order.userId !== user.id) return null;
+      const [window, credential, refund, preference] = await Promise.all([
+        store.getCommunityPickupWindow(order.id),
+        store.getPickupCredential(order.id),
+        notification.refundId ? store.getPartialRefund(notification.refundId) : Promise.resolve(null),
+        store.getNotificationPreference(user.id),
+      ]);
+      return { order, plan, user, window, credential, refund, preference };
+    });
+    if (!prerequisites) {
       notification.status = "MANUAL_REQUIRED";
       notification.nextAttemptAt = null;
       notification.deliveryLeaseUntil = null;
@@ -257,15 +265,11 @@ export class NotificationService {
       return;
     }
 
-    const input = { user, notification, plan, order,
-      window: await this.store.getCommunityPickupWindowForUpdate(order.id),
-      credential: await this.store.getPickupCredential(order.id),
-      refund: notification.refundId ? await this.store.getPartialRefund(notification.refundId) : null,
-    };
+    const { order, plan, user, preference, window, credential, refund } = prerequisites;
+    const input = { user, notification, plan, order, window, credential, refund };
     let templateId: string | undefined;
     let preferenceSnapshot: NotificationPreference | null = null;
     try {
-      const preference = await this.store.getNotificationPreference(user.id);
       templateId = this.provider.templateIdFor?.(notification.type);
       preferenceSnapshot = preference ? {
         ...preference,

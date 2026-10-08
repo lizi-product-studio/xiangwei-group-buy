@@ -8,13 +8,10 @@ import {
 import { BusinessError } from "@hometown/domain";
 import { requireActor } from "../modules/auth/auth.js";
 import type { AdminAuthService } from "../modules/auth/admin-auth.js";
-import type { LoginRateLimiter } from "../modules/auth/login-rate-limiter.js";
 import type { AuthService } from "../modules/auth/wechat-auth.js";
 
-// A browser matrix activates more than five isolated employees. Keep the
-// production brute-force limit intact while allowing the dedicated test app to
-// exercise all roles in one deterministic run.
-const adminCredentialRateLimit =
+// Password setup remains throttled independently of ordinary staff login.
+const adminPasswordChangeRateLimit =
   process.env.NODE_ENV === "test"
     ? { max: 50, timeWindow: "15 minutes" }
     : { max: 5, timeWindow: "15 minutes" };
@@ -24,14 +21,12 @@ export function registerAuthRoutes(
   dependencies: {
     authService: AuthService | null;
     adminAuthService: AdminAuthService;
-    loginRateLimiter: LoginRateLimiter;
     privacyNoticeVersion: string;
   },
 ): void {
   const {
     authService,
     adminAuthService,
-    loginRateLimiter,
     privacyNoticeVersion,
   } = dependencies;
   app.post(
@@ -54,26 +49,15 @@ export function registerAuthRoutes(
   );
   app.post(
     "/api/v1/auth/admin/login",
-    { config: { rateLimit: adminCredentialRateLimit } },
+    { config: { rateLimit: false } },
     async (request) => {
       const input = adminLoginSchema.parse(request.body);
-      const attempt = await loginRateLimiter.claim(request.ip, input.username);
-      let data: Awaited<ReturnType<AdminAuthService["login"]>>;
-      try {
-        data = await adminAuthService.login(input.username, input.password);
-      } catch (error) {
-        if (error instanceof BusinessError && error.code === "INVALID_CREDENTIALS")
-          await loginRateLimiter.recordFailure(attempt);
-        else await loginRateLimiter.clearSuccessfulLogin(attempt);
-        throw error;
-      }
-      await loginRateLimiter.clearSuccessfulLogin(attempt);
-      return { data };
+      return { data: await adminAuthService.login(input.username, input.password) };
     },
   );
   app.post(
     "/api/v1/auth/admin/complete-password-change",
-    { config: { rateLimit: adminCredentialRateLimit } },
+    { config: { rateLimit: adminPasswordChangeRateLimit } },
     async (request) => {
       const input = completeAdminPasswordChangeSchema.parse(request.body);
       return {

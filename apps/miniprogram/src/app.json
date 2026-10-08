@@ -4,6 +4,7 @@
     "pages/category/index",
     "pages/campaign/detail",
     "pages/checkout/index",
+    "pages/payment-result/index",
     "pages/cart/index",
     "pages/pickup-select/index",
     "pages/orders/index",
@@ -36,6 +37,12 @@
     ]
   },
   "style": "v2",
+  "requiredPrivateInfos": ["getLocation"],
+  "permission": {
+    "scope.userLocation": {
+      "desc": "用于按距离推荐附近自提点"
+    }
+  },
   "sitemapLocation": "sitemap.json",
   "lazyCodeLoading": "requiredComponents",
   "usingComponents": {

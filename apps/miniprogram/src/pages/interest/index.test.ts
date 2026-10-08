@@ -36,3 +36,35 @@ it("does not show withdrawal success after the follow-up refresh expires the ses
   expect(page.data.interests).toEqual([]);
   expect(showToast).not.toHaveBeenCalled();
 });
+
+it("releases the submit state after a successful write starts its follow-up list refresh", async () => {
+  const createServiceAreaInterest = vi.fn(async () => ({ id: "interest-1", status: "NEW" }));
+  const listOwnServiceAreaInterests = vi.fn(async () => []);
+  const showModal = vi.fn();
+  vi.doMock("../../utils/api", () => ({
+    AuthExpiredError: class AuthExpiredError extends Error {},
+    customerAuth: { captureSessionEpoch: () => 1, isLoggedIn: () => true },
+    customerErrorMessage: (_error: unknown, fallback: string) => fallback,
+    api: { createServiceAreaInterest, listOwnServiceAreaInterests },
+  }));
+  vi.doMock("../../utils/auth-navigation", () => ({ navigateToCustomerLogin: vi.fn() }));
+  vi.stubGlobal("wx", { showModal, showToast: vi.fn() });
+  type InterestPage = {
+    data: Record<string, unknown>;
+    setData: (patch: Record<string, unknown>) => void;
+    submit: () => Promise<void>;
+  };
+  let page!: InterestPage;
+  vi.stubGlobal("Page", (definition: InterestPage) => {
+    page = { ...definition, setData: (patch) => Object.assign(page.data, patch) };
+  });
+  await import("./index");
+  Object.assign(page.data, { regionText: "幸福区", contactName: "李女士", contactPhone: "13800000000", privacyAccepted: true });
+
+  await page.submit();
+
+  expect(createServiceAreaInterest).toHaveBeenCalledOnce();
+  expect(listOwnServiceAreaInterests).toHaveBeenCalledOnce();
+  expect(page.data).toMatchObject({ submitting: false, loading: false, editingId: "", interests: [] });
+  expect(showModal).toHaveBeenCalledWith(expect.objectContaining({ title: "登记成功" }));
+});

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { BusinessError, moneyCents } from "@hometown/domain";
 import type {
+  CommunityPickupReceipt,
   FulfillmentException,
   LedgerLine,
   LedgerTransaction,
@@ -57,14 +58,26 @@ export class LedgerService {
   public async recordPickup(
     store: LedgerPostingStore,
     order: Order,
+    receipt?: CommunityPickupReceipt,
   ): Promise<void> {
-    const amount = moneyCents(
-      order.items.reduce(
-        (sum, item) =>
-          sum + Number(item.unitPriceCents) * item.pickedUpQuantity,
-        0,
-      ),
-    );
+    // Preserve historical order-level postings as the complete pickup fact for
+    // that order. Adding receipt postings alongside them would double revenue.
+    if (receipt && (await store.listLedgerTransactions(order.id)).some(
+      (value) => value.eventType === "PICKUP_CONFIRMED" && !value.postingKey,
+    )) return;
+    // Older callers and historical repair tools post the order's cumulative
+    // pickup snapshot. Live fulfillment passes its immutable receipt so each
+    // newly picked quantity is recognised exactly once.
+    const amount = receipt
+      ? moneyCents(receipt.items.reduce((sum, item) => {
+          const orderItem = order.items.find((value) => value.skuId === item.catalogSkuId);
+          if (!orderItem) throw new BusinessError("INVENTORY_INCONSISTENT", "领取凭证商品不属于订单", 500);
+          return sum + Number(orderItem.unitPriceCents) * item.quantity;
+        }, 0))
+      : moneyCents(order.items.reduce(
+          (sum, item) => sum + Number(item.unitPriceCents) * item.pickedUpQuantity,
+          0,
+        ));
     if (Number(amount) > 0)
       await this.append(store, order.id, "PICKUP_CONFIRMED", [
         {
@@ -79,7 +92,7 @@ export class LedgerService {
           direction: "CREDIT",
           amountCents: amount,
         },
-      ]);
+      ], "ORDER", receipt ? `pickup:${receipt.id}` : undefined);
   }
   public async recordPartialRefund(
     store: LedgerPostingStore,
@@ -89,10 +102,7 @@ export class LedgerService {
     // CUSTOMER_CLAIM is an operational source, not an accounting fact:
     // an expired uncollected order is also created from that source but has
     // never recognised revenue. Keep the fallback only for legacy snapshots.
-    const recognised =
-      exception.refundAccountingStage === "POST_REVENUE" ||
-      (exception.refundAccountingStage === undefined &&
-        exception.sourceStage === "CUSTOMER_CLAIM");
+    const recognised = exception.refundAccountingStage === "POST_REVENUE";
     await this.append(
       store,
       refund.id,
@@ -122,6 +132,7 @@ export class LedgerService {
     eventType: LedgerTransaction["eventType"],
     lines: LedgerLine[],
     referenceType: LedgerTransaction["referenceType"] = "ORDER",
+    postingKey?: string,
   ): Promise<void> {
     const debit = lines
       .filter((line) => line.direction === "DEBIT")
@@ -138,6 +149,7 @@ export class LedgerService {
       );
     await store.appendLedgerTransaction({
       id: randomUUID(),
+      ...(postingKey ? { postingKey } : {}),
       referenceType,
       referenceId,
       eventType,

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Descriptions, Input, Modal, Space, Spin, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Descriptions, Input, Modal, Space, Spin, Tag, Typography } from 'antd';
+import { AdminTable as Table } from './admin-table.tsx';
 import dayjs from 'dayjs';
 import { displayLabel } from './labels.ts';
 import { useCan } from './access-context.tsx';

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { moneyCents } from "@hometown/domain";
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
@@ -75,10 +75,12 @@ describe("pickup code order lookup", () => {
 
   it("looks up a valid partially picked order and returns its actual plan", async () => {
     await addOrder("order-a", "ORDER-A", "123456", new Date(Date.now() + 60_000).toISOString());
+    const transaction = vi.spyOn(store, "transaction");
     const response = await app.inject({ method: "GET", url: "/api/v1/pickup/orders/lookup?pickupPointId=point-a&code=123456", headers: managerHeaders });
     expect(response.statusCode, response.body).toBe(200);
     expect(response.json().data).toMatchObject({ id: "order-a", orderNo: "ORDER-A", deliveryPlanId: "plan-a" });
     expect(response.json().data.items[0].remainingPickupQuantity).toBe(1);
+    expect(transaction).not.toHaveBeenCalled();
   });
 
   it("accepts the pickup code in a POST body for new workbenches", async () => {

@@ -10,6 +10,7 @@ import {
 import { navigateToCustomerLogin } from "../../utils/auth-navigation";
 import { PageLoadCoordinator } from "../../utils/page-load-guard";
 import { PageActionCoordinator } from "../../utils/page-action-coordinator";
+import { compactPickupAddress } from "../../utils/pickup-label";
 
 interface OrderCounts {
   pending: number;
@@ -21,6 +22,7 @@ interface OrderCounts {
 const loadCoordinator = new PageLoadCoordinator();
 const areaCoordinator = new PageLoadCoordinator();
 const actionCoordinator = new PageActionCoordinator();
+interface PickupPointCardView extends PickupPointSelection { displayAddress: string; }
 
 Page({
   data: {
@@ -31,7 +33,7 @@ Page({
     loggedIn: false,
     wechatMode: false,
     area: null as ServiceAreaSelection | null,
-    pickupPoint: null as PickupPointSelection | null,
+    pickupPoint: null as PickupPointCardView | null,
     areaError: "",
     latestRequestId: "",
     orderTotal: 0,
@@ -55,7 +57,7 @@ Page({
       if (!areaCoordinator.isCurrent(loadGuard, customerAuth.captureSessionEpoch())) return;
       this.setData({
         area: context.selected,
-        pickupPoint: pointContext.selected,
+        pickupPoint: pointContext.selected ? { ...pointContext.selected, displayAddress: compactPickupAddress(pointContext.selected.name, pointContext.selected.address) } : null,
         areaError: "",
       });
     } catch (error) {

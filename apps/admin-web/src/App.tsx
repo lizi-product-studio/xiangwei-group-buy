@@ -1,7 +1,7 @@
 import { AccessContext, PermissionButton as Button, useCan } from "./access-context.tsx";
 import { AccessManagement, StaffRoleField } from "./access-management.tsx";
 import type { AccessSnapshot } from "./api.ts";
-import { newestFirst, earliestFirst, refundHistory } from "./list-order.ts";
+import { newestFirst, earliestFirst } from "./list-order.ts";
 import { OperationsQueueTable } from "./operations-queue-table.tsx";
 import { adminErrorNotice } from "./request-error.tsx";
 import { Consumers } from "./consumers-page.tsx";
@@ -36,11 +36,11 @@ import {
   Space,
   Spin,
   Statistic,
-  Table,
   Tabs,
   Tag,
   Typography,
 } from "antd";
+import { AdminTable as Table } from "./admin-table.tsx";
 import {
   AppstoreOutlined,
   CarOutlined,
@@ -63,8 +63,6 @@ import {
   adminErrorText,
   AdminApiError,
   hasValidAdminSession,
-  loginRetryMessage,
-  loginRetryRemainingSeconds,
   requiresLogin,
   type Campaign,
   type CatalogSku,
@@ -85,12 +83,24 @@ import {
   type ServiceArea,
   type QueueQuery,
 } from "./api.ts";
+
+const CATEGORY_ICON_OPTIONS: Array<{ key: ProductCategory["iconKey"]; label: string; src: string }> = [
+  { key: "basket", label: "通用", src: new URL("../../miniprogram/src/assets/category-icon-basket.png", import.meta.url).href },
+  { key: "leaf", label: "蔬菜", src: new URL("../../miniprogram/src/assets/category-icon-leaf.png", import.meta.url).href },
+  { key: "grain", label: "粮谷", src: new URL("../../miniprogram/src/assets/category-icon-grain.png", import.meta.url).href },
+  { key: "beans", label: "豆类", src: new URL("../../miniprogram/src/assets/category-icon-beans.png", import.meta.url).href },
+  { key: "ready-food", label: "熟食", src: new URL("../../miniprogram/src/assets/category-icon-ready-food.png", import.meta.url).href },
+  { key: "seasoning", label: "调味", src: new URL("../../miniprogram/src/assets/category-icon-seasoning.png", import.meta.url).href },
+  { key: "fruit", label: "水果", src: new URL("../../miniprogram/src/assets/category-icon-fruit.png", import.meta.url).href },
+  { key: "tools", label: "工具", src: new URL("../../miniprogram/src/assets/category-icon-tools.png", import.meta.url).href },
+];
 import {
   getAdminNavigation,
   getAdminPageModule,
   getAdminNavigationPath,
   getDefaultAdminPage,
   isAllowedAdminPage,
+  resolveAdminPageFromSearch,
   type AdminPage,
 } from "./navigation.ts";
 import {
@@ -322,24 +332,12 @@ function Login({
   const [loading, setLoading] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
-  const [rateLimitUntil, setRateLimitUntil] = useState<number | null>(null);
-  const [clockNow, setClockNow] = useState(() => Date.now());
   const [passwordChange, setPasswordChange] = useState<{
     token: string;
     username: string;
   } | null>(null);
   const [loginForm] = Form.useForm();
   const [passwordChangeForm] = Form.useForm();
-  const rateLimitRemaining = loginRetryRemainingSeconds(rateLimitUntil, clockNow);
-  useEffect(() => {
-    if (!rateLimitUntil || rateLimitUntil <= Date.now()) return;
-    const timer = window.setInterval(() => {
-      const now = Date.now();
-      setClockNow(now);
-      if (now >= rateLimitUntil) window.clearInterval(timer);
-    }, 1_000);
-    return () => window.clearInterval(timer);
-  }, [rateLimitUntil]);
   const submit = async (value: { username: string; password: string }) => {
     if (loading) return;
     setLoading(true);
@@ -353,14 +351,7 @@ function Login({
         done();
       }
     } catch (error) {
-      if (error instanceof AdminApiError && error.code === "LOGIN_RATE_LIMITED") {
-        const seconds = error.retryAfterSeconds ?? 15 * 60;
-        const now = Date.now();
-        setClockNow(now);
-        setRateLimitUntil(now + seconds * 1_000);
-      } else {
-        setErrorText(mutationErrorText(error));
-      }
+      setErrorText(mutationErrorText(error));
       loginForm.setFieldValue("password", "");
     } finally {
       setLoading(false);
@@ -421,18 +412,14 @@ function Login({
               message={notice}
             />
           ) : null}
-          {rateLimitRemaining > 0 || errorText ? (
+          {errorText ? (
             <Alert
               className="login-error"
               type="error"
               showIcon
               role="alert"
               aria-live="polite"
-              message={
-                rateLimitRemaining > 0
-                  ? loginRetryMessage(rateLimitRemaining)
-                  : errorText
-              }
+              message={errorText}
             />
           ) : null}
           {passwordChange ? (
@@ -517,7 +504,7 @@ function Login({
                   prefix={<UserOutlined />}
                   placeholder="请输入账号"
                   autoComplete="username"
-                  disabled={loading || rateLimitRemaining > 0}
+                  disabled={loading}
                 />
               </Form.Item>
               <Form.Item
@@ -533,7 +520,7 @@ function Login({
                   prefix={<LockOutlined />}
                   placeholder="请输入密码"
                   autoComplete="current-password"
-                  disabled={loading || rateLimitRemaining > 0}
+                  disabled={loading}
                 />
               </Form.Item>
               <Button
@@ -541,7 +528,6 @@ function Login({
                 htmlType="submit"
                 block
                 loading={loading}
-                disabled={rateLimitRemaining > 0}
               >
                 {loading ? "登录中…" : "登录"}
               </Button>
@@ -828,6 +814,8 @@ function Products({
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<CatalogSku | null>(null);
   const [categoryOpen, setCategoryOpen] = useState(false);
+  const [categoryEditorOpen, setCategoryEditorOpen] = useState(false);
+  const [categoryStatusOpen, setCategoryStatusOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<ProductCategory | null>(null);
   const [saving, setSaving] = useState(false);
   const [imageUrls, setImageUrls] = useState<string[]>([]);
@@ -912,12 +900,22 @@ function Products({
     }
   };
   const editCategory = (value: ProductCategory) => {
+    setCategoryStatusOpen(false);
     setEditingCategory(value);
     categoryForm.setFieldsValue({
       name: value.name,
+      iconKey: value.iconKey,
       sortOrder: value.sortOrder,
       status: value.status,
     });
+    setCategoryEditorOpen(true);
+  };
+  const addCategory = () => {
+    setCategoryStatusOpen(false);
+    setEditingCategory(null);
+    categoryForm.resetFields();
+    categoryForm.setFieldsValue({ iconKey: "basket", sortOrder: 0, status: "ACTIVE" });
+    setCategoryEditorOpen(true);
   };
   const requestCategoryDelete = (value: ProductCategory) => {
     Modal.confirm({
@@ -943,10 +941,11 @@ function Products({
     <>
       <PageTitle
         title={view === "categories" ? "分类管理" : "商品列表"}
-        subtitle={view === "categories" ? "管理商品分类名称、排序和使用状态" : "维护商品、规格与可售数量"}
-        action={view !== "categories" &&
+        subtitle={view === "categories" ? "启用的分类会展示在小程序；暂无本期商品时显示空分类" : "维护商品、规格与可售数量"}
+        action={view === "categories" ?
+          <Button permission="categories.manage" type="primary" icon={<PlusOutlined />} onClick={addCategory}>新增分类</Button> :
           <Space>
-          <Button permission="categories.manage" onClick={() => { setEditingCategory(null); categoryForm.resetFields(); setCategoryOpen(true); }}>分类管理</Button>
+          <Button permission="categories.manage" onClick={() => setCategoryOpen(true)}>分类管理</Button>
           <Button permission="products.create"
             type="primary"
             icon={<PlusOutlined />}
@@ -1136,10 +1135,44 @@ function Products({
         footer={null}
         onCancel={() => setCategoryOpen(false)}
       >
+        {view !== "categories" && <Button permission="categories.manage" type="primary" icon={<PlusOutlined />} onClick={addCategory} style={{ marginBottom: 16 }}>新增分类</Button>}
+        <Table
+          rowKey="id"
+          pagination={false}
+          dataSource={categories}
+          locale={{ emptyText: "暂无分类，点击新增分类开始设置" }}
+          columns={[
+            { title: "分类", render: (_, value) => {
+              const icon = CATEGORY_ICON_OPTIONS.find((option) => option.key === value.iconKey) ?? CATEGORY_ICON_OPTIONS[0]!;
+              return <Space><img src={icon.src} alt="" width={32} height={32} style={{ objectFit: "contain" }} /><span>{value.name}</span></Space>;
+            } },
+            { title: "排序", dataIndex: "sortOrder", width: 100 },
+            { title: "状态", width: 120, render: (_, value) => <Status value={value.status} /> },
+            {
+              title: "操作",
+              width: 168,
+              align: "right",
+              className: "table-actions",
+              render: (_, value) => (
+                <Space size="small" wrap={false}>
+                  <Button permission="categories.manage" onClick={() => editCategory(value)}>编辑</Button>
+                  <Button permission="categories.delete" danger disabled={savingCategory} onClick={() => requestCategoryDelete(value)}>删除</Button>
+                </Space>
+              ),
+            },
+          ]}
+        />
+      </PanelDialog>
+      <Modal
+        open={categoryEditorOpen}
+        title={editingCategory ? "编辑分类" : "新增分类"}
+        onCancel={() => { if (!savingCategory) setCategoryEditorOpen(false); }}
+        footer={null}
+        destroyOnHidden
+      >
         {can("categories.manage") && <Form
           form={categoryForm}
-          layout="inline"
-          style={{ marginBottom: 24, rowGap: 12 }}
+          layout="vertical"
           onFinish={async (value) => {
             if (savingCategory) return;
             if (editingCategory?.status === "ACTIVE" && value.status === "INACTIVE") {
@@ -1163,6 +1196,7 @@ function Products({
               });
               categoryForm.resetFields();
               setEditingCategory(null);
+              setCategoryEditorOpen(false);
               await refreshAfterMutation(
                 reload,
                 message,
@@ -1175,48 +1209,37 @@ function Products({
             }
           }}
         >
-          <Form.Item name="name" rules={[{ required: true, min: 2, message: "分类名称至少 2 个字" }]}>
+          <Form.Item name="name" label="分类名称" rules={[{ required: true, min: 2, message: "分类名称至少 2 个字" }]}>
             <Input aria-label="分类名称" placeholder="分类名称，例如：蔬菜" />
           </Form.Item>
-          <Form.Item name="sortOrder" label="排序" initialValue={0}>
+          <Form.Item name="iconKey" label="分类图标" extra="图标可在编辑分类时更换。" rules={[{ required: true, message: "请选择分类图标" }]}>
+            <Radio.Group aria-label="分类图标" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
+              {CATEGORY_ICON_OPTIONS.map((option) => <Radio.Button key={option.key} value={option.key} style={{ height: 76, padding: 6, textAlign: "center" }}>
+                <span style={{ display: "flex", height: "100%", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 3 }}>
+                  <img src={option.src} alt="" width={34} height={34} style={{ objectFit: "contain" }} />
+                  <span>{option.label}</span>
+                </span>
+              </Radio.Button>)}
+            </Radio.Group>
+          </Form.Item>
+          <Form.Item name="sortOrder" label="排序" extra="数字越小，展示越靠前" initialValue={0}>
             <InputNumber min={0} max={1_000_000} aria-label="排序" />
           </Form.Item>
           <Form.Item name="status" label="状态" hidden={!editingCategory} initialValue="ACTIVE">
-            <Select style={{ width: 110 }} options={[{ value: "ACTIVE", label: "启用" }, { value: "INACTIVE", label: "停用" }]} />
+            <Select
+              style={{ width: 110 }}
+              open={categoryStatusOpen}
+              onOpenChange={setCategoryStatusOpen}
+              onSelect={() => setCategoryStatusOpen(false)}
+              options={[{ value: "ACTIVE", label: "启用" }, { value: "INACTIVE", label: "停用" }]}
+            />
           </Form.Item>
-          <Button permission="categories.manage" type="primary" htmlType="submit" loading={savingCategory}>
-            {editingCategory ? "保存修改" : "新增分类"}
-          </Button>
-          {editingCategory && (
-            <Button permission="categories.manage" onClick={() => { setEditingCategory(null); categoryForm.resetFields(); }}>
-              取消编辑
-            </Button>
-          )}
+          <Space>
+            <Button permission="categories.manage" type="primary" htmlType="submit" loading={savingCategory}>{editingCategory ? "保存修改" : "创建分类"}</Button>
+            <Button onClick={() => setCategoryEditorOpen(false)} disabled={savingCategory}>取消</Button>
+          </Space>
         </Form>}
-        <Table
-          rowKey="id"
-          pagination={false}
-          dataSource={categories}
-          locale={{ emptyText: "暂无分类，请先新增分类" }}
-          columns={[
-            { title: "分类", dataIndex: "name" },
-            { title: "排序", dataIndex: "sortOrder", width: 100 },
-            { title: "状态", width: 120, render: (_, value) => <Status value={value.status} /> },
-            {
-              title: "操作",
-              width: 184,
-              align: "right",
-              className: "table-actions",
-              render: (_, value) => (
-                <Space size="small" wrap={false}>
-                  <Button permission="categories.manage" onClick={() => editCategory(value)}>编辑</Button>
-                  <Button permission="categories.delete" danger disabled={savingCategory} onClick={() => requestCategoryDelete(value)}>删除</Button>
-                </Space>
-              ),
-            },
-          ]}
-        />
-      </PanelDialog>
+      </Modal>
     </>
   );
 }
@@ -1241,6 +1264,8 @@ function Campaigns({
   const can = useCan();
   const { message } = AntApp.useApp();
   const [open, setOpen] = useState(false);
+  const [groupOpen, setGroupOpen] = useState(false);
+  const [groupEditing, setGroupEditing] = useState<{ id: string; version: number } | null>(null);
   const [editing, setEditing] = useState<Campaign | null>(null);
   const [deleteReview, setDeleteReview] = useState<Campaign | null>(null);
   const [reviewNow, setReviewNow] = useState(Date.now());
@@ -1267,7 +1292,10 @@ function Campaigns({
   } | null>(null);
   const [cancelReason, setCancelReason] = useState("");
   const [postponeForm] = Form.useForm();
+  const [groupPostponeForm] = Form.useForm();
   const [form] = Form.useForm();
+  const [groupForm] = Form.useForm();
+  const groupPoints = (Form.useWatch("points", groupForm) ?? []) as Array<{ pickupPointId?: string }>;
   const areaId = Form.useWatch("serviceAreaId", form);
   useEffect(() => {
     if (!openReview) return;
@@ -1302,6 +1330,32 @@ function Campaigns({
       items: campaign.items.map(item => ({catalogSkuId:item.skuId,retailPriceYuan:(item.unitPriceCents/100).toFixed(2),sellableQuantity:item.stock})),
     });
     setOpen(true);
+  };
+  const editCampaignGroup = (campaign: Campaign) => {
+    if (!campaign.campaignGroupId || campaign.campaignGroupVersion == null) return;
+    const members = values.filter((member) => member.campaignGroupId === campaign.campaignGroupId);
+    const firstBySku = new Map<string, Campaign["items"][number]>();
+    for (const member of members) for (const item of member.items) if (!firstBySku.has(item.skuId)) firstBySku.set(item.skuId, item);
+    groupForm.setFieldsValue({
+      title: campaign.title,
+      cutoffAt: dayjs(campaign.cutoffAt),
+      groupingMode: campaign.groupingMode ?? "PER_POINT",
+      minTotalQuantity: campaign.minTotalQuantity,
+      failureAction: campaign.failureAction,
+      points: members.map((member) => ({
+        pickupPointId: member.deliveryPlan?.pickupPointId,
+        dispatchAt: dayjs(member.dispatchAt),
+        ...(member.estimatedArrivalStartAt ? { estimatedArrivalStartAt: dayjs(member.estimatedArrivalStartAt) } : {}),
+        ...(member.estimatedArrivalEndAt ? { estimatedArrivalEndAt: dayjs(member.estimatedArrivalEndAt) } : {}),
+      })),
+      items: [...firstBySku.values()].map((item) => ({
+        catalogSkuId: item.skuId,
+        retailPriceYuan: (item.unitPriceCents / 100).toFixed(2),
+        stockByPoint: members.map((member) => ({ sellableQuantity: member.items.find((candidate) => candidate.skuId === item.skuId)?.stock ?? 0 })),
+      })),
+    });
+    setGroupEditing({ id: campaign.campaignGroupId, version: campaign.campaignGroupVersion });
+    setGroupOpen(true);
   };
   const removeDraft = async () => {
     if (!deleteReview || submitting) return;
@@ -1341,6 +1395,47 @@ function Campaigns({
       // Keep the draft/review open so the operator can fix the exact field
       // rejected by the API instead of losing all entered values.
       void message.error(adminErrorNotice(error, campaignError(error)));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  const createGroup = async () => {
+    if (submitting) return;
+    try {
+      const value = await groupForm.validateFields();
+      const pointRows = value.points as Array<{ pickupPointId: string; dispatchAt: dayjs.Dayjs; estimatedArrivalStartAt?: dayjs.Dayjs | null; estimatedArrivalEndAt?: dayjs.Dayjs | null }>;
+      const itemRows = value.items as Array<{ catalogSkuId: string; retailPriceYuan: string; stockByPoint: Array<{ sellableQuantity: number }> }>;
+      setSubmitting(true);
+      const payload = {
+        title: value.title,
+        cutoffAt: (value.cutoffAt as dayjs.Dayjs).toISOString(),
+        groupingMode: value.groupingMode,
+        minTotalQuantity: value.minTotalQuantity,
+        failureAction: value.failureAction,
+        points: pointRows.map((point) => ({
+          pickupPointId: point.pickupPointId,
+          dispatchAt: point.dispatchAt.toISOString(),
+          estimatedArrivalStartAt: point.estimatedArrivalStartAt?.toISOString() ?? null,
+          estimatedArrivalEndAt: point.estimatedArrivalEndAt?.toISOString() ?? null,
+        })),
+        items: itemRows.map((item) => ({
+          catalogSkuId: item.catalogSkuId,
+          retailPriceCents: yuanToCents(item.retailPriceYuan),
+          stockByPoint: pointRows.map((point, index) => ({
+            pickupPointId: point.pickupPointId,
+            sellableQuantity: item.stockByPoint?.[index]?.sellableQuantity ?? 0,
+          })),
+        })),
+      };
+      if (groupEditing) await api.updateCampaignGroup(groupEditing.id, groupEditing.version, payload);
+      else await api.createCampaignGroup(payload);
+      setGroupOpen(false);
+      setGroupEditing(null);
+      groupForm.resetFields();
+      await refreshAfterMutation(reload, message, groupEditing ? "多点活动草稿已更新" : "多点活动已创建；请逐项核对各点设置并整体开售");
+    } catch (error) {
+      if (!(error instanceof Error && "errorFields" in error))
+        void message.error(adminErrorNotice(error, campaignError(error)));
     } finally {
       setSubmitting(false);
     }
@@ -1447,6 +1542,31 @@ function Campaigns({
       setSubmitting(false);
     }
   };
+  const postponeGroup = async (value: {
+    cutoffAt: dayjs.Dayjs;
+    points: Array<{ campaignId: string; dispatchAt: dayjs.Dayjs; estimatedArrivalStartAt?: dayjs.Dayjs | null; estimatedArrivalEndAt?: dayjs.Dayjs | null }>;
+  }) => {
+    if (!postponeCampaign?.campaignGroupId) return;
+    setSubmitting(true);
+    try {
+      await api.postponeCampaignGroup(postponeCampaign.campaignGroupId, {
+        cutoffAt: value.cutoffAt.toISOString(),
+        points: value.points.map((point) => ({
+          campaignId: point.campaignId,
+          dispatchAt: point.dispatchAt.toISOString(),
+          estimatedArrivalStartAt: point.estimatedArrivalStartAt?.toISOString() ?? null,
+          estimatedArrivalEndAt: point.estimatedArrivalEndAt?.toISOString() ?? null,
+        })),
+      });
+      setPostponeCampaign(null);
+      groupPostponeForm.resetFields();
+      await refreshAfterMutation(reload, message, "未成团点位已重新开售；已成团点位继续履约");
+    } catch (error) {
+      void message.error(adminErrorNotice(error, campaignError(error)));
+    } finally {
+      setSubmitting(false);
+    }
+  };
   const openLabels = async (campaign: Campaign) => {
     setLabelCampaign(campaign);
     setLabels([]);
@@ -1499,12 +1619,19 @@ function Campaigns({
     <>
       <PageTitle
         title="团期管理"
-        subtitle="一团一固定自提点；商品、价格、可售量与时间均由后台配置"
+        subtitle="支持单点团期与统一截单的多点活动；各点库存、发车和领取时间分别管理"
         action={
-          <Button permission="campaigns.create"
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => {
+          <Space>
+            <Button permission="campaigns.create" onClick={() => {
+              setGroupEditing(null);
+              groupForm.resetFields();
+              groupForm.setFieldsValue({ groupingMode: "PER_POINT", minTotalQuantity: 1, failureAction: "CANCEL_AND_REFUND", points: [{}, {}], items: [{ retailPriceYuan: "0.01", stockByPoint: [] }] });
+              setGroupOpen(true);
+            }}>创建多点活动</Button>
+            <Button permission="campaigns.create"
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => {
               const area =
                 areas.find(
                   (value) => value.orderEnabled && value.regionCode === "000000",
@@ -1529,12 +1656,52 @@ function Campaigns({
                 pickupPointId: point?.id,
               });
               setOpen(true);
-            }}
-          >
-            创建团期
-          </Button>
+              }}
+            >创建团期</Button>
+          </Space>
         }
       />
+      <Modal width={920} open={groupOpen} title={groupEditing ? "编辑多点活动草稿" : "创建多点活动"} okText={groupEditing ? "保存修改" : "创建活动"} cancelText="取消" confirmLoading={submitting} onOk={() => void createGroup()} onCancel={() => { if (!submitting) { setGroupOpen(false); setGroupEditing(null); groupForm.resetFields(); } }} destroyOnHidden>
+        <Alert type="info" showIcon style={{ marginBottom: 16 }} message="所有自提点共用一个截单时间；各点分别扣减库存和履约。" description="各点独立模式要求每个点分别达到件数门槛；所有点合计模式只把组内已支付且未成功退款的商品件数计算一次。" />
+        <Form form={groupForm} layout="vertical">
+          <div className="form-grid">
+            <Form.Item name="title" label="活动名称" rules={[{ required: true, min: 2, max: 80 }]}><Input /></Form.Item>
+            <Form.Item name="groupingMode" label="成团口径" rules={[{ required: true }]}><Select options={[{ value: "PER_POINT", label: "各点独立成团" }, { value: "ALL_POINTS", label: "所有点合计成团" }]} /></Form.Item>
+            <Form.Item name="cutoffAt" label="统一截单时间" rules={[{ required: true }]}><DatePicker showTime style={{ width: "100%" }} /></Form.Item>
+            <Form.Item name="minTotalQuantity" label="最小成团件数" rules={[{ required: true, type: "number", min: 1 }]}><InputNumber min={1} max={1000000} style={{ width: "100%" }} /></Form.Item>
+            <Form.Item name="failureAction" label="未成团处理" rules={[{ required: true }]}><Select options={[{ value: "CANCEL_AND_REFUND", label: "取消并原路退款" }, { value: "POSTPONE", label: "允许运营顺延一次" }]} /></Form.Item>
+          </div>
+          <Typography.Title level={5}>参与自提点与履约时间</Typography.Title>
+          <Form.List name="points">
+            {(fields, { add, remove }) => <Space direction="vertical" style={{ width: "100%" }}>
+              {fields.map((field, index) => <Card key={field.key} size="small" title={`自提点 ${index + 1}`} extra={fields.length > 2 && <Button danger type="link" onClick={() => remove(field.name)}>移除</Button>}>
+                <div className="form-grid">
+                  <Form.Item name={[field.name, "pickupPointId"]} label="自提点" rules={[{ required: true }]}><Select showSearch optionFilterProp="label" options={points.filter((point) => point.status === "ACTIVE").map((point) => ({ value: point.id, label: `${point.name} · ${point.address}` }))} /></Form.Item>
+                  <Form.Item name={[field.name, "dispatchAt"]} label="计划发车" rules={[{ required: true }]}><DatePicker showTime style={{ width: "100%" }} /></Form.Item>
+                  <Form.Item name={[field.name, "estimatedArrivalStartAt"]} label="预计到货开始"><DatePicker showTime style={{ width: "100%" }} /></Form.Item>
+                  <Form.Item name={[field.name, "estimatedArrivalEndAt"]} label="预计到货结束"><DatePicker showTime style={{ width: "100%" }} /></Form.Item>
+                </div>
+              </Card>)}
+              {fields.length < 100 && <Button onClick={() => add({})}>添加自提点</Button>}
+            </Space>}
+          </Form.List>
+          <Typography.Title level={5} style={{ marginTop: 20 }}>商品、售价与分点库存</Typography.Title>
+          <Form.List name="items">
+            {(fields, { add, remove }) => <Space direction="vertical" style={{ width: "100%" }}>
+              {fields.map((field, index) => <Card key={field.key} size="small" title={`商品 ${index + 1}`} extra={fields.length > 1 && <Button danger type="link" onClick={() => remove(field.name)}>移除</Button>}>
+                <div className="form-grid">
+                  <Form.Item name={[field.name, "catalogSkuId"]} label="商品规格" rules={[{ required: true }]}><Select showSearch optionFilterProp="label" options={skus.filter((sku) => sku.status === "ACTIVE").map((sku) => ({ value: sku.id, label: `${sku.product.title} · ${sku.name}` }))} /></Form.Item>
+                  <Form.Item name={[field.name, "retailPriceYuan"]} label="团购价（元）" rules={[{ required: true }]}><Input inputMode="decimal" /></Form.Item>
+                </div>
+                <div className="form-grid">
+                  {groupPoints.map((point, pointIndex) => <Form.Item key={`${point.pickupPointId ?? pointIndex}-${field.key}`} name={[field.name, "stockByPoint", pointIndex, "sellableQuantity"]} label={`${points.find((value) => value.id === point.pickupPointId)?.name ?? `自提点 ${pointIndex + 1}`} 库存`} rules={[{ required: true, type: "number", min: 0 }]}><InputNumber min={0} max={1000000} style={{ width: "100%" }} /></Form.Item>)}
+                </div>
+              </Card>)}
+              {fields.length < 500 && <Button onClick={() => add({ retailPriceYuan: "0.01", stockByPoint: [] })}>添加商品</Button>}
+            </Space>}
+          </Form.List>
+        </Form>
+      </Modal>
       <Modal open={!!deleteReview} title="删除草稿团期" okText="确认删除" okButtonProps={{danger:true}} confirmLoading={submitting} onOk={() => void removeDraft()} onCancel={() => setDeleteReview(null)}>
         <p>确认删除“{deleteReview?.title}”？仅允许删除没有订单或运输履约记录的草稿，同时移除其自动生成的配送计划。删除后不能恢复，审计记录保留。</p>
       </Modal>
@@ -1550,6 +1717,7 @@ function Campaigns({
               <>
                 <b>{v.title}</b>
                 <div>{v.items.length} 个商品</div>
+                {v.campaignGroupId && <Typography.Text type="secondary">多点 · {v.groupingMode === "ALL_POINTS" ? "所有点合计成团" : "各点独立成团"}</Typography.Text>}
               </>
             ),
           },
@@ -1590,18 +1758,32 @@ function Campaigns({
                     disabled={submitting}
                     onClick={() => {
                       setPostponeCampaign(v);
-                      postponeForm.setFieldsValue({
-                        cutoffAt: dayjs(v.cutoffAt),
-                        dispatchAt: dayjs(v.dispatchAt),
-                        ...(v.estimatedArrivalStartAt ? { estimatedArrivalStartAt: dayjs(v.estimatedArrivalStartAt) } : {}),
-                        ...(v.estimatedArrivalEndAt ? { estimatedArrivalEndAt: dayjs(v.estimatedArrivalEndAt) } : {}),
-                      });
+                      if (v.campaignGroupId) {
+                        const members = values.filter((member) => member.campaignGroupId === v.campaignGroupId && member.status === "POSTPONED");
+                        groupPostponeForm.setFieldsValue({
+                          cutoffAt: dayjs(v.cutoffAt),
+                          points: members.map((member) => ({
+                            campaignId: member.id,
+                            dispatchAt: dayjs(member.dispatchAt),
+                            ...(member.estimatedArrivalStartAt ? { estimatedArrivalStartAt: dayjs(member.estimatedArrivalStartAt) } : {}),
+                            ...(member.estimatedArrivalEndAt ? { estimatedArrivalEndAt: dayjs(member.estimatedArrivalEndAt) } : {}),
+                          })),
+                        });
+                      } else postponeForm.setFieldsValue({
+                          cutoffAt: dayjs(v.cutoffAt),
+                          dispatchAt: dayjs(v.dispatchAt),
+                          ...(v.estimatedArrivalStartAt ? { estimatedArrivalStartAt: dayjs(v.estimatedArrivalStartAt) } : {}),
+                          ...(v.estimatedArrivalEndAt ? { estimatedArrivalEndAt: dayjs(v.estimatedArrivalEndAt) } : {}),
+                        });
                     }}
                   >
                     调整团期
                   </Button>
                 )}
-                {v.status === "DRAFT" && (can("campaigns.edit") || can("campaigns.delete")) && (
+                {v.status === "DRAFT" && v.campaignGroupId && values.findIndex((member) => member.campaignGroupId === v.campaignGroupId) === values.findIndex((member) => member.id === v.id) && can("campaigns.edit") && (
+                  <Button permission="campaigns.edit" disabled={submitting} onClick={() => editCampaignGroup(v)}>编辑多点草稿</Button>
+                )}
+                {v.status === "DRAFT" && !v.campaignGroupId && (can("campaigns.edit") || can("campaigns.delete")) && (
                   <Dropdown
                     trigger={["click"]}
                     menu={{
@@ -1884,11 +2066,34 @@ function Campaigns({
       </Modal>
       <Modal
         open={Boolean(postponeCampaign)}
-        title="顺延团期"
+        title={postponeCampaign?.campaignGroupId ? "顺延多点活动" : "顺延团期"}
         footer={null}
         destroyOnHidden
         onCancel={() => !submitting && setPostponeCampaign(null)}
       >
+        {postponeCampaign?.campaignGroupId ? <>
+          <Alert type="info" showIcon message="统一调整截单时间，并逐点确认履约时间" description="只有本轮未成团的点位会重新开售；已成团点位继续履约。活动最多顺延一次。" style={{ marginBottom: 16 }} />
+          <Form form={groupPostponeForm} layout="vertical" onFinish={(value) => void postponeGroup(value)}>
+            <Form.Item name="cutoffAt" label="新的统一截单时间" rules={[{ required: true }]}><DatePicker showTime disabled={submitting} /></Form.Item>
+            <Form.List name="points">
+              {(fields) => <Space direction="vertical" style={{ width: "100%" }}>
+                {fields.map((field) => {
+                  const campaignId = groupPostponeForm.getFieldValue(["points", field.name, "campaignId"]) as string;
+                  const campaign = values.find((member) => member.id === campaignId);
+                  return <Card key={field.key} size="small" title={campaign?.deliveryPlan?.siteName ?? "自提点"}>
+                    <Form.Item name={[field.name, "campaignId"]} hidden><Input /></Form.Item>
+                    <div className="form-grid">
+                      <Form.Item name={[field.name, "dispatchAt"]} label="新计划发车" rules={[{ required: true }]}><DatePicker showTime disabled={submitting} /></Form.Item>
+                      <Form.Item name={[field.name, "estimatedArrivalStartAt"]} label="预计到货开始"><DatePicker showTime disabled={submitting} /></Form.Item>
+                      <Form.Item name={[field.name, "estimatedArrivalEndAt"]} label="预计到货结束"><DatePicker showTime disabled={submitting} /></Form.Item>
+                    </div>
+                  </Card>;
+                })}
+              </Space>}
+            </Form.List>
+            <Button type="primary" htmlType="submit" loading={submitting}>重新开售失败点位</Button>
+          </Form>
+        </> : <>
         <Alert
           type="info"
           showIcon
@@ -1967,6 +2172,7 @@ function Campaigns({
             确认顺延
           </Button>
         </Form>
+        </>}
       </Modal>
       <Modal
         width={760}
@@ -2289,11 +2495,38 @@ function Orders({
   const [failed, setFailed] = useState(false);
   const [result, setResult] = useState({ items: [] as Order[], total: 0, page: 1, pageSize: 20 });
   const [selected, setSelected] = useState<Order | null>(null);
+  const [detailOrderId, setDetailOrderId] = useState(() => new URLSearchParams(window.location.search).get("orderId"));
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
   const can = useCan();
   const canViewPhone = can("consumers.phone.view");
   const [phoneLookupFailed, setPhoneLookupFailed] = useState(false);
   const [requestVersion, setRequestVersion] = useState(0);
   const filtersVersion = useRef(0);
+  useEffect(() => {
+    const syncOrderId = () => setDetailOrderId(new URLSearchParams(window.location.search).get("orderId"));
+    window.addEventListener("popstate", syncOrderId);
+    return () => window.removeEventListener("popstate", syncOrderId);
+  }, []);
+  useEffect(() => {
+    if (!detailOrderId) {
+      setSelected(null);
+      setDetailError("");
+      return;
+    }
+    let active = true;
+    setSelected(null);
+    setDetailError("");
+    setDetailLoading(true);
+    void api.adminOrder(detailOrderId).then((order) => {
+      if (active) setSelected(order);
+    }).catch((error) => {
+      if (active) setDetailError(adminErrorText(error));
+    }).finally(() => {
+      if (active) setDetailLoading(false);
+    });
+    return () => { active = false; };
+  }, [detailOrderId]);
   useEffect(() => {
     let active = true;
     setSearching(true);
@@ -2328,6 +2561,23 @@ function Orders({
   const applyFilters = () => { filtersVersion.current += 1; setSearching(true); setResult({ items: [], total: 0, page: 1, pageSize: 20 }); setPage(1); setFilters({ ...draftFilters }); };
   const resetFilters = () => { filtersVersion.current += 1; setSearching(true); setResult({ items: [], total: 0, page: 1, pageSize: 20 }); setDraftFilters(emptyFilters); setPage(1); setFilters(emptyFilters); };
   const refreshOrders = () => { setSearching(true); setResult({ items: [], total: 0, page, pageSize: 20 }); setRequestVersion((value) => value + 1); };
+  const openOrderDetail = (order: Order) => {
+    const url = new URL(window.location.href);
+    url.searchParams.set("page", "orders");
+    url.searchParams.set("orderId", order.id);
+    window.history.pushState({ ...window.history.state, adminOrderDetail: true }, "", `${url.pathname}${url.search}${url.hash}`);
+    setDetailOrderId(order.id);
+  };
+  const closeOrderDetail = () => {
+    if (window.history.state?.adminOrderDetail) {
+      window.history.back();
+      return;
+    }
+    const url = new URL(window.location.href);
+    url.searchParams.delete("orderId");
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+    setDetailOrderId(null);
+  };
   const exportOrders = async () => {
     if (searching || exporting || failed || result.total === 0) return;
     const requestedFiltersVersion = filtersVersion.current;
@@ -2398,7 +2648,7 @@ function Orders({
               aria-label="订单状态"
             />
           </label>
-          <label className="order-filter-field">
+          {can("campaigns.view") && <label className="order-filter-field">
             <span>团期</span>
             <Select
               allowClear
@@ -2410,8 +2660,8 @@ function Orders({
               onChange={(value) => updateDraft("campaignId", value)}
               aria-label="订单团期"
             />
-          </label>
-          <label className="order-filter-field">
+          </label>}
+          {can("pickup-points.view") && <label className="order-filter-field">
             <span>自提点</span>
             <Select
               allowClear
@@ -2423,7 +2673,7 @@ function Orders({
               onChange={(value) => updateDraft("pickupPointId", value)}
               aria-label="订单自提点"
             />
-          </label>
+          </label>}
           <div className="order-filter-field order-filter-dates">
             <span>时间范围</span>
             <Space.Compact block>
@@ -2488,7 +2738,7 @@ function Orders({
           {
             title: "操作",
             render: (_, v) => (
-              <Button onClick={() => setSelected(v)}>查看详情</Button>
+              <Button onClick={() => openOrderDetail(v)}>查看详情</Button>
             ),
           },
         ]}
@@ -2496,13 +2746,13 @@ function Orders({
       </Card>
       <Modal
         width={900}
-        open={!!selected}
+        open={Boolean(detailOrderId)}
         title={selected ? `订单详情 · ${selected.orderNo}` : "订单详情"}
         footer={null}
-        onCancel={() => setSelected(null)}
+        onCancel={closeOrderDetail}
         destroyOnHidden
       >
-        {selected && (
+        {detailLoading ? <Spin /> : detailError ? <Alert type="error" showIcon message="订单详情加载失败" description={detailError} /> : selected && (
           <Space direction="vertical" size="large" style={{ width: "100%" }}>
             <Descriptions bordered size="small" column={{ xs: 1, sm: 2 }}>
               <Descriptions.Item label="订单号">{selected.orderNo}</Descriptions.Item>
@@ -3500,7 +3750,7 @@ function Areas({
           { title: "状态", width: 100, render: (_, v) => v.archivedAt ? <Tag color="default">已删除</Tag> : <Status value={v.status} /> },
           {
             title: "操作",
-            width: 184,
+            width: 168,
             align: "right",
             className: "table-actions",
             render: (_, v) => v.archivedAt ? <Typography.Text type="secondary">历史保留</Typography.Text> : (
@@ -4928,7 +5178,7 @@ function Finance({
   onQualityRefunded: (
     result: Pick<
       Awaited<ReturnType<typeof api.quality>>[number],
-      "id" | "status" | "financeRefundStatus"
+      "id" | "status" | "financeRefundStatus" | "financeRefundStatuses"
     >,
   ) => void;
   onCancellationRefunded: (
@@ -4942,15 +5192,38 @@ function Finance({
 }) {
   const { message } = AntApp.useApp();
   const canExecuteRefund = useCan()("finance.refund");
+  const [refundPage, setRefundPage] = useState(refunds);
+  const [ledgerPage, setLedgerPage] = useState(ledger);
+  const [refundOrderId, setRefundOrderId] = useState("");
+  const [refundStatus, setRefundStatus] = useState("");
+  const [ledgerReferenceId, setLedgerReferenceId] = useState("");
+  const [refundCursors, setRefundCursors] = useState<string[]>([]);
+  const [ledgerCursors, setLedgerCursors] = useState<string[]>([]);
+  const [financePageLoading, setFinancePageLoading] = useState(false);
+  useEffect(() => { setRefundPage(refunds); setRefundCursors([]); }, [refunds]);
+  useEffect(() => { setLedgerPage(ledger); setLedgerCursors([]); }, [ledger]);
+  const loadRefundHistory = async (cursor?: string) => {
+    setFinancePageLoading(true);
+    try { const page = await api.finance({ pageSize: 25, ...(cursor ? { cursor } : {}), ...(refundOrderId.trim() ? { reference: refundOrderId.trim() } : {}), ...(refundStatus ? { status: refundStatus } : {}) }); setRefundPage(page); }
+    catch (error) { void message.error(adminLoadErrorText(error)); }
+    finally { setFinancePageLoading(false); }
+  };
+  const loadLedgerPage = async (cursor?: string) => {
+    setFinancePageLoading(true);
+    try { setLedgerPage(await api.ledger({ pageSize: 25, ...(cursor ? { cursor } : {}), ...(ledgerReferenceId.trim() ? { referenceId: ledgerReferenceId.trim() } : {}) })); }
+    catch (error) { void message.error(adminLoadErrorText(error)); }
+    finally { setFinancePageLoading(false); }
+  };
   const [refundTarget, setRefundTarget] = useState<FulfillmentException | null>(null);
   const [refundDraft, setRefundDraft] = useState<{
     exception: FulfillmentException;
     note: string;
   } | null>(null);
   const [pickupRefundTarget, setPickupRefundTarget] = useState<PickupWindow | null>(null);
-  const [qualityRefundTarget, setQualityRefundTarget] = useState<
-    Awaited<ReturnType<typeof api.quality>>[number] | null
-  >(null);
+  const [qualityRefundTarget, setQualityRefundTarget] = useState<{
+    value: Awaited<ReturnType<typeof api.quality>>[number];
+    mode: "EXECUTE" | "CONFIRM_SETTLED";
+  } | null>(null);
   const [cancellationRefundTarget, setCancellationRefundTarget] = useState<
     Awaited<ReturnType<typeof api.cancellations>>[number] | null
   >(null);
@@ -5005,7 +5278,7 @@ function Finance({
     if (!qualityRefundTarget) return;
     setSubmitting(true);
     try {
-      const result = await api.refundQuality(qualityRefundTarget.id);
+      const result = await api.refundQuality(qualityRefundTarget.value.id);
       // The mutation is authoritative.  Keep its terminal fact in the visible
       // queue before the follow-up read starts, so a transient or delayed read
       // cannot leave a stale financial action available for the same case.
@@ -5014,7 +5287,9 @@ function Finance({
       await refreshAfterMutation(
         reload,
         message,
-        result.status === "RESOLVED"
+        qualityRefundTarget.mode === "CONFIRM_SETTLED"
+          ? "退款结清已确认，未再次提交退款"
+          : result.status === "RESOLVED"
           ? "品质退款已完成，退款与账本状态已收敛"
           : "品质退款已提交，系统正在同步退款与账本状态",
       );
@@ -5059,19 +5334,37 @@ function Finance({
           action={<Button size="small" onClick={() => void reload().catch(() => undefined)}>重试</Button>}
         />
       )}
-      {view === "finance-records" && <Table
+      {view === "finance-records" && <>
+      <Space wrap style={{ marginBottom: 12 }}>
+        <Input aria-label="退款检索" placeholder="按订单号 / 退款单号筛选" value={refundOrderId} onChange={e => setRefundOrderId(e.target.value)} onPressEnter={() => { setRefundCursors([]); void loadRefundHistory(); }} />
+        <Select aria-label="退款状态筛选" allowClear placeholder="全部状态" value={refundStatus || undefined} onChange={value => { setRefundStatus(value ?? ""); setRefundCursors([]); }} options={["CREATED","SUBMISSION_UNKNOWN","PROCESSING","RETRYABLE_FAILURE","FAILED","MANUAL_HOLD","SUCCEEDED"].map(value => ({value,label:displayLabel(value)}))} />
+        <Button onClick={() => { setRefundCursors([]); void loadRefundHistory(); }}>筛选</Button>
+        <span>共 {refundPage?.total ?? 0} 条</span>
+        <Button disabled={!refundCursors.length || financePageLoading} onClick={() => { const stack=refundCursors.slice(0,-1); setRefundCursors(stack); void loadRefundHistory(stack.at(-1)); }}>上一页</Button>
+        <Button disabled={!refundPage?.nextCursor || financePageLoading} onClick={() => { const next=refundPage?.nextCursor; if(next){setRefundCursors(v=>[...v,next]); void loadRefundHistory(next);} }}>下一页</Button>
+      </Space>
+      <Table
         rowKey="id"
-        dataSource={refundHistory(refunds)}
+        loading={financePageLoading}
+        pagination={false}
+        dataSource={refundPage?.items ?? []}
         columns={[
           { title: "退款单", dataIndex: "providerRefundNo" },
-          { title: "退款类型", dataIndex: "refundType" },
+          { title: "退款类型", render: (_, v) => v.refundType === "FULL" ? "整单退款" : "部分退款" },
           { title: "退款时间", render: (_, v) => dateTime(v.createdAt) },
           { title: "订单", dataIndex: "orderId" },
           { title: "金额", render: (_, v) => money(v.amountCents) },
           { title: "状态", render: (_, v) => <Status value={v.status} /> },
+          { title: "机构核查", render: (_, v) => v.manualProviderStatus ?? "—" },
+          { title: "核查说明", render: (_, v) => <Space direction="vertical" size={0}><span>{v.manualHoldReason ?? v.lastError ?? "—"}</span>{v.manualProviderStatus === "ABNORMAL" && <Typography.Text type="warning">请在微信支付商户平台“交易中心”人工审核退款</Typography.Text>}</Space> },
+          { title: "操作", render: (_, v) => v.status === "MANUAL_HOLD" && canExecuteRefund ? <Space>
+            <Button disabled={financePageLoading} onClick={async () => { setFinancePageLoading(true); try { await api.checkManualRefund(v.refundType, v.id); await loadRefundHistory(refundCursors.at(-1)); void message.success("已查询原退款号的机构状态"); } catch (error) { void message.error(adminErrorNotice(error)); } finally { setFinancePageLoading(false); } }}>查询机构</Button>
+            { v.manualProviderStatus === "NOT_FOUND" && (v.manualRetryAttempts ?? 0) < 1 && <Button type="primary" disabled={financePageLoading} onClick={() => Modal.confirm({title: "确认恢复原退款义务", content: `机构确认原退款号 ${v.providerRefundNo} 不存在。系统将沿用原退款号和参数提交，不会新建退款单；人工恢复最多一次。`, okText: "确认恢复", cancelText: "取消", onOk: async () => { setFinancePageLoading(true); try { await api.retryManualRefund(v.refundType, v.id); await loadRefundHistory(refundCursors.at(-1)); void message.success("已按原退款号提交恢复"); } catch (error) { void message.error(adminErrorNotice(error)); throw error; } finally { setFinancePageLoading(false); } } })}>恢复原退款</Button> }
+            { (v.manualRetryAttempts ?? 0) >= 1 && <Typography.Text type="warning">人工恢复次数已用完，请按退款机构指引继续处理</Typography.Text> }
+          </Space> : "—" },
         ]}
       />
-      }
+      </>}
       {view === "finance" && <>
       <Tabs
         activeKey={activeRefundTab}
@@ -5098,7 +5391,10 @@ function Finance({
               title: "操作",
               render: (_, value) => <Space>
                 {canExecuteRefund && value.status === "REFUNDING" && !value.financeRefundStatus && value.refundAmountKind !== "RECORDED" ? (
-                  <Button type="primary" disabled={Boolean(value.financialFactsError) || safeRefundAmount(value) === null} title={value.financialFactsError ?? undefined} onClick={() => setQualityRefundTarget(value)}>执行退款</Button>
+                  <Button type="primary" disabled={Boolean(value.financialFactsError) || safeRefundAmount(value) === null} title={value.financialFactsError ?? undefined} onClick={() => setQualityRefundTarget({ value, mode: "EXECUTE" })}>执行退款</Button>
+                ) : null}
+                {canExecuteRefund && value.status === "REFUNDING" && (value.financeRefundStatuses ?? []).length > 0 && (value.financeRefundStatuses ?? []).every(status => status === "SUCCEEDED") ? (
+                  <Button type="primary" onClick={() => setQualityRefundTarget({ value, mode: "CONFIRM_SETTLED" })}>确认退款已结清</Button>
                 ) : null}
                 <Button type="link" onClick={() => openFinanceDetail(`品质退款 · ${value.orderNo ?? value.orderId}`, [{label: "商品与数量", value: value.items.map(item => `${item.name} × ${item.quantity}：${item.description}`).join("；") || "—"}, {label: "决定说明", value: value.decisionNote ?? "—"}, {label: "退款金额", value: refundAmountText(value)}])}>查看详情</Button>
               </Space>,
@@ -5172,9 +5468,18 @@ function Finance({
       </>}
       {view === "finance-ledger" && <section aria-label="财务流水">
         <Typography.Title level={4}>财务流水</Typography.Title>
+        <Space wrap style={{ marginBottom: 12 }}>
+          <Input aria-label="关联单据筛选" placeholder="按关联单据筛选" value={ledgerReferenceId} onChange={e => setLedgerReferenceId(e.target.value)} onPressEnter={() => {setLedgerCursors([]);void loadLedgerPage();}} />
+          <Button onClick={() => {setLedgerCursors([]);void loadLedgerPage();}}>筛选</Button>
+          <span>共 {ledgerPage.total} 条</span>
+          <Button disabled={!ledgerCursors.length || financePageLoading} onClick={() => {const stack=ledgerCursors.slice(0,-1);setLedgerCursors(stack);void loadLedgerPage(stack.at(-1));}}>上一页</Button>
+          <Button disabled={!ledgerPage.nextCursor || financePageLoading} onClick={() => {const next=ledgerPage.nextCursor;if(next){setLedgerCursors(v=>[...v,next]);void loadLedgerPage(next);}}}>下一页</Button>
+        </Space>
         <Table
+          loading={financePageLoading}
+          pagination={false}
           rowKey="id"
-          dataSource={newestFirst(ledger)}
+          dataSource={ledgerPage.items}
           columns={[
           { title: "事件", render: (_, value) => displayLabel(value.eventType) },
           { title: "关联单据", dataIndex: "referenceId" },
@@ -5251,15 +5556,25 @@ function Finance({
       </Modal>
       <Modal
         open={Boolean(qualityRefundTarget)}
-        title="二次确认执行品质退款"
-        okText="确认执行退款"
+        title={qualityRefundTarget?.mode === "CONFIRM_SETTLED" ? "二次确认品质退款结清" : "二次确认执行品质退款"}
+        okText={qualityRefundTarget?.mode === "CONFIRM_SETTLED" ? "确认结清" : "确认执行退款"}
         cancelText="取消"
         confirmLoading={submitting}
         onOk={() => void executeQualityRefund()}
         onCancel={() => !submitting && setQualityRefundTarget(null)}
       >
-        确认对订单 {qualityRefundTarget?.orderNo ?? qualityRefundTarget?.orderId} 执行已批准的品质退款？
-        <Typography.Paragraph>退款金额：{qualityRefundTarget ? refundAmountText(qualityRefundTarget) : "金额待核查"}</Typography.Paragraph>
+        {qualityRefundTarget?.mode === "CONFIRM_SETTLED" ? (
+          <>
+            支付渠道已确认该品质单的所有退款义务成功。此操作只记录财务结清确认，不会再次向支付渠道提交退款。
+            <Typography.Paragraph>订单：{qualityRefundTarget.value.orderNo ?? qualityRefundTarget.value.orderId}</Typography.Paragraph>
+            <Typography.Paragraph>退款金额：{refundAmountText(qualityRefundTarget.value)}</Typography.Paragraph>
+          </>
+        ) : (
+          <>
+            确认对订单 {qualityRefundTarget?.value.orderNo ?? qualityRefundTarget?.value.orderId} 执行已批准的品质退款？
+            <Typography.Paragraph>退款金额：{qualityRefundTarget ? refundAmountText(qualityRefundTarget.value) : "金额待核查"}</Typography.Paragraph>
+          </>
+        )}
       </Modal>
       <Modal
         open={Boolean(cancellationRefundTarget)}
@@ -5709,8 +6024,16 @@ export function App() {
   const canAccess = (code:string) => !requiresLogin || Boolean(access?.isSuperAdmin || access?.permissions.includes(code));
   useEffect(()=>{if(!authenticated)return; let active=true; setAccessError(""); void api.access().then(value=>{if(active)setAccess(value);}).catch(error=>{if(active)setAccessError(adminErrorText(error));});return()=>{active=false;};},[authenticated,auth.token()]);
   const [page, setPage] = useState<AdminPage>(
-    () => defaultPage ?? "settings",
+    () => resolveAdminPageFromSearch(window.location.search, roles, undefined, defaultPage) ?? "settings",
   );
+  const navigatePage = useCallback((nextPage: AdminPage) => {
+    setPage(nextPage);
+    const url = new URL(window.location.href);
+    url.searchParams.set("page", nextPage);
+    url.searchParams.delete("orderId");
+    url.searchParams.delete("billId");
+    window.history.pushState({ adminPage: nextPage }, "", `${url.pathname}${url.search}${url.hash}`);
+  }, []);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loginNotice, setLoginNotice] = useState<string | null>(null);
@@ -5743,13 +6066,10 @@ export function App() {
       Awaited<ReturnType<typeof api.finance>> | null
     >(null),
     [ledger, setLedger] = useState<Awaited<ReturnType<typeof api.ledger>>>(
-      [],
+      { items: [], total: 0, nextCursor: null, pageSize: 25 },
     ),
     [notifications, setNotifications] = useState<
       Awaited<ReturnType<typeof api.manualNotifications>>
-    >([]),
-    [interests, setInterests] = useState<
-      Awaited<ReturnType<typeof api.serviceAreaInterests>>
     >([]),
     [audits, setAudits] = useState<Awaited<ReturnType<typeof api.audits>>>(
       [],
@@ -5762,6 +6082,32 @@ export function App() {
     ? page
     : defaultPage ?? "settings";
   const currentPage = getAdminPageModule(currentView);
+  useEffect(() => {
+    const restorePage = () => {
+      const nextPage = resolveAdminPageFromSearch(window.location.search, roles, permissions, defaultPage);
+      if (nextPage) setPage(nextPage);
+    };
+    window.addEventListener("popstate", restorePage);
+    return () => window.removeEventListener("popstate", restorePage);
+  }, [roles.join(","), permissions?.join(","), defaultPage]);
+  useEffect(() => {
+    if (!authenticated || !hasAccess) return;
+    const url = new URL(window.location.href);
+    let changed = false;
+    if (url.searchParams.get("page") !== currentView) {
+      url.searchParams.set("page", currentView);
+      changed = true;
+    }
+    if (currentView !== "orders" && url.searchParams.has("orderId")) {
+      url.searchParams.delete("orderId");
+      changed = true;
+    }
+    if (url.searchParams.has("billId")) {
+      url.searchParams.delete("billId");
+      changed = true;
+    }
+    if (changed) window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+  }, [authenticated, hasAccess, currentView]);
   useEffect(() => {
     if (!authenticated) return;
     const frame = window.requestAnimationFrame(() => {
@@ -5796,9 +6142,8 @@ export function App() {
     setExceptions([]);
     setPickupWindows([]);
     setRefunds(null);
-    setLedger([]);
+    setLedger({ items: [], total: 0, nextCursor: null, pageSize: 25 });
     setNotifications([]);
-    setInterests([]);
     setAudits([]);
     setLoadError(null);
     setLoginNotice(null);
@@ -5852,10 +6197,12 @@ export function App() {
           api.campaigns().then(commit(setCampaigns)),
         );
       if (currentPage === "orders")
-        work.push(
-          api.campaigns().then(commit(setCampaigns)),
-          api.points().then(commit(setPoints)),
-        );
+        {
+          if (canAccess("campaigns.view")) work.push(api.campaigns().then(commit(setCampaigns)));
+          else commit(setCampaigns)([]);
+          if (canAccess("pickup-points.view")) work.push(api.points().then(commit(setPoints)));
+          else commit(setPoints)([]);
+        }
       if (currentPage === "logistics")
         work.push(
           api.plans().then(commit(setPlans)),
@@ -5880,8 +6227,6 @@ export function App() {
         }
         if (currentPage === "governance") setNotifications(value => [...value]);
       }
-      if (currentView === "interests")
-        work.push(api.serviceAreaInterests().then(commit(setInterests)));
       if (currentPage === "finance") {
         if (currentView !== "finance-ledger") work.push(api.finance().then(commit(setRefunds)));
         if (currentView === "finance-ledger") work.push(api.ledger().then(commit(setLedger)));
@@ -5965,7 +6310,7 @@ export function App() {
           loading,
           error: loadError,
           reload,
-          onNavigate: setPage,
+          onNavigate: navigatePage,
         }}
       />
     ) : currentPage === "pickup-points" ? (
@@ -5997,10 +6342,11 @@ export function App() {
       <GovernancePage
         {...{
           notifications,
-          interests,
           loading,
           error: loadError,
           reload,
+          canViewNotifications: currentView === "governance" && canAccess("governance.view"),
+          canViewInterests: currentView === "interests" && canAccess("interests.view"),
           canHandleNotifications:
             currentView === "governance" && canAccess("governance.manage"),
           canHandleInterests:
@@ -6026,6 +6372,7 @@ export function App() {
                       ...value,
                       status: result.status,
                       financeRefundStatus: result.financeRefundStatus,
+                      financeRefundStatuses: result.financeRefundStatuses ?? [],
                     }
                   : value,
               ),
@@ -6074,7 +6421,7 @@ export function App() {
             mode="inline"
             selectedKeys={[currentView]}
             defaultOpenKeys={navigation.map((group) => `section:${group.key}`)}
-            onClick={({ key }) => setPage(key as AdminPage)}
+            onClick={({ key }) => navigatePage(key as AdminPage)}
             items={navigation.map((group) => group.items.length === 1 && !["products", "orders", "fulfillment", "sites", "finance", "access-audit", "point-workbench"].includes(group.key) ? ({
               key: group.items[0]!.key, icon: navigationGroupIcon(group.key), label: group.items[0]!.label,
             }) : ({

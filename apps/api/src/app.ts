@@ -16,7 +16,6 @@ import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import Fastify, { type FastifyInstance, type FastifyRequest, type FastifyServerOptions } from "fastify";
-import { Redis } from "ioredis";
 import {
   batchCreatePickupPointsSchema,
   bookVehicleSchema,
@@ -25,6 +24,8 @@ import {
   catalogSkuSchema,
   productCategorySchema,
   communityCampaignSchema,
+  communityCampaignGroupSchema,
+  communityCampaignGroupPostponeSchema,
   communityQualityAcceptanceSchema,
   communityQualityCaseSchema,
   communityQualityDecisionSchema,
@@ -54,15 +55,8 @@ import { BusinessError, moneyCents } from "@hometown/domain";
 import type { AppConfig } from "./config.js";
 import { AdminAuthService } from "./modules/auth/admin-auth.js";
 import { readDemoActor, requireActor } from "./modules/auth/auth.js";
-import {
-  createLoginRateLimiter,
-  type LoginRateLimiter,
-} from "./modules/auth/login-rate-limiter.js";
 import { StaffService } from "./modules/auth/staff-service.js";
-import {
-  ensureConsumerPublicNumbers,
-  findConsumerByPublicNumber,
-} from "./modules/customers/consumer-directory-service.js";
+import { ensureConsumerPublicNumbers } from "./modules/customers/consumer-directory-service.js";
 import { runWithInternalWriteActor } from "./modules/auth/internal-write-context.js";
 import {
   AuthService,
@@ -89,7 +83,7 @@ import { LedgerService } from "./modules/finance/ledger-service.js";
 import { CommunityFulfillmentService } from "./modules/fulfillment/community-fulfillment-service.js";
 import { CommunityOperationsService } from "./modules/fulfillment/community-operations-service.js";
 import { CommunityQualityService } from "./modules/fulfillment/community-quality-service.js";
-import { calculateNetSalesFromOrders, calculateNetSalesSnapshot, type NetSalesSnapshot } from "./modules/catalog/catalog-sales.js";
+import { calculateNetSalesSnapshot, type NetSalesSnapshot } from "./modules/catalog/catalog-sales.js";
 import { DeliveryPlanService } from "./modules/fulfillment/delivery-plan-service.js";
 import { FulfillmentService } from "./modules/fulfillment/fulfillment-service.js";
 import { NotificationService } from "./modules/notifications/notification-service.js";
@@ -151,6 +145,18 @@ function maskPhone(value: string): string {
     : "[REDACTED]";
 }
 
+function summarizePartialRefundStatuses(refunds: readonly { status: string }[]) {
+  const financeRefundStatuses = refunds.map((refund) => refund.status);
+  return {
+    financeRefundStatuses,
+    financeRefundStatus:
+      financeRefundStatuses.length === 0
+        ? null
+        : financeRefundStatuses.find((status) => status !== "SUCCEEDED") ??
+          "SUCCEEDED",
+  };
+}
+
 /** Audit is an operational view, never a raw persistence dump. */
 function redactAuditData(value: unknown, key?: string): unknown {
   const normalized = key?.toLowerCase();
@@ -193,7 +199,6 @@ export interface AppDependencies {
   wechatPhoneExchange?: WechatPhoneExchange;
   subscriptionMessageProvider?: SubscriptionMessageProvider;
   paymentProvider?: PaymentProvider;
-  loginRateLimiter?: LoginRateLimiter;
 }
 
 export async function hasReadyAdminBootstrap(store: CommerceStore): Promise<boolean> {
@@ -295,17 +300,38 @@ export async function buildApp(
     trustProxy: config.TRUST_PROXY,
     bodyLimit: 1_048_576,
   });
-  const store =
+  const store: CommerceStore =
     dependencies.store ??
     (config.DATA_STORE === "mysql"
-      ? MysqlStore.create(config.DATABASE_URL!)
+      ? MysqlStore.create(config.DATABASE_URL!, {
+          payloadWarningBytes: config.AGGREGATE_PAYLOAD_WARNING_BYTES,
+          payloadCriticalBytes: config.AGGREGATE_PAYLOAD_CRITICAL_BYTES,
+          onPayloadAlert: (event) => app.log.warn(
+            { aggregatePayloadBytes: event.payloadBytes, tier: event.tier },
+            "aggregate payload capacity threshold exceeded",
+          ),
+        })
       : new MemoryStore(false));
+  const persistenceMode = await store.getPersistenceMode?.() ?? "LEGACY";
+  const maintenanceMode = config.MAINTENANCE_MODE || persistenceMode === "PREPARED" ||
+    (persistenceMode === "ENTITY" && !config.SINGLE_WRITER_CONFIRMED);
+  if (maintenanceMode) {
+    app.addHook("onRequest", async (request, reply) => {
+      if (request.url.startsWith("/health")) return;
+      reply.header("retry-after", "60").code(503).send({
+        error: { code: "MAINTENANCE_MODE", message: "系统正在维护，请稍后重试" },
+      });
+    });
+  }
   const holder: { campaigns?: CampaignService } = {};
-  let scheduler: CampaignScheduler = dependencies.scheduler ?? new NoopCampaignScheduler();
+  let scheduler: CampaignScheduler = maintenanceMode
+    ? new NoopCampaignScheduler()
+    : dependencies.scheduler ?? new NoopCampaignScheduler();
   let reconciliationRunning = false;
   let lastReconciliationAt: string | null = null;
   let lastReconciliationError: string | null = null;
-  if (!dependencies.scheduler && config.QUEUE_DRIVER === "redis")
+  let lastAuthenticationCleanupAt = 0;
+  if (!maintenanceMode && !dependencies.scheduler && config.QUEUE_DRIVER === "redis")
     scheduler = new RedisCampaignScheduler(
       config.REDIS_URL!,
       async (id, version) => {
@@ -388,15 +414,6 @@ export async function buildApp(
     store,
     config.AUTH_SESSION_TTL_SECONDS,
   );
-  const loginRateLimitRedis = !dependencies.loginRateLimiter && config.REDIS_URL
-    ? new Redis(config.REDIS_URL)
-    : null;
-  const loginRateLimiter =
-    dependencies.loginRateLimiter ??
-    createLoginRateLimiter(
-      loginRateLimitRedis,
-      config.NODE_ENV === "production",
-    );
   const staffService = new StaffService(store);
 
   const audit = (
@@ -543,22 +560,28 @@ export async function buildApp(
         }
       : null;
   const campaignView = async (campaign: Campaign, sales: NetSalesSnapshot) => {
-    const [plan, orders, points] = await Promise.all([
+    const [plan, paidBySku, points, group] = await Promise.all([
       store.getDeliveryPlanByCampaign(campaign.id),
-      store.listOrdersByCampaign(campaign.id),
+      store.getNetSalesQuantities(campaign.id),
       store.listPickupPoints(campaign.serviceAreaId),
+      campaign.campaignGroupId ? store.getCampaignGroup(campaign.campaignGroupId) : Promise.resolve(null),
     ]);
-    const paidBySku = calculateNetSalesFromOrders(orders, sales.fullyRefundedOrderIds);
+    const groupPaidQuantity = group
+      ? (await Promise.all(group.campaignIds.map((id) => store.getNetSalesQuantities(id))))
+          .reduce((total, quantities) => total + [...quantities.values()].reduce((sum, value) => sum + value, 0), 0)
+      : [...paidBySku.values()].reduce((total, quantity) => total + quantity, 0);
     return {
       ...campaign,
+      groupingMode: group?.groupingMode ?? "PER_POINT",
+      groupPaidQuantity,
+      campaignGroupVersion: group?.version ?? null,
       deliveryPlan: publicPlan(plan),
       pickupPoint: plan
         ? (points.find((point) => point.id === plan.pickupPointId) ?? null)
         : null,
-      paidQuantity: [...paidBySku.values()].reduce(
-        (total, quantity) => total + quantity,
-        0,
-      ),
+      paidQuantity: group?.groupingMode === "ALL_POINTS"
+        ? groupPaidQuantity
+        : [...paidBySku.values()].reduce((total, quantity) => total + quantity, 0),
       items: campaign.items.map((item) => ({
         skuId: item.catalogSkuId,
         title: item.title,
@@ -652,20 +675,29 @@ export async function buildApp(
           "HTTPS connection required",
           426,
         );
-    });
+  });
   app.addHook("onRequest", (request, _reply, done) => {
-    void adminAuthService
-      .authenticate(request.headers.authorization)
+    if (!request.headers.authorization?.startsWith("Bearer ")) {
+      request.actor = config.AUTH_PROVIDER === "demo" ? readDemoActor(request) : null;
+      runWithInternalWriteActor(request.actor, done);
+      return;
+    }
+    let revokedSessionHash: string | undefined;
+    void store.readSnapshot(async (snapshot) => {
+      const adminActor = await adminAuthService.authenticate(
+        request.headers.authorization,
+        snapshot,
+        (tokenHash) => { revokedSessionHash = tokenHash; },
+      );
+      const actor = adminActor ??
+        (config.AUTH_PROVIDER === "demo"
+          ? readDemoActor(request)
+          : await authService!.authenticate(request.headers.authorization, snapshot));
+      return attachAccess(snapshot, actor);
+    })
       .then(
-        async (adminActor) =>
-          adminActor ??
-          (config.AUTH_PROVIDER === "demo"
-            ? readDemoActor(request)
-            : await authService!.authenticate(request.headers.authorization)),
-      )
-      .then((actor) => attachAccess(store, actor))
-      .then(
-        (actor) => {
+        async (actor) => {
+          if (revokedSessionHash) await store.deleteAuthSession(revokedSessionHash);
           request.actor = actor;
           runWithInternalWriteActor(actor, done);
         },
@@ -674,22 +706,6 @@ export async function buildApp(
   });
   registerAccessRoutes(app, store);
   app.setErrorHandler((error, request, reply) => {
-    if (error instanceof BusinessError && error.code === "LOGIN_RATE_LIMITED") {
-      const retryAfterSeconds =
-        error.details &&
-        typeof error.details === "object" &&
-        "retryAfterSeconds" in error.details &&
-        typeof error.details.retryAfterSeconds === "number"
-          ? Math.max(1, Math.ceil(error.details.retryAfterSeconds))
-          : 900;
-      reply.header("Retry-After", String(retryAfterSeconds));
-      return reply.status(429).send({
-        code: error.code,
-        message: error.message,
-        requestId: request.id,
-        ...(error.details === undefined ? {} : { details: error.details }),
-      });
-    }
     // @fastify/rate-limit throws a framework error rather than a BusinessError.
     // Preserve its protocol status at the product boundary instead of allowing
     // the generic handler below to turn normal back-pressure into a 500.
@@ -699,13 +715,10 @@ export async function buildApp(
       "statusCode" in error &&
       error.statusCode === 429
     ) {
-      const isAdminLogin = request.url.startsWith("/api/v1/auth/admin/login");
-      reply.header("Retry-After", isAdminLogin ? "900" : "60");
+      reply.header("Retry-After", "60");
       return reply.status(429).send({
-        code: isAdminLogin ? "LOGIN_RATE_LIMITED" : "RATE_LIMITED",
-        message: isAdminLogin
-          ? "登录尝试过于频繁，请 15 分钟后再试"
-          : "请求过于频繁，请稍后再试",
+        code: "RATE_LIMITED",
+        message: "请求过于频繁，请稍后再试",
         requestId: request.id,
       });
     }
@@ -755,7 +768,6 @@ export async function buildApp(
     const dependencies: Record<string, "ok" | "degraded"> = {
       dataStore: await probe(() => store.health()),
       queue: await probe(() => scheduler.health()),
-      loginProtection: await probe(() => loginRateLimiter.health()),
       reconciliation:
         lastReconciliationError || reconciliationStale ? "degraded" : "ok",
     };
@@ -775,7 +787,6 @@ export async function buildApp(
     if (
       dependencies.dataStore !== "ok" ||
       dependencies.queue !== "ok" ||
-      dependencies.loginProtection !== "ok" ||
       lastReconciliationError ||
       reconciliationStale
     )
@@ -796,7 +807,6 @@ export async function buildApp(
   registerAuthRoutes(app, {
     authService,
     adminAuthService,
-    loginRateLimiter,
     privacyNoticeVersion: config.PRIVACY_NOTICE_VERSION,
   });
   const listPickupPointManagerDirectory = async (serviceAreaId?: string) => {
@@ -825,6 +835,7 @@ export async function buildApp(
     campaigns,
     getSalesSnapshot: () => calculateNetSalesSnapshot(store),
     listServiceAreas: () => store.listServiceAreas(),
+    listProductCategories: () => store.listProductCategories(),
     listPickupPoints: async (id) => (await listPickupPointManagerDirectory(id)).map((point) => {
       Reflect.deleteProperty(point, "managerNames");
       Reflect.deleteProperty(point, "managerConflict");
@@ -855,7 +866,7 @@ export async function buildApp(
     assertActivePickupPointAccess: assertPointAccess,
     rejectCommunityExternalEvidence: rejectExternalEvidence,
   });
-  registerFinanceRoutes(app, store);
+  registerFinanceRoutes(app, store, payments);
 
   // Browser integration tests may prepare a persisted expiry fact, but the
   // product action itself is always performed through the operator/finance UI.
@@ -990,30 +1001,18 @@ export async function buildApp(
         throw new BusinessError("RESOURCE_NOT_FOUND", "服务区域不存在", 404);
       const after = { ...before, orderEnabled: input.orderEnabled };
       if (before.orderEnabled && !after.orderEnabled) {
-        const [campaigns, orders] = await Promise.all([
-          transactionStore.listCampaigns(),
-          transactionStore.listOrders(Number.MAX_SAFE_INTEGER),
+        const [activeCampaignCount, unfinishedOrders] = await Promise.all([
+          transactionStore.countCampaignsByServiceAreaStatuses(id, ["OPEN", "CLOSING", "LOCKED", "FULFILLING", "POSTPONED"]),
+          transactionStore.searchOrders({serviceAreaId: id, excludeStatuses: ["CANCELLED", "REFUNDED", "COMPLETED"], page: 1, pageSize: 1}),
         ]);
-        const activeCampaigns = campaigns.filter(
-          (campaign) =>
-            campaign.serviceAreaId === id &&
-            ["OPEN", "CLOSING", "LOCKED", "FULFILLING", "POSTPONED"].includes(
-              campaign.status,
-            ),
-        );
-        const unfinishedOrders = orders.filter(
-          (order) =>
-            order.serviceAreaId === id &&
-            !["CANCELLED", "REFUNDED", "COMPLETED"].includes(order.status),
-        );
-        if (activeCampaigns.length || unfinishedOrders.length)
+        if (activeCampaignCount || unfinishedOrders.total)
           throw new BusinessError(
             "RESOURCE_IN_USE",
             "区域仍有进行中团期或未完成订单，不能暂停下单",
             409,
             {
-              campaignCount: activeCampaigns.length,
-              unfinishedOrderCount: unfinishedOrders.length,
+              campaignCount: activeCampaignCount,
+              unfinishedOrderCount: unfinishedOrders.total,
             },
           );
       }
@@ -1214,28 +1213,12 @@ export async function buildApp(
         createPickupPointSchema.omit({ photoUrl: true }).parse(legacyCompatiblePoint);
       }
       if (before.status === "ACTIVE" && after.status === "INACTIVE") {
-        const [campaigns, plans, staff, assignments, orders] = await Promise.all([
-          transactionStore.listCampaigns(),
-          transactionStore.listDeliveryPlans(),
+        const [inProgressDeliveryCount, staff, assignments, unfinishedOrders] = await Promise.all([
+          transactionStore.countInProgressDeliveryForPickupPoint(id, ["SITE_CONFIRMED", "VEHICLE_BOOKED", "IN_TRANSIT"], ["OPEN", "LOCKED", "POSTPONED", "FULFILLING"]),
           transactionStore.listInternalStaff(),
           transactionStore.listStaffPickupPointAssignments(),
-          transactionStore.listOrders(Number.MAX_SAFE_INTEGER),
+          transactionStore.searchOrders({pickupPointId: id, excludeStatuses: ["CANCELLED", "REFUNDED", "PICKED_UP", "COMPLETED"], page: 1, pageSize: 1}),
         ]);
-        const campaignById = new Map(
-          campaigns.map((campaign) => [campaign.id, campaign]),
-        );
-        const inProgressPlans = plans.filter((plan) => {
-          if (plan.pickupPointId !== id) return false;
-          const campaign = campaignById.get(plan.campaignId);
-          return (
-            ["SITE_CONFIRMED", "VEHICLE_BOOKED", "IN_TRANSIT"].includes(
-              plan.status,
-            ) ||
-            ["OPEN", "LOCKED", "POSTPONED", "FULFILLING"].includes(
-              campaign?.status ?? "",
-            )
-          );
-        });
         const activeStaffIds = new Set(
           staff
             .filter(
@@ -1249,22 +1232,15 @@ export async function buildApp(
             assignment.pickupPointId === id &&
             activeStaffIds.has(assignment.staffUserId),
         );
-        const unfinishedOrders = orders.filter(
-          (order) =>
-            order.pickupPointId === id &&
-            !["CANCELLED", "REFUNDED", "PICKED_UP", "COMPLETED"].includes(
-              order.status,
-            ),
-        );
-        if (inProgressPlans.length || hasActiveManager || unfinishedOrders.length)
+        if (inProgressDeliveryCount || hasActiveManager || unfinishedOrders.total)
           throw new BusinessError(
             "INVALID_STATE_TRANSITION",
             "存在未完成订单、进行中履约或有效点位负责人授权，不能停用自提点",
             409,
             {
-              deliveryPlanCount: inProgressPlans.length,
+              deliveryPlanCount: inProgressDeliveryCount,
               activeManagerCount: hasActiveManager ? 1 : 0,
-              unfinishedOrderCount: unfinishedOrders.length,
+              unfinishedOrderCount: unfinishedOrders.total,
             },
           );
       }
@@ -1321,29 +1297,18 @@ export async function buildApp(
       const before = (await transactionStore.listPickupPoints()).find((point) => point.id === id);
       if (!before) throw new BusinessError("RESOURCE_NOT_FOUND", "自提点不存在", 404);
       if (before.archivedAt) throw new BusinessError("INVALID_STATE_TRANSITION", "自提点已删除，请勿重复操作", 409);
-      const [campaigns, plans, orders, assignments, staff] = await Promise.all([
-        transactionStore.listCampaigns(),
-        transactionStore.listDeliveryPlans(),
-        transactionStore.listOrders(Number.MAX_SAFE_INTEGER),
+      const [inProgressDeliveryCount, unfinishedOrders, assignments, staff] = await Promise.all([
+        transactionStore.countInProgressDeliveryForPickupPoint(id, ["SITE_CONFIRMED", "VEHICLE_BOOKED", "IN_TRANSIT"], ["OPEN", "CLOSING", "LOCKED", "FULFILLING", "POSTPONED"]),
+        transactionStore.searchOrders({pickupPointId: id, excludeStatuses: ["CANCELLED", "REFUNDED", "PICKED_UP", "COMPLETED"], page: 1, pageSize: 1}),
         transactionStore.listStaffPickupPointAssignments(),
         transactionStore.listInternalStaff(),
       ]);
-      const campaignById = new Map(campaigns.map((campaign) => [campaign.id, campaign]));
-      const referencedPlans = plans.filter((plan) => plan.pickupPointId === id);
-      const inProgressPlans = referencedPlans.filter((plan) => {
-        const campaign = campaignById.get(plan.campaignId);
-        return ["SITE_CONFIRMED", "VEHICLE_BOOKED", "IN_TRANSIT"].includes(plan.status)
-          || ["OPEN", "CLOSING", "LOCKED", "FULFILLING", "POSTPONED"].includes(campaign?.status ?? "");
-      });
-      const unfinishedOrders = orders.filter((order) =>
-        order.pickupPointId === id && !["CANCELLED", "REFUNDED", "PICKED_UP", "COMPLETED"].includes(order.status),
-      );
-      if (inProgressPlans.length || unfinishedOrders.length) {
+      if (inProgressDeliveryCount || unfinishedOrders.total) {
         throw new BusinessError(
           "RESOURCE_IN_USE",
           "自提点仍被进行中团期、待履约流程或未完成订单引用，不能删除",
           409,
-          {deliveryPlanCount: inProgressPlans.length, unfinishedOrderCount: unfinishedOrders.length},
+          {deliveryPlanCount: inProgressDeliveryCount, unfinishedOrderCount: unfinishedOrders.total},
         );
       }
       const affectedAssignments = assignments.filter((assignment) => assignment.pickupPointId === id);
@@ -1459,6 +1424,7 @@ export async function buildApp(
       const category: ProductCategory = {
         id: input.id ?? randomUUID(),
         name: input.name,
+        iconKey: input.iconKey ?? existing.find((item) => item.id === input.id)?.iconKey ?? "basket",
         sortOrder: input.sortOrder,
         status: input.status,
         createdAt: existing.find((item) => item.id === input.id)?.createdAt ?? now,
@@ -1562,29 +1528,18 @@ export async function buildApp(
         }
         value.productId = value.product.id;
         if (existing?.status === "ACTIVE" && value.status === "INACTIVE") {
-          const [campaigns, orders] = await Promise.all([
-            transactionStore.listCampaigns(),
-            transactionStore.listOrders(Number.MAX_SAFE_INTEGER),
+          const [activeCampaignReference, unfinishedOrders] = await Promise.all([
+            transactionStore.countActiveCampaignReferencesForCatalogSku(value.id, ["OPEN", "CLOSING", "LOCKED", "FULFILLING", "POSTPONED"]),
+            transactionStore.searchOrders({catalogSkuId: value.id, excludeStatuses: ["CANCELLED", "REFUNDED", "COMPLETED"], page: 1, pageSize: 1}),
           ]);
-          const activeCampaigns = campaigns.filter(
-            (campaign) =>
-              ["OPEN", "CLOSING", "LOCKED", "FULFILLING", "POSTPONED"].includes(
-                campaign.status,
-              ) && campaign.items.some((item) => item.catalogSkuId === value.id),
-          );
-          const unfinishedOrders = orders.filter(
-            (order) =>
-              !["CANCELLED", "REFUNDED", "COMPLETED"].includes(order.status) &&
-              order.items.some((item) => item.skuId === value.id),
-          );
-          if (activeCampaigns.length || unfinishedOrders.length)
+          if (activeCampaignReference || unfinishedOrders.total)
             throw new BusinessError(
               "RESOURCE_IN_USE",
               "商品仍有进行中团期或未完成订单，不能停用",
               409,
               {
-                campaignCount: activeCampaigns.length,
-                unfinishedOrderCount: unfinishedOrders.length,
+                campaignCount: activeCampaignReference,
+                unfinishedOrderCount: unfinishedOrders.total,
               },
             );
         }
@@ -1615,15 +1570,15 @@ export async function buildApp(
   app.get("/api/v1/admin/consumers", async (request) => {
     requireActor(request, ["SUPER_ADMIN", "CUSTOMER_SERVICE"]);
     const query = z.object({query:z.string().trim().max(80).default(""),page:z.coerce.number().int().min(1).max(100000).default(1),pageSize:z.coerce.number().int().min(1).max(100).default(20)}).parse(request.query);
-    const needle = query.query.toLowerCase();
-    const users = (await ensureConsumerPublicNumbers(store)).filter(user => !needle || String(user.consumerNumber).includes(needle) || (user.displayName ?? "").toLowerCase().includes(needle) || (user.phoneNumber ?? "").includes(needle)).sort((a,b) => (a.consumerNumber ?? 0) - (b.consumerNumber ?? 0));
-    return {data:{items:await Promise.all(users.slice((query.page-1)*query.pageSize,query.page*query.pageSize).map(consumerSummary)),total:users.length,page:query.page,pageSize:query.pageSize}};
+    await ensureConsumerPublicNumbers(store);
+    const result = await store.searchConsumerUsers(query.query, query.page, query.pageSize);
+    return {data:{items:await Promise.all(result.items.map(consumerSummary)),total:result.total,page:result.page,pageSize:result.pageSize}};
   });
   app.get("/api/v1/admin/consumers/:id", async (request) => {
     const actor = requireActor(request, ["SUPER_ADMIN", "CUSTOMER_SERVICE"]);
     const consumerNumber = z.coerce.number().int().min(1).max(Number.MAX_SAFE_INTEGER).parse((request.params as {id:string}).id);
-    const users = await ensureConsumerPublicNumbers(store);
-    const user = findConsumerByPublicNumber(users, consumerNumber);
+    await ensureConsumerPublicNumbers(store);
+    const user = await store.findConsumerUserByPublicNumber(consumerNumber);
     if (!user) throw new BusinessError("RESOURCE_NOT_FOUND", "消费者不存在", 404);
     const canViewPhone = actorCan(actor, "consumers.phone.view");
     if (canViewPhone && user.phoneNumber)
@@ -1643,8 +1598,8 @@ export async function buildApp(
   app.get("/api/v1/admin/consumers/:id/phone", async (request) => {
     const actor = requireActor(request, ["SUPER_ADMIN", "CUSTOMER_SERVICE", "OPERATOR", "FINANCE"]);
     const consumerNumber = z.coerce.number().int().min(1).max(Number.MAX_SAFE_INTEGER).parse((request.params as {id:string}).id);
-    const users = await ensureConsumerPublicNumbers(store);
-    const user = findConsumerByPublicNumber(users, consumerNumber);
+    await ensureConsumerPublicNumbers(store);
+    const user = await store.findConsumerUserByPublicNumber(consumerNumber);
     if (!user) throw new BusinessError("RESOURCE_NOT_FOUND", "消费者不存在", 404);
     if (!actorCan(actor, "consumers.phone.view"))
       throw new BusinessError("FORBIDDEN", "没有查看手机号的权限", 403);
@@ -1676,6 +1631,33 @@ export async function buildApp(
       request.id,
     );
     return reply.status(201).send({ data: await campaignView(value, await calculateNetSalesSnapshot(store)) });
+  });
+  app.post("/api/v1/admin/campaign-groups", async (request, reply) => {
+    const actor = requireActor(request, ["OPERATOR", "SUPER_ADMIN"]);
+    const value = await communityFulfillment.createCampaignGroup(
+      communityCampaignGroupSchema.parse(request.body),
+      actor.userId,
+      request.id,
+    );
+    const sales = await calculateNetSalesSnapshot(store);
+    return reply.status(201).send({ data: {
+      group: await store.getCampaignGroup(value.group.id),
+      campaigns: await Promise.all(value.campaigns.map((campaign) => campaignView(campaign, sales))),
+    } });
+  });
+  app.patch("/api/v1/admin/campaign-groups/:id", async (request) => {
+    const actor = requireActor(request, ["OPERATOR", "SUPER_ADMIN"]);
+    const id = identifierSchema.parse((request.params as { id: string }).id);
+    const { version, ...input } = z.intersection(
+      communityCampaignGroupSchema,
+      z.object({ version: z.int().min(1) }),
+    ).parse(request.body);
+    const value = await communityFulfillment.updateCampaignGroup(id, version, input, actor.userId, request.id);
+    const sales = await calculateNetSalesSnapshot(store);
+    return { data: {
+      group: value.group,
+      campaigns: await Promise.all(value.campaigns.map((campaign) => campaignView(campaign, sales))),
+    } };
   });
   app.patch("/api/v1/admin/campaigns/:id", async (request) => {
     const actor = requireActor(request, ["OPERATOR", "SUPER_ADMIN"]);
@@ -1741,6 +1723,17 @@ export async function buildApp(
       { actorId: actor.userId, requestId: request.id },
     );
     return { data: after };
+  });
+  app.post("/api/v1/admin/campaign-groups/:id/postpone", async (request) => {
+    const actor = requireActor(request, ["OPERATOR", "SUPER_ADMIN"]);
+    const id = identifierSchema.parse((request.params as { id: string }).id);
+    const after = await campaigns.postponeCampaignGroup(
+      id,
+      communityCampaignGroupPostponeSchema.parse(request.body),
+      { actorId: actor.userId, requestId: request.id },
+    );
+    const sales = await calculateNetSalesSnapshot(store);
+    return { data: await Promise.all(after.map((campaign) => campaignView(campaign, sales))) };
   });
   app.get("/api/v1/admin/campaigns/:id/packing-labels", async (request) => {
     requireActor(request, ["OPERATOR", "SUPER_ADMIN"]);
@@ -1952,6 +1945,23 @@ export async function buildApp(
       ),
     };
   });
+  app.post("/api/v1/order-checkouts/:id/pay", async (request) => {
+    const actor = requireActor(request, ["USER", "SUPER_ADMIN"]);
+    return {
+      data: await payments.initiateBatch(
+        identifierSchema.parse((request.params as { id: string }).id),
+        actor.userId,
+      ),
+    };
+  });
+  app.post("/api/v1/order-checkouts/:id/pay/mock-confirm", async (request) => {
+    const actor = requireActor(request, ["USER", "SUPER_ADMIN"]);
+    await payments.confirmMockBatch(
+      identifierSchema.parse((request.params as { id: string }).id),
+      actor.userId,
+    );
+    return { data: { status: "SUCCEEDED" } };
+  });
   app.post("/api/v1/orders/:id/pay/mock-confirm", async (request) => {
     const actor = requireActor(request, ["USER", "SUPER_ADMIN"]);
     await payments.confirmMock(
@@ -2019,13 +2029,14 @@ export async function buildApp(
       ...operationsPageSchema.parse(request.query),
       ...(visibleStatuses ? {allowedStatuses: visibleStatuses} : {}),
     });
+    const casesWithRefunds = page.items.filter(value => value.refundExceptionId);
     const [orders, refunds, exceptions] = await Promise.all([
       Promise.all([...new Set(page.items.map(value => value.orderId))].map(id => store.getOrder(id))),
-      Promise.all(page.items.filter(value => value.refundExceptionId).map(value => store.listPartialRefundsByException(value.refundExceptionId!))),
+      Promise.all(casesWithRefunds.map(value => store.listPartialRefundsByException(value.refundExceptionId!))),
       Promise.all(page.items.map(value => value.refundExceptionId ? store.getFulfillmentException(value.refundExceptionId) : Promise.resolve(null))),
     ]);
     const orderById = new Map(orders.filter(value => value !== null).map(order => [order.id, order]));
-    const partialRefundByException = new Map(refunds.flat().map(value => [value.exceptionId, value]));
+    const partialRefundsByException = new Map(casesWithRefunds.map((value, index) => [value.refundExceptionId!, refunds[index]!]));
     return {
       pagination: {total: page.total, page: page.page, pageSize: page.pageSize},
       data: await Promise.all(page.items.map(async (value, index) => {
@@ -2055,10 +2066,11 @@ export async function buildApp(
             financeExecutedBy: value.financeExecutedBy,
             financeExecutedAt: value.financeExecutedAt,
             refundExceptionId: value.refundExceptionId,
-            financeRefundStatus: value.refundExceptionId
-              ? (partialRefundByException.get(value.refundExceptionId)?.status ??
-                null)
-              : null,
+            ...summarizePartialRefundStatuses(
+              value.refundExceptionId
+                ? partialRefundsByException.get(value.refundExceptionId) ?? []
+                : [],
+            ),
             ...(exception ? await exceptionRefundFacts(store, exception) : {refundAmountCents: null, financialFactsError: "退款事实缺失，请联系管理员核查，暂不可执行退款", refundAmountKind: null, refundStatus: null}),
             items: value.items.map((item) => ({
               catalogSkuId: item.catalogSkuId,
@@ -2125,11 +2137,11 @@ export async function buildApp(
       actor.userId,
       request.id,
     );
-    const financeRefundStatus = (
-      await store.listPartialRefundsByException(value.refundExceptionId)
-    )[0]?.status ?? null;
+    const financeRefundSummary = summarizePartialRefundStatuses(
+      await store.listPartialRefundsByException(value.refundExceptionId),
+    );
     return {
-      data: { ...executed, financeRefundStatus },
+      data: { ...executed, ...financeRefundSummary },
     };
   });
   app.get("/api/v1/admin/fulfillment-exceptions", async (request) => {
@@ -2293,23 +2305,26 @@ export async function buildApp(
   );
   app.get("/api/v1/admin/service-area-interests", async (request) => {
     requireActor(request, ["CUSTOMER_SERVICE", "OPERATOR", "SUPER_ADMIN"]);
+    const query = request.query as { page?: string; pageSize?: string; status?: string };
+    const page = Math.max(1, Math.min(100_000, Number.parseInt(query.page ?? "1", 10) || 1));
+    const pageSize = Math.max(1, Math.min(100, Number.parseInt(query.pageSize ?? "20", 10) || 20));
+    const status = query.status && ["NEW", "CONTACTED", "CLOSED"].includes(query.status)
+      ? query.status as "NEW" | "CONTACTED" | "CLOSED" : undefined;
+    if (query.status && !status) throw new BusinessError("VALIDATION_ERROR", "区域意向状态无效", 400);
+    const result = await store.listServiceAreaInterestPage({ page, pageSize, ...(status ? { status } : {}) });
     return {
-      data: (await store.listServiceAreaInterests(500))
-        .filter(
-          (value) =>
-            Boolean(value.privacyVersion) && Boolean(value.privacyConsentedAt),
-        )
-        .map((value) => ({
-          id: value.id,
-          contactName: value.contactName,
-          maskedContactPhone: maskPhone(value.contactPhone),
-          regionText: value.regionText,
-          privacyConsentedAt: value.privacyConsentedAt!,
-          createdAt: value.createdAt,
-          status: value.status,
-          statusNote: value.statusNote ?? null,
-          statusChangedAt: value.statusChangedAt ?? null,
-        })),
+      data: result.items.map((value) => ({
+        id: value.id,
+        contactName: value.contactName,
+        maskedContactPhone: maskPhone(value.contactPhone),
+        regionText: value.regionText,
+        privacyConsentedAt: value.privacyConsentedAt!,
+        createdAt: value.createdAt,
+        status: value.status,
+        statusNote: value.statusNote ?? null,
+        statusChangedAt: value.statusChangedAt ?? null,
+      })),
+      pagination: { total: result.total, page: result.page, pageSize: result.pageSize },
     };
   });
   app.post(
@@ -2518,14 +2533,30 @@ export async function buildApp(
   });
 
   const reconcile = async () => {
+    if (maintenanceMode) return;
     if (reconciliationRunning) return;
     reconciliationRunning = true;
     try {
       const acquired = await scheduler.runReconciliation(async (assertOwned) => {
         await assertOwned();
-        await scheduler.reconcile(await store.listCampaigns());
+        if (Date.now() - lastAuthenticationCleanupAt >= 60_000) {
+          const now = await store.databaseNow();
+          const expired = await store.readSnapshot((snapshot) => snapshot.listExpiredAuthenticationData(now, 200));
+          if (expired.sessions.length || expired.passwordChangeTokens.length) {
+            await store.transaction((transactionStore) => transactionStore.deleteExpiredAuthenticationData(
+              now,
+              expired.sessions,
+              expired.passwordChangeTokens,
+            ));
+          }
+          lastAuthenticationCleanupAt = Date.now();
+        }
         await assertOwned();
-        await orders.expirePendingOrders();
+        await scheduler.reconcile(await store.listCampaignsByStatus(["OPEN"]));
+        await assertOwned();
+        const expiredPayments = await payments.expirePendingOrders((orderId, userId) => orders.cancelPending(orderId, userId));
+        if (expiredPayments.failed > 0)
+          app.log.warn(expiredPayments, "pending order expiry kept orders open while payment provider status was unresolved");
         await assertOwned();
         await communityOperations.reconcilePickupDeadlines();
         await assertOwned();
@@ -2554,25 +2585,28 @@ export async function buildApp(
     }
   };
   app.get("/health/reconciliation", async () => ({
+    mode: maintenanceMode ? "maintenance" : persistenceMode,
     status:
+      maintenanceMode ? "maintenance" :
       lastReconciliationError ||
       !lastReconciliationAt ||
-      Date.now() - Date.parse(lastReconciliationAt) > 150_000
+      Date.now() - Date.parse(lastReconciliationAt) > 150_000 ||
+      store.getAggregatePayloadStatus?.().tier === "critical"
         ? "degraded"
         : "ok",
     running: reconciliationRunning,
     lastCompletedAt: lastReconciliationAt,
     hasError: Boolean(lastReconciliationError),
+    aggregatePayload: store.getAggregatePayloadStatus?.() ?? null,
   }));
-  await reconcile();
-  const timer = setInterval(() => {
+  if (!maintenanceMode) await reconcile();
+  const timer = maintenanceMode ? null : setInterval(() => {
     void reconcile();
   }, 30_000);
-  timer.unref();
+  timer?.unref();
   app.addHook("onClose", async () => {
-    clearInterval(timer);
+    if (timer) clearInterval(timer);
     await scheduler.close();
-    await loginRateLimiter.close();
     await store.close();
   });
   return app;

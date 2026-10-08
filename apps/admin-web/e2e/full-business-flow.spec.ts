@@ -170,7 +170,7 @@ test('同一主图商品与网页开售团贯穿运输到货及分批核销（�
   await expect(pickupQuantity).toBeDisabled();
   await expect(pickupRow).toContainText(`${productTitle} · 一份`);
   const completed = await readOrder();
-  expect(completed).toMatchObject({ id: order.id, campaignId: campaign.id, status: 'PICKED_UP', items: [{ skuId, quantity: 2, pickedUpQuantity: 2 }] });
+  expect(completed).toMatchObject({ id: order.id, campaignId: campaign.id, status: 'COMPLETED', items: [{ skuId, quantity: 2, pickedUpQuantity: 2 }] });
   expect(mutations.filter(m => m.path === '/api/v1/pickup/verify')).toHaveLength(2);
   expect(mutations.filter(m => m.path === `/api/v1/admin/campaigns/${campaign.id}/open`)).toHaveLength(1);
   expect(failures).toEqual([]);

@@ -170,9 +170,9 @@ test("超管通过网页复核运输、发车、紧急纠正、订单详情和�
   await page.locator('.ant-modal:visible button[type="submit"]').click();
 
   await page.getByRole("menuitem", { name: "订单列表" }).click();
-  const search = page.getByRole("searchbox", { name: "订单号搜索" });
+  const search = page.getByRole("textbox", { name: "订单关键词" });
   await search.fill(order.orderNo);
-  await page.getByRole("button", { name: "搜索订单号" }).click();
+  await page.getByRole("button", { name: /^查\s*询$/ }).click();
   const orderRow = page.getByRole("row").filter({ hasText: order.orderNo });
   await expect(orderRow).toBeVisible();
   await orderRow.getByRole("button", { name: "查看详情" }).click();

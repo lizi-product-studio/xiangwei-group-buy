@@ -7,6 +7,7 @@ import type {
   Order,
 } from "../core/types.js";
 import type { PaymentService } from "../payments/payment-service.js";
+import { completeCampaignIfSettled } from "./campaign-completion.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import type { CommunityOperationsStore } from "./community-operations-store.js";
 /** Paid cancellation preserves the cutoff/dispatch
@@ -341,6 +342,7 @@ export class CommunityOperationsService {
       order.status = transitionOrder(order.status, "COMPLETED");
       await store.saveOrderStatus(order);
     }
+    if (order) await completeCampaignIfSettled(store, order.campaignId);
   }
   public async disposeExpiredPickup(
     orderId: string,
@@ -577,6 +579,7 @@ export class CommunityOperationsService {
           refunded < Number(payment.amountCents)
         )
           await this.completeResidualFulfilment(store, current.orderId);
+        else if (order?.status === "COMPLETED") await completeCampaignIfSettled(store, order.campaignId);
         await store.saveAuditLog({
           id: randomUUID(),
           actorId: "system",

@@ -9,6 +9,7 @@ import type { CommerceStore } from "../core/store.js";
 import type { DispatchBatch, Order } from "../core/types.js";
 import type { LedgerService } from "../finance/ledger-service.js";
 import type { NotificationService } from "../notifications/notification-service.js";
+import { completeCampaignIfSettled } from "./campaign-completion.js";
 
 export type VerifyPickupCommand = {
   orderId: string;
@@ -183,46 +184,24 @@ export class FulfillmentService {
     code: string,
     orderNo?: string,
   ): Promise<Order> {
-    const matches: Order[] = [];
-    for (const order of await this.store.listOrders(Number.MAX_SAFE_INTEGER)) {
-      if (
-        order.pickupPointId !== pickupPointId ||
-        order.status !== "READY_FOR_PICKUP" ||
-        (orderNo !== undefined && order.orderNo !== orderNo)
-      )
-        continue;
-      const plan = await this.store.getDeliveryPlan(order.deliveryPlanId);
-      if (!plan || plan.pickupPointId !== pickupPointId || plan.status !== "ARRIVED")
-        continue;
-      const credential = await this.store.getPickupCredential(order.id);
-      const window = await this.store.getCommunityPickupWindowForUpdate(order.id);
-      if (
-        !credential ||
-        credential.status !== "ACTIVE" ||
-        !Number.isFinite(Date.parse(credential.expiresAt)) ||
-        Date.parse(credential.expiresAt) <= Date.now() ||
-        !window ||
-        !["ACTIVE", "EXTENDED"].includes(window.status) ||
-        !Number.isFinite(Date.parse(window.deadlineAt)) ||
-        Date.parse(window.deadlineAt) <= Date.now() ||
-        !matchesPickupCode(code, credential.codeHash, this.secret)
-      )
-        continue;
-      matches.push(order);
-    }
-    if (matches.length > 1)
+    const codeHash = this.hash(code);
+    const matches = await this.store.listPickupCodeCandidates(pickupPointId, codeHash, orderNo);
+    // Keep constant-time verification at the service boundary even though the
+    // indexed hash lookup already narrows the candidate set to a handful.
+    const verified = matches.filter((candidate) => matchesPickupCode(code, candidate.codeHash, this.secret));
+    if (verified.length > 1)
       throw new BusinessError(
         "PICKUP_CODE_AMBIGUOUS",
         "取货码匹配到多笔订单，请提供订单号查询",
         409,
       );
-    if (!matches[0])
+    if (!verified[0])
       throw new BusinessError(
         "RESOURCE_NOT_FOUND",
         "未找到有效取货码，请核对自提点和取货码，或请用户刷新取货码页面",
         404,
       );
-    return matches[0];
+    return verified[0]!.order;
   }
   public async verify(command: VerifyPickupCommand): Promise<Order> {
     return this.store.transaction(async (store) => {
@@ -425,12 +404,14 @@ export class FulfillmentService {
       order.pickedUpAt = receipt.createdAt;
       if (complete) {
         order.status = transitionOrder(order.status, "PICKED_UP");
+        order.status = transitionOrder(order.status, "COMPLETED");
         credential.status = "USED";
         await store.savePickupCredential(credential);
         await store.savePickupRecord(order.id, deliveryPlanId, verifierId);
       }
       await store.saveOrderStatus(order);
-      if (complete) await this.ledger.recordPickup(store, order);
+      await this.ledger.recordPickup(store, order, receipt);
+      await completeCampaignIfSettled(store, order.campaignId);
       return order;
     });
   }

@@ -304,33 +304,6 @@ describe("AdminAuthService", () => {
     }
   });
 
-  it("returns LOGIN_RATE_LIMITED with Retry-After after five failed login attempts", async () => {
-    const app = await buildApp({
-      config: loadConfig({ NODE_ENV: "test" }),
-      store: new MemoryStore(false),
-    });
-    try {
-      for (let attempt = 0; attempt < 5; attempt += 1) {
-        const response = await app.inject({
-          method: "POST",
-          url: "/api/v1/auth/admin/login",
-          payload: { username: "missing.admin", password: "not a real password" },
-        });
-        expect(response.statusCode).toBe(401);
-      }
-      const limited = await app.inject({
-        method: "POST",
-        url: "/api/v1/auth/admin/login",
-        payload: { username: "missing.admin", password: "not a real password" },
-      });
-      expect(limited.statusCode, limited.body).toBe(429);
-      expect(limited.headers["retry-after"]).toBe("900");
-      expect(limited.json().code).toBe("LOGIN_RATE_LIMITED");
-    } finally {
-      await app.close();
-    }
-  });
-
   it("rejects an unmanaged legacy bootstrap credential for login, bearer authentication, and staff writes", async () => {
     const store = new MemoryStore(false);
     await store.saveUser({

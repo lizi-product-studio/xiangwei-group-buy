@@ -1,10 +1,19 @@
 import { api, AuthExpiredError, customerAuth, customerErrorMessage } from "../../utils/api";
 import { navigateToCustomerLogin } from "../../utils/auth-navigation";
-import { PageActionCoordinator, isOwnedAuthExpiry } from "../../utils/page-action-coordinator";
+import { PageActionCoordinator, type PageActionGuard } from "../../utils/page-action-coordinator";
 import { PageLoadCoordinator } from "../../utils/page-load-guard";
 
 const loadCoordinator = new PageLoadCoordinator();
 const actionCoordinator = new PageActionCoordinator();
+const initialShows = new WeakSet<object>();
+const visiblePages = new WeakSet<object>();
+const pendingProfileMutations = new WeakMap<object, Promise<unknown>>();
+
+function shouldRecoverMutationExpiry(page: object, error: AuthExpiredError, action: PageActionGuard, mutation?: Promise<unknown>): boolean {
+  return Boolean(mutation && pendingProfileMutations.get(page) === mutation && visiblePages.has(page) &&
+    error.sessionWasCleared && error.requestEpoch === action.epoch &&
+    customerAuth.captureSessionEpoch() === action.epoch + 1);
+}
 
 function emptyProfileData() {
   return {
@@ -17,23 +26,45 @@ function emptyProfileData() {
 }
 
 Page({
-  data: { loading: true, saving: false, error: "", ...emptyProfileData() },
+  data: { loading: true, saving: false, error: "", nameDirty: false, ...emptyProfileData() },
   onLoad() { void this.loadProfile(); },
-  onShow() { loadCoordinator.show(); actionCoordinator.activate(); },
-  onHide() { loadCoordinator.hide(); actionCoordinator.invalidate(); },
-  onUnload() { loadCoordinator.unload(); actionCoordinator.invalidate(); },
+  onShow() {
+    loadCoordinator.show();
+    actionCoordinator.activate();
+    visiblePages.add(this);
+    if (!initialShows.has(this)) { initialShows.add(this); return; }
+    if (!customerAuth.isLoggedIn()) {
+      pendingProfileMutations.delete(this);
+      void this.loadProfile();
+      return;
+    }
+    if (pendingProfileMutations.has(this)) {
+      this.setData({ loading: true, saving: false, error: "" });
+      return;
+    }
+    void this.loadProfile();
+  },
+  onHide() {
+    visiblePages.delete(this);
+    loadCoordinator.hide();
+    actionCoordinator.invalidate();
+    this.setData({ loading: false, saving: false });
+  },
+  onUnload() { visiblePages.delete(this); loadCoordinator.unload(); actionCoordinator.invalidate(); },
   async loadProfile() {
     const loadGuard = loadCoordinator.begin(customerAuth.captureSessionEpoch());
-    this.setData({ loading: true, error: "", ...emptyProfileData() });
+    this.setData({ loading: true, error: "" });
     if (!customerAuth.isLoggedIn()) {
-      this.setData({ loading: false, ...emptyProfileData() });
+      this.setData({ loading: false, nameDirty: false, ...emptyProfileData() });
       navigateToCustomerLogin("profile", "/pages/profile/index");
       return;
     }
     try {
       const profile = await api.getMyProfile();
       if (!loadCoordinator.isCurrent(loadGuard, customerAuth.captureSessionEpoch()) || !customerAuth.isLoggedIn()) return;
-      this.setData({ profileLoaded: true, displayName: profile.displayName ?? "", avatarRef: profile.avatarUrl ?? "", phoneNumber: profile.phoneNumber ?? "未绑定手机号", profileVersion: profile.profileVersion, loading: false });
+      const savedName = profile.displayName ?? "";
+      const keepDraftName = this.data.nameDirty && this.data.displayName !== savedName;
+      this.setData({ profileLoaded: true, displayName: keepDraftName ? this.data.displayName : savedName, nameDirty: keepDraftName, avatarRef: profile.avatarUrl ?? "", phoneNumber: profile.phoneNumber ?? "未绑定手机号", profileVersion: profile.profileVersion, loading: false });
     } catch (error) {
       const ownExpiry = error instanceof AuthExpiredError &&
         error.sessionWasCleared &&
@@ -42,7 +73,7 @@ Page({
       if (!ownExpiry && !loadCoordinator.isCurrent(loadGuard, customerAuth.captureSessionEpoch())) return;
       if (error instanceof AuthExpiredError) {
         if (!ownExpiry || !loadCoordinator.isLive(loadGuard)) return;
-        this.setData({ loading: false, error: "", ...emptyProfileData() });
+        this.setData({ loading: false, error: "", nameDirty: false, ...emptyProfileData() });
         navigateToCustomerLogin("profile", "/pages/profile/index");
         return;
       }
@@ -51,7 +82,7 @@ Page({
       if (loadCoordinator.isCurrent(loadGuard, customerAuth.captureSessionEpoch())) this.setData({ loading: false });
     }
   },
-  onNameInput(event: WechatMiniprogram.Input) { this.setData({ displayName: event.detail.value }); },
+  onNameInput(event: WechatMiniprogram.Input) { this.setData({ displayName: event.detail.value, nameDirty: true }); },
   async saveProfile() {
     const displayName = this.data.displayName.trim();
     if (!displayName) { this.setData({ error: "请输入姓名" }); return; }
@@ -59,20 +90,28 @@ Page({
     const current = () => actionCoordinator.isCurrent(action, customerAuth.captureSessionEpoch()) && customerAuth.isLoggedIn();
     if (!current()) return;
     this.setData({ saving: true, error: "" });
+    let mutation: Promise<unknown> | undefined;
     try {
-      const profile = await api.updateMyProfile({ displayName, avatarUrl: this.data.avatarRef || null, expectedVersion: this.data.profileVersion });
+      const request = api.updateMyProfile({ displayName, avatarUrl: this.data.avatarRef || null, expectedVersion: this.data.profileVersion });
+      mutation = request;
+      pendingProfileMutations.set(this, request);
+      const profile = await request;
       if (!current()) return;
-      this.setData({ profileVersion: profile.profileVersion, displayName: profile.displayName ?? displayName, avatarRef: profile.avatarUrl ?? this.data.avatarRef });
+      this.setData({ profileVersion: profile.profileVersion, displayName: profile.displayName ?? displayName, nameDirty: false, avatarRef: profile.avatarUrl ?? this.data.avatarRef });
       void wx.showToast({ title: "已保存", icon: "success" });
     } catch (error) {
       if (error instanceof AuthExpiredError) {
-        if (!isOwnedAuthExpiry(error, action, customerAuth.captureSessionEpoch()) || !actionCoordinator.isActive(action)) return;
-        this.setData({ saving: false, error: "", ...emptyProfileData() });
+        if (!shouldRecoverMutationExpiry(this, error, action, mutation)) return;
+        this.setData({ loading: false, saving: false, error: "", nameDirty: false, ...emptyProfileData() });
         navigateToCustomerLogin("profile", "/pages/profile/index");
         return;
       }
       if (current()) this.setData({ error: customerErrorMessage(error, "保存失败，请刷新后重试") });
-    } finally { if (current()) this.setData({ saving: false }); }
+    } finally {
+      if (mutation && pendingProfileMutations.get(this) === mutation) pendingProfileMutations.delete(this);
+      if (current()) this.setData({ saving: false });
+      else if (visiblePages.has(this) && customerAuth.isLoggedIn()) void this.loadProfile();
+    }
   },
   async authorizePhone(event: WechatMiniprogram.ButtonGetPhoneNumber) {
     const code = event.detail?.code;
@@ -91,19 +130,27 @@ Page({
     const current = () => actionCoordinator.isCurrent(action, customerAuth.captureSessionEpoch()) && customerAuth.isLoggedIn();
     if (!current()) return;
     this.setData({ saving: true, error: "" });
+    let mutation: Promise<unknown> | undefined;
     try {
-      const profile = await api.rebindMyPhone(code, this.data.profileVersion);
+      const request = api.rebindMyPhone(code, this.data.profileVersion);
+      mutation = request;
+      pendingProfileMutations.set(this, request);
+      const profile = await request;
       if (!current()) return;
       this.setData({ profileVersion: profile.profileVersion, phoneNumber: profile.phoneNumber ?? "已绑定" });
       void wx.showToast({ title: "手机号已更新", icon: "success" });
     } catch (error) {
       if (error instanceof AuthExpiredError) {
-        if (!isOwnedAuthExpiry(error, action, customerAuth.captureSessionEpoch()) || !actionCoordinator.isActive(action)) return;
-        this.setData({ saving: false, error: "", ...emptyProfileData() });
+        if (!shouldRecoverMutationExpiry(this, error, action, mutation)) return;
+        this.setData({ loading: false, saving: false, error: "", nameDirty: false, ...emptyProfileData() });
         navigateToCustomerLogin("profile", "/pages/profile/index");
         return;
       }
       if (current()) this.setData({ error: customerErrorMessage(error, "手机号更新失败，请稍后重试") });
-    } finally { if (current()) this.setData({ saving: false }); }
+    } finally {
+      if (mutation && pendingProfileMutations.get(this) === mutation) pendingProfileMutations.delete(this);
+      if (current()) this.setData({ saving: false });
+      else if (visiblePages.has(this) && customerAuth.isLoggedIn()) void this.loadProfile();
+    }
   },
 });

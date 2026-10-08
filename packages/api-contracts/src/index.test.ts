@@ -72,6 +72,8 @@ describe("public API contracts", () => {
 
   it("requires valid product category names and sortable lifecycle values", () => {
     expect(productCategorySchema.safeParse({ name: "蔬菜" }).success).toBe(true);
+    expect(productCategorySchema.safeParse({ name: "蔬菜" }).success).toBe(true);
+    expect(productCategorySchema.safeParse({ name: "蔬菜", iconKey: "unknown" }).success).toBe(false);
     expect(productCategorySchema.safeParse({ name: "A" }).success).toBe(false);
     expect(productCategorySchema.safeParse({ name: "蔬菜", sortOrder: -1 }).success).toBe(false);
   });

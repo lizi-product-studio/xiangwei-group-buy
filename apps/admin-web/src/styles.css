@@ -449,7 +449,7 @@ nav { display: grid; gap: 16px; }
 .ant-modal .ant-form-item-explain { font-size: 12px; line-height: 1.7; }
 .modal-note { padding: 12px 14px; color: #6e785f; background: #f2f3e9; border-radius: 8px; font-size: 12px; line-height: 1.8; }
 .content .table-actions { white-space: nowrap; }
-.content .table-actions .ant-space { flex-wrap: nowrap; justify-content: flex-end; }
+.content .table-actions .ant-space { display: flex; flex-wrap: nowrap; justify-content: flex-start; gap: 8px !important; }
 .pickup-point-modal .ant-modal-body { max-height: calc(100dvh - 220px); overflow-y: auto; padding-right: 8px; }
 .pickup-point-modal__footer { display: flex; justify-content: flex-end; gap: 12px; }
 .pickup-point-modal__footer .ant-btn { min-width: 88px; }
@@ -517,9 +517,6 @@ nav { display: grid; gap: 16px; }
 .content .ant-btn-text {color:#59645a;}
 .content .ant-btn-dangerous {color:#b42318;}
 .content .ant-card {border-radius:12px;}
-.content .ant-table-cell {text-align:left;}
-.content .table-actions {display:flex;justify-content:flex-end;}
-.content .table-actions .ant-btn {min-width:76px;}
 .page-content-frame {min-height:240px;}
 .neutral-loading-strip {display:flex;min-height:34px;align-items:center;justify-content:flex-end;margin:0 0 10px;padding:4px 8px;}
 .access-loading-shell {max-width:760px;margin:10vh auto;padding:32px;background:var(--paper);border:1px solid var(--line);border-radius:14px;}

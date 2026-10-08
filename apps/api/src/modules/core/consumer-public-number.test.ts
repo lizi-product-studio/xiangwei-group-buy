@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { MemoryStore } from "./store.js";
 import { ensureConsumerPublicNumbers } from "../customers/consumer-directory-service.js";
 
@@ -30,7 +30,8 @@ describe("consumer public number allocation", () => {
       staff: [["staff-user", { userId: "staff-user", staffNo: "S-1" }]],
     }));
 
-    const users = await ensureConsumerPublicNumbers(store);
+    await ensureConsumerPublicNumbers(store);
+    const users = await store.listConsumerUsers();
     expect(users.map((value) => [value.id, value.consumerNumber])).toEqual([
       ["later", 2],
       ["earlier", 1],
@@ -86,5 +87,17 @@ describe("consumer public number allocation", () => {
     await store.saveUser({ id: "employee", wechatOpenId: null, status: "ACTIVE", createdAt: "2026-09-01T00:00:00.000Z" });
     await expect(store.allocateConsumerPublicNumber("employee")).rejects.toMatchObject({ code: "INVALID_STATE_TRANSITION" });
     await expect(store.allocateConsumerPublicNumber("missing")).rejects.toMatchObject({ code: "INVALID_STATE_TRANSITION" });
+  });
+
+  it("repairs missing numbers in bounded pages without listing every consumer", async () => {
+    const store = new MemoryStore(false);
+    for (let index = 0; index < 3; index++) await store.saveUser(consumer(`missing-${index}`, `2026-09-0${index + 1}T00:00:00.000Z`));
+    const unbounded = vi.spyOn(store, "listConsumerUsers").mockRejectedValue(new Error("unbounded consumer scan"));
+    await ensureConsumerPublicNumbers(store);
+    expect(unbounded).not.toHaveBeenCalled();
+    expect(await store.listConsumerUsersMissingPublicNumbers(500)).toEqual([]);
+    const page = await store.searchConsumerUsers("", 1, 10);
+    expect(page.total).toBe(3);
+    expect(page.items.map((user) => user.consumerNumber)).toEqual([1, 2, 3]);
   });
 });

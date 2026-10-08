@@ -19,6 +19,8 @@ interface IAppOption {
   };
 }
 
+interface ProductCategoryDto { id: string; name: string; iconKey: "basket" | "leaf" | "grain" | "beans" | "ready-food" | "seasoning" | "fruit" | "tools"; }
+
 interface CampaignDto {
   id: string;
   title: string;
@@ -32,6 +34,8 @@ interface CampaignDto {
   estimatedArrivalEndAt?: string | null;
   /** 全团已支付订单中的商品件数，由服务端实时汇总。 */
   paidQuantity?: number;
+  groupingMode?: "PER_POINT" | "ALL_POINTS";
+  groupPaidQuantity?: number;
   failureAction: "CANCEL_AND_REFUND" | "POSTPONE";
   minTotalQuantity: number;
   items: Array<{
@@ -72,9 +76,11 @@ interface OrderDto {
   deliveryPlan: DeliveryPlanDto | null;
   status: string;
   totalCents: number;
+  checkoutBatch?: { id: string; totalCents: number; orderCount: number; status: "PENDING_PAYMENT" | "PAID" | "CANCELLED"; expiresAt: string };
   createdAt: string;
   expiresAt: string;
   paidAt: string | null;
+  serverTime?: string;
   pickedUpAt: string | null;
   qualityDeadlineAt?: string | null;
   pickupDeadlineAt?: string | null;
@@ -88,6 +94,7 @@ interface OrderDto {
   }>;
   items: Array<{
     skuId: string;
+    imageUrl?: string | null;
     name: string;
     quantity: number;
     unitPriceCents: number;
@@ -132,6 +139,7 @@ interface OrderDto {
     id: string;
     status: "REGISTERED" | "ACCEPTED" | "REJECTED" | "REFUNDING" | "RESOLVED";
     registeredAt: string;
+    decisionNote?: string | null;
     items: Array<{
       id: string;
       catalogSkuId: string;
@@ -168,6 +176,27 @@ interface OrderDto {
     requestedAt: string;
     refundId: string | null;
   } | null;
+}
+
+interface CheckoutBatchPaymentStatusDto {
+  checkoutBatch: {
+    id: string;
+    status: "PENDING_PAYMENT" | "PAID" | "CANCELLED";
+    totalCents: number;
+    expiresAt: string;
+    expired: boolean;
+    serverTime: string;
+  };
+  orders: Array<{
+    id: string;
+    status: string;
+    totalCents: number;
+    expiresAt: string;
+    paidAt: string | null;
+    pickupPointId: string | null;
+    pickupPointName: string;
+    pickupPointAddress: string;
+  }>;
 }
 
 interface DeliveryPlanDto {

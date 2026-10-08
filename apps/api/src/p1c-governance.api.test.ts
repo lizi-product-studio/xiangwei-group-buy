@@ -650,6 +650,19 @@ describe("P1-C governance API contracts", () => {
       headers: customerService,
     });
     expect(filtered.json().data).toHaveLength(2);
+    expect(filtered.json().pagination).toMatchObject({ page: 1, pageSize: 20, total: 2 });
+    const firstPage = await app.inject({ method: "GET", url: "/api/v1/admin/service-area-interests?page=1&pageSize=1&status=NEW", headers: customerService });
+    expect(firstPage.statusCode).toBe(200);
+    expect(firstPage.json().data).toHaveLength(1);
+    expect(firstPage.json().pagination.total).toBe(1);
+    for (let index = 0; index < 501; index += 1) await store.saveServiceAreaInterest({
+      id: `older-consented-${index}`, userId: "user", regionText: "历史区域", contactName: "历史联系人", contactPhone: "13700000000",
+      privacyVersion: "2026-09-07-phone-v1", privacyConsentedAt: "2025-01-01T00:00:00.000Z", status: "NEW", statusNote: null,
+      statusChangedBy: null, statusChangedAt: null, createdAt: new Date(Date.UTC(2020, 0, index + 1)).toISOString(),
+    });
+    const deepPage = await app.inject({ method: "GET", url: "/api/v1/admin/service-area-interests?page=26&pageSize=20&status=NEW", headers: customerService });
+    expect(deepPage.statusCode).toBe(200);
+    expect(deepPage.json().data.map((value: { id: string }) => value.id)).toContain("older-consented-0");
     const contacted = await app.inject({
       method: "POST",
       url: `/api/v1/admin/service-area-interests/${id}/status`,
@@ -740,7 +753,7 @@ describe("P1-C governance API contracts", () => {
       headers: finance,
     });
     expect(ledger.statusCode).toBe(200);
-    expect(ledger.json().data[0]).toMatchObject({
+    expect(ledger.json().data.items[0]).toMatchObject({
       debitCents: 1600,
       creditCents: 1600,
       isBalanced: true,

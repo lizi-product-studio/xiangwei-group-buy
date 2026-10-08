@@ -11,7 +11,7 @@
   <view class="ui-view product-summary"><view class="ui-view price-row"><text class="ui-text price"><text class="ui-text">¥</text>{{priceText}}</text><text class="ui-text price-tag">团购价</text><text class="ui-text sold">已售 {{product.salesQuantity || 0}} 件</text></view><text class="ui-text product-summary__title">{{product.title}}</text><text class="ui-text product-summary__desc">{{product.skuName}} · 团期集中送达</text></view>
   <view wx:if="{{product.description}}" class="product-introduction"><text class="content-heading">产品介绍</text><text class="content-copy">{{product.description}}</text></view>
   <view class="ui-view group-card">
-    <view class="ui-view group-card__head"><text class="ui-text">本团成团进度</text><text class="ui-text">已支付 {{campaignSoldQuantity}} / {{campaign.minTotalQuantity}} 件</text></view>
+    <view class="ui-view group-card__head"><text class="ui-text">{{campaign.groupingMode === 'ALL_POINTS' ? '所有参与点合计成团' : '本点独立成团'}}</text><text class="ui-text">已支付 {{campaignSoldQuantity}} / {{campaign.minTotalQuantity}} 件</text></view>
     <view class="ui-view progress-track"><view class="ui-view progress-track__value" style="width: {{progressPercent}}%;"></view></view>
     <view class="ui-view time-row"><text class="ui-text">截单时间</text><text class="ui-text">{{cutoffText}}</text></view>
     <view class="ui-view countdown">{{countdownText}}</view>

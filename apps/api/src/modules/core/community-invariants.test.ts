@@ -234,9 +234,9 @@ describe("community safety invariants", () => {
       ...first,
       pickupRequestId: "00000000-0000-4000-8000-000000000002",
     });
-    expect((await store.getOrder("order"))?.status).toBe("PICKED_UP");
+    expect((await store.getOrder("order"))?.status).toBe("COMPLETED");
     expect(await store.listCommunityPickupReceiptsByOrder("order")).toHaveLength(2);
-    expect((await store.listLedgerTransactions("order")).filter((value) => value.eventType === "PICKUP_CONFIRMED")).toHaveLength(1);
+    expect((await store.listLedgerTransactions("order")).filter((value) => value.eventType === "PICKUP_CONFIRMED")).toHaveLength(2);
     vi.useRealTimers();
   });
   it("serializes concurrent different pickup requests and keeps one receipt and ledger fact per request/event", async () => {
@@ -258,13 +258,13 @@ describe("community safety invariants", () => {
         service.verify(command("00000000-0000-4000-8000-000000000011")),
       ])).resolves.toHaveLength(2);
       expect((await store.listOrderLinesByOrderForUpdate("order"))[0]?.pickedUpQuantity).toBe(2);
-      expect((await store.getOrder("order"))?.status).toBe("PICKED_UP");
+      expect((await store.getOrder("order"))?.status).toBe("COMPLETED");
       expect(await store.listCommunityPickupReceiptsByOrder("order")).toHaveLength(2);
-      expect((await store.listLedgerTransactions("order")).filter((value) => value.eventType === "PICKUP_CONFIRMED")).toHaveLength(1);
+      expect((await store.listLedgerTransactions("order")).filter((value) => value.eventType === "PICKUP_CONFIRMED")).toHaveLength(2);
 
       await service.verify(command("00000000-0000-4000-8000-000000000010"));
       expect(await store.listCommunityPickupReceiptsByOrder("order")).toHaveLength(2);
-      expect((await store.listLedgerTransactions("order")).filter((value) => value.eventType === "PICKUP_CONFIRMED")).toHaveLength(1);
+      expect((await store.listLedgerTransactions("order")).filter((value) => value.eventType === "PICKUP_CONFIRMED")).toHaveLength(2);
     } finally {
       vi.useRealTimers();
     }

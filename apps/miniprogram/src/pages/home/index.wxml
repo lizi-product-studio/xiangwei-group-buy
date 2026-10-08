@@ -3,7 +3,7 @@
     <view class="home-safe-top" style="height: {{statusBarHeight}}px"></view>
     <view class="home-brand" style="padding-right: {{menuReserveWidth}}px"><text class="ui-text home-brand__name">乡味集</text><text class="ui-text home-brand__slogan">附近好味道 · 一起带回家</text></view>
     <view class="pickup-card" bindtap="openPickup">
-      <view class="pickup-card__copy"><text class="ui-text pickup-card__eyebrow">当前固定自提点</text><text class="ui-text pickup-card__name">{{pickupPoint ? pickupPoint.name : '选择固定自提点'}}<text class="pickup-card__chevron">›</text></text><text class="ui-text pickup-card__address">{{pickupPoint ? pickupPoint.address : '选择附近真实自提点，查看本期好物'}}</text></view>
+      <view class="pickup-card__copy"><text class="ui-text pickup-card__eyebrow">当前固定自提点</text><text class="ui-text pickup-card__name">{{pickupPoint ? pickupPoint.name : '选择固定自提点'}}<text class="pickup-card__chevron">›</text></text><text wx:if="{{pickupPoint && pickupPoint.displayAddress}}" class="ui-text pickup-card__address">{{pickupPoint.displayAddress}}</text><text wx:elif="{{!pickupPoint}}" class="ui-text pickup-card__address">选择附近真实自提点，查看本期好物</text></view>
       <view wx:if="{{pickupPoint && pickupPoint.photoUrl}}" class="pickup-photo"><product-image src="{{pickupPoint.photoUrl}}" image-mode="aspectFill" label="自提点照片" /></view>
       <view wx:elif="{{pickupPoint}}" class="pickup-photo pickup-photo--empty"><text>暂无点位照片</text></view>
       <view wx:else class="pickup-photo pickup-photo--empty"><text>先选点位</text></view>
@@ -26,12 +26,12 @@
       </view>
     </view>
 
-    <view wx:if="{{allProducts.length}}" class="category-grid" aria-label="商品分类">
+    <view wx:if="{{categoryItems.length > 1}}" class="category-grid" aria-label="商品分类">
       <view wx:for="{{categoryItems}}" wx:key="value" class="category-tile {{activeCategory === item.value ? 'category-tile--active' : ''}}" data-category="{{item.value}}" bindtap="changeCategory">
-        <view class="category-tile__icon"><image wx:if="{{item.icon}}" src="{{item.icon}}" mode="aspectFit"/><text wx:else>{{item.fallback}}</text></view><text class="ui-text category-tile__label">{{item.label}}</text>
+        <view class="category-tile__icon"><image src="{{item.icon}}" mode="aspectFit"/></view><text class="ui-text category-tile__label">{{item.label}}</text>
       </view>
     </view>
-    <view class="shopping-heading"><text class="ui-text shopping-heading__title">正在团购</text><text class="ui-text shopping-heading__note">本期商品 · 固定自提点领取</text></view>
+    <view class="shopping-heading"><text class="ui-text shopping-heading__title">正在团购</text><text class="ui-text shopping-heading__note">{{campaignGroups.length}} 个团期可购 · 各团截单与到货安排独立</text></view>
     <view class="home-search"><text class="search-mark">⌕</text><input value="{{searchQuery}}" placeholder="搜索本期商品" confirm-type="search" bindinput="onSearchInput"/><text wx:if="{{searchQuery}}" class="home-search__clear" catchtap="clearSearch">×</text></view>
 
     <view wx:if="{{loading}}" class="state-card"><text class="state-card__title">正在准备本期好物…</text></view>
@@ -41,13 +41,16 @@
     <view wx:elif="{{!allProducts.length}}" class="state-card"><text class="state-card__title">本期好物正在筹备</text><text class="state-card__copy">已为你记住{{pickupPoint.name}}。开团后，可以在这里查看本期商品。</text><button class="ui-button state-card__button" bindtap="openMessages">查看订单消息</button><button class="ui-button state-card__link" bindtap="openPickup">查看其他自提点</button></view>
     <view wx:elif="{{!campaigns.length}}" class="state-card"><text class="state-card__title">这个分类暂无商品</text><text class="state-card__copy">可以看看其他分类的本期好物。</text><button class="ui-button state-card__button" data-category="全部" bindtap="changeCategory">查看全部好物</button></view>
 
-    <view class="campaign-list"><view wx:for="{{campaigns}}" wx:key="renderKey" class="product-card" data-id="{{item.id}}" data-sku="{{item.skuId}}" bindtap="openCampaign">
-      <view class="product-card__photos">
-        <view wx:if="{{!item.imageUrls.length}}" class="product-photo product-photo--empty"><product-image src="" label="商品图片暂缺" /></view>
-        <view wx:else class="product-photo product-photo--single"><product-image src="{{item.imageUrls[0]}}" refresh-key="{{imageRefreshKey}}" auto-aspect="{{true}}" image-mode="aspectFit" style="height:auto" label="{{item.productTitle}}封面图" /><text wx:if="{{item.imageUrls.length > 1}}" class="product-photo__count">查看{{item.imageUrls.length}}张 ›</text></view>
-      </view>
-      <view class="product-card__body"><view class="product-card__top"><text class="product-card__category">{{item.category}}</text><text wx:if="{{item.origin}}" class="product-card__tag">{{item.origin}}</text></view><text class="ui-text product-card__title">{{item.productTitle}}</text><text wx:if="{{item.description}}" class="ui-text product-card__desc">{{item.description}}</text><text wx:if="{{item.skuName}}" class="ui-text product-card__sku">规格 · {{item.skuName}}</text><view class="product-card__foot"><view class="product-card__price-copy"><text class="ui-text price"><text class="price__currency">¥</text>{{item.priceText}}</text><text class="ui-text price-note">已售 {{item.salesQuantity}} 件</text></view><button class="ui-button buy-button" catchtap="addToCart" data-key="{{item.renderKey}}">加入购物车</button></view></view>
-      <view class="product-card__schedule"><text class="ui-text">截单 {{item.cutoffText}}</text><text class="ui-text">预计到货 {{item.arrivalText}}</text></view>
+    <view class="campaign-list"><view wx:for="{{campaignGroups}}" wx:for-item="campaign" wx:key="id" class="campaign-group">
+      <view class="campaign-group__heading"><view class="campaign-group__title-row"><text class="ui-text campaign-group__title">{{campaign.title}}</text><text class="campaign-group__status">{{campaign.statusText}}</text></view><view class="campaign-group__schedule"><text class="ui-text">截单 {{campaign.cutoffText}}</text><text class="ui-text">预计到货 {{campaign.arrivalText}}</text></view></view>
+      <view class="campaign-group__products"><view wx:for="{{campaign.products}}" wx:for-item="product" wx:key="renderKey" class="product-card" data-id="{{product.id}}" data-sku="{{product.skuId}}" bindtap="openCampaign">
+        <view class="product-card__photos">
+          <view wx:if="{{!product.imageUrls.length}}" class="product-photo product-photo--empty"><product-image src="" label="商品图片暂缺" /></view>
+          <view wx:else class="product-photo product-photo--single"><product-image src="{{product.imageUrls[0]}}" refresh-key="{{imageRefreshKey}}" auto-aspect="{{true}}" image-mode="aspectFit" style="height:auto" label="{{product.productTitle}}封面图" /><text wx:if="{{product.imageUrls.length > 1}}" class="product-photo__count">查看{{product.imageUrls.length}}张 ›</text></view>
+        </view>
+        <view class="product-card__body"><view class="product-card__top"><text class="product-card__category">{{product.category}}</text><text wx:if="{{product.origin}}" class="product-card__tag">{{product.origin}}</text></view><text class="ui-text product-card__title">{{product.productTitle}}</text><text wx:if="{{product.description}}" class="ui-text product-card__desc">{{product.description}}</text><text wx:if="{{product.skuName}}" class="ui-text product-card__sku">规格 · {{product.skuName}}</text><view class="product-card__foot"><view class="product-card__price-copy"><text class="ui-text price"><text class="price__currency">¥</text>{{product.priceText}}</text><text class="ui-text price-note">已售 {{product.salesQuantity}} 件</text></view><button class="ui-button buy-button" catchtap="addToCart" data-key="{{product.renderKey}}">加入购物车</button></view></view>
+      </view></view>
+      <view class="campaign-group__progress"><view class="campaign-group__progress-head"><text class="ui-text campaign-group__mode">{{campaign.groupingModeText}}</text><text class="ui-text campaign-group__quantity">已支付 {{campaign.paidQuantity}} / {{campaign.minimumQuantity}} 件</text></view><view class="campaign-group__track"><view class="campaign-group__track-value" style="width: {{campaign.progressPercent}}%;"></view></view><text class="ui-text campaign-group__hint">{{campaign.progressHint}}</text></view>
     </view></view>
     <view wx:if="{{cartCount > 0}}" class="cart-entry" bindtap="openCart"><text>查看购物车 · {{cartCount}} 件</text><text class="cart-entry__hint">本期商品统一结算 ›</text></view>
   </view>

@@ -4,6 +4,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { MemoryStore } from "./modules/core/store.js";
+import type { PaymentProvider } from "./modules/payments/payment-provider.js";
+import { CampaignService } from "./modules/campaigns/campaign-service.js";
+import { NoopCampaignScheduler } from "./modules/campaigns/campaign-scheduler.js";
+import { OrderService } from "./modules/orders/order-service.js";
 
 const admin = { "x-demo-user-id": "admin", "x-demo-role": "SUPER_ADMIN" };
 const customer = { "x-demo-user-id": "customer", "x-demo-role": "USER" };
@@ -137,6 +141,32 @@ describe("community group-buying API lifecycle", () => {
     return { areaId, pointId, skuId, campaignId, deliveryPlanId };
   }
 
+  async function createSecondPickupCampaign(fixture: Fixture): Promise<Fixture> {
+    const point = await inject({ method: "POST", url: "/api/v1/admin/pickup-points", headers: admin, payload: {
+      serviceAreaId: fixture.areaId, name: "西门社区自提点", address: "西门社区服务站 2 号",
+      businessHours: "09:00-20:00", pickupInstructions: "请出示核销码", latitude: 39.9,
+      longitude: 116.4, contactName: "王店长", contactPhone: "13800000003", capacityPerDay: 300,
+      photoUrl: "https://example.com/west-pickup.jpg",
+    } });
+    expect(point.statusCode, point.body).toBe(201);
+    const pickupPointId = point.json().data.id as string;
+    const cutoffAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const dispatchAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+    const campaign = await inject({ method: "POST", url: "/api/v1/admin/campaigns", headers: admin, payload: {
+      title: "周末社区蔬菜团·西门", serviceAreaId: fixture.areaId, pickupPointId,
+      cutoffAt, dispatchAt,
+      estimatedArrivalStartAt: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(),
+      estimatedArrivalEndAt: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(),
+      minTotalQuantity: 1, failureAction: "CANCEL_AND_REFUND",
+      items: [{ catalogSkuId: fixture.skuId, retailPriceCents: 1900, sellableQuantity: 20 }],
+    } });
+    expect(campaign.statusCode, campaign.body).toBe(201);
+    const campaignId = campaign.json().data.id as string;
+    const opened = await inject({ method: "POST", url: `/api/v1/admin/campaigns/${campaignId}/open`, headers: admin });
+    expect(opened.statusCode, opened.body).toBe(200);
+    return { ...fixture, campaignId, pointId: pickupPointId, deliveryPlanId: campaign.json().data.deliveryPlan.id as string };
+  }
+
   async function createAndPayOrder(fixture: Fixture, quantity = 2) {
     const payload = {
       campaignId: fixture.campaignId,
@@ -228,6 +258,599 @@ describe("community group-buying API lifecycle", () => {
     ).toBe("PAID_WAITING_CLOSE");
     return order as { id: string; orderNo: string };
   }
+
+  it("paginates a consumer order history with a stable cursor and no overlaps", async () => {
+    const fixture = await createOpenCampaign();
+    const created = await Promise.all([
+      createAndPayOrder(fixture, 1),
+      createAndPayOrder(fixture, 1),
+      createAndPayOrder(fixture, 1),
+    ]);
+    const first = await inject({ method: "GET", url: "/api/v1/orders?pageSize=2", headers: customer });
+    expect(first.statusCode, first.body).toBe(200);
+    const firstPage = first.json().data;
+    expect(firstPage.items).toHaveLength(2);
+    expect(firstPage.hasMore).toBe(true);
+    expect(firstPage.nextCursor).toMatchObject({ createdAt: expect.any(String), id: expect.any(String) });
+
+    const second = await inject({
+      method: "GET",
+      url: `/api/v1/orders?pageSize=2&cursorAt=${encodeURIComponent(firstPage.nextCursor.createdAt)}&cursorId=${encodeURIComponent(firstPage.nextCursor.id)}`,
+      headers: customer,
+    });
+    expect(second.statusCode, second.body).toBe(200);
+    const secondPage = second.json().data;
+    expect(secondPage.items).toHaveLength(1);
+    expect(secondPage.hasMore).toBe(false);
+    const ids = [...firstPage.items, ...secondPage.items].map((order) => order.id);
+    expect(new Set(ids).size).toBe(3);
+    expect(ids).toEqual(expect.arrayContaining(created.map((order) => order.id)));
+
+    const legacy = await inject({ method: "GET", url: "/api/v1/orders", headers: customer });
+    expect(legacy.json().data.map((order: { id: string }) => order.id)).toEqual(ids);
+  });
+
+  it("applies consumer status filters before pagination", async () => {
+    const now = Date.now();
+    const ids: string[] = [];
+    for (let index = 0; index < 21; index++) {
+      const id = `status-page-${index}`;
+      ids.push(id);
+      const createdAt = new Date(now - (21 - index) * 60_000).toISOString();
+      await store.saveOrder({
+        id, orderNo: `STATUS-PAGE-${index}`, userId: "customer", campaignId: `campaign-${index}`,
+        serviceAreaId: "area", pickupPointId: "point", deliveryPlanId: "plan",
+        status: index === 0 ? "READY_FOR_PICKUP" : "CANCELLED", totalCents: 100,
+        items: [], createdAt, expiresAt: createdAt, paidAt: createdAt, pickedUpAt: null,
+      });
+    }
+
+    const ready = await inject({ method: "GET", url: "/api/v1/orders?pageSize=1&filter=READY", headers: customer });
+    expect(ready.statusCode, ready.body).toBe(200);
+    expect(ready.json().data.items.map((order: { id: string }) => order.id)).toEqual([ids[0]]);
+    expect(ready.json().data.hasMore).toBe(false);
+
+    const after = await inject({ method: "GET", url: "/api/v1/orders?pageSize=2&filter=AFTER", headers: customer });
+    expect(after.statusCode, after.body).toBe(200);
+    expect(after.json().data.items).toHaveLength(2);
+    expect(after.json().data.items.every((order: { status: string }) => order.status === "CANCELLED")).toBe(true);
+    expect(after.json().data.hasMore).toBe(true);
+
+    const qualityOrders = [
+      { id: "status-page-quality-order-open", status: "PICKED_UP" as const, caseStatus: "REGISTERED" as const, userId: "customer" },
+      { id: "status-page-quality-order-resolved", status: "COMPLETED" as const, caseStatus: "RESOLVED" as const, userId: "customer" },
+      { id: "status-page-quality-order-other-user", status: "COMPLETED" as const, caseStatus: "REGISTERED" as const, userId: "another-customer" },
+    ];
+    for (const [index, value] of qualityOrders.entries()) {
+      const qualityCreatedAt = new Date(now + index + 1).toISOString();
+      const userId = value.userId;
+      await store.saveOrder({
+        id: value.id, orderNo: `STATUS-PAGE-${value.id}`, userId, campaignId: "campaign-quality",
+        serviceAreaId: "area", pickupPointId: "point", deliveryPlanId: "plan",
+        status: value.status, totalCents: 100, items: [], createdAt: qualityCreatedAt,
+        expiresAt: qualityCreatedAt, paidAt: qualityCreatedAt, pickedUpAt: qualityCreatedAt,
+      });
+      await store.saveCommunityQualityCase({
+        id: `case-${value.id}`, orderId: value.id, userId,
+        clientRequestId: `request-${value.id}`, payloadHash: `hash-${value.id}`,
+        status: value.caseStatus, registeredAt: qualityCreatedAt, acceptedBy: null, acceptedAt: null,
+        acceptanceNote: null, decisionBy: null, decidedAt: null, decisionNote: null,
+        refundApprovedBy: null, refundApprovedAt: null, financeExecutedBy: null,
+        financeExecutedAt: null, refundExceptionId: null, items: [],
+      });
+    }
+    const afterWithQualityCase = await inject({ method: "GET", url: "/api/v1/orders?pageSize=2&filter=AFTER", headers: customer });
+    expect(afterWithQualityCase.statusCode, afterWithQualityCase.body).toBe(200);
+    const afterPageOne = afterWithQualityCase.json().data;
+    expect(afterPageOne.items.map((order: { id: string }) => order.id)).toEqual([
+      "status-page-quality-order-resolved", "status-page-quality-order-open",
+    ]);
+    expect(afterWithQualityCase.json().data.hasMore).toBe(true);
+    const afterPageTwo = await inject({
+      method: "GET",
+      url: `/api/v1/orders?pageSize=2&filter=AFTER&cursorAt=${encodeURIComponent(afterPageOne.nextCursor.createdAt)}&cursorId=${afterPageOne.nextCursor.id}`,
+      headers: customer,
+    });
+    expect(afterPageTwo.statusCode, afterPageTwo.body).toBe(200);
+    expect(afterPageTwo.json().data.items.map((order: { id: string }) => order.id)).not.toContain("status-page-quality-order-other-user");
+    expect(afterPageTwo.json().data.items.map((order: { id: string }) => order.id)).not.toContain("status-page-quality-order-open");
+  });
+
+  it("opens and closes an all-points campaign as one cutoff and counts paid units once", async () => {
+    const fixture = await createOpenCampaign();
+    const secondPoint = await inject({ method: "POST", url: "/api/v1/admin/pickup-points", headers: admin, payload: {
+      serviceAreaId: fixture.areaId, name: "西门合计自提点", address: "西门社区服务站 2 号",
+      businessHours: "09:00-20:00", pickupInstructions: "请出示核销码", latitude: 39.9,
+      longitude: 116.4, contactName: "王店长", contactPhone: "13800000003", capacityPerDay: 300,
+      photoUrl: "https://example.com/west-pickup.jpg",
+    } });
+    expect(secondPoint.statusCode, secondPoint.body).toBe(201);
+    const secondPointId = secondPoint.json().data.id as string;
+    const cutoffAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const groupResponse = await inject({ method: "POST", url: "/api/v1/admin/campaign-groups", headers: admin, payload: {
+      title: "社区多点合计活动", cutoffAt, groupingMode: "ALL_POINTS", minTotalQuantity: 2,
+      failureAction: "CANCEL_AND_REFUND",
+      points: [
+        { pickupPointId: fixture.pointId, dispatchAt: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(), estimatedArrivalStartAt: null, estimatedArrivalEndAt: null },
+        { pickupPointId: secondPointId, dispatchAt: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(), estimatedArrivalStartAt: null, estimatedArrivalEndAt: null },
+      ],
+      items: [{ catalogSkuId: fixture.skuId, retailPriceCents: 1500, stockByPoint: [
+        { pickupPointId: fixture.pointId, sellableQuantity: 5 },
+        { pickupPointId: secondPointId, sellableQuantity: 5 },
+      ] }],
+    } });
+    expect(groupResponse.statusCode, groupResponse.body).toBe(201);
+    const group = groupResponse.json().data.group as { id: string };
+    const members = groupResponse.json().data.campaigns as Array<{ id: string; status: string }>;
+    expect(members).toHaveLength(2);
+    expect(members.every((member) => member.status === "DRAFT")).toBe(true);
+
+    const opened = await inject({ method: "POST", url: `/api/v1/admin/campaigns/${members[0]!.id}/open`, headers: admin });
+    expect(opened.statusCode, opened.body).toBe(200);
+    expect((await store.listCampaigns()).filter((campaign) => campaign.campaignGroupId === group.id).map((campaign) => campaign.status)).toEqual(["OPEN", "OPEN"]);
+
+    const publicCampaign = await inject({ method: "GET", url: `/api/v1/campaigns/${members[0]!.id}` });
+    expect(publicCampaign.json().data).toMatchObject({ groupingMode: "ALL_POINTS", paidQuantity: 0 });
+    const paidOrder = await createAndPayOrder({ ...fixture, campaignId: members[0]!.id }, 2);
+    const closed = await inject({ method: "POST", url: `/api/v1/admin/campaigns/${members[1]!.id}/close`, headers: admin, payload: { reason: "联合截单测试" } });
+    expect(closed.statusCode, closed.body).toBe(200);
+    const after = (await store.listCampaigns()).filter((campaign) => campaign.campaignGroupId === group.id);
+    expect(after.map((campaign) => campaign.status)).toEqual(["LOCKED", "LOCKED"]);
+    const paidAfterClose = await store.getOrder(paidOrder.id);
+    expect(paidAfterClose?.status).toBe("LOCKED");
+    expect((await store.getCampaignGroup(group.id))?.status).toBe("LOCKED");
+  });
+
+  it("counts refund-in-progress units at cutoff until the provider confirms success", async () => {
+    const fixture = await createOpenCampaign();
+    const campaign = await store.getCampaign(fixture.campaignId);
+    expect(campaign).not.toBeNull();
+    expect(await store.updateCampaign({ ...campaign!, minTotalQuantity: 2, version: campaign!.version + 1 }, campaign!.version)).toBe(true);
+    const refundingOrder = await createAndPayOrder(fixture, 1);
+    const ordinaryOrder = await createAndPayOrder(fixture, 1);
+    const payment = await store.getPaymentByOrder(refundingOrder.id);
+    expect(payment).not.toBeNull();
+    await store.saveOrderStatus({ ...(await store.getOrder(refundingOrder.id))!, status: "REFUNDING" });
+    await store.savePayment({ ...payment!, status: "REFUNDING" });
+    await store.saveOrderRefund({
+      id: `pending-close-refund-${refundingOrder.id}`, orderId: refundingOrder.id, paymentId: payment!.id,
+      providerRefundNo: `PENDING-CLOSE-${refundingOrder.id}`, providerRefundId: null,
+      status: "PROCESSING", amountCents: payment!.amountCents, createdAt: new Date().toISOString(),
+      submissionLeaseUntil: null, submissionClaimToken: null,
+    });
+
+    expect([...(await store.getNetSalesQuantities(fixture.campaignId)).values()].reduce((sum, value) => sum + value, 0)).toBeGreaterThanOrEqual(2);
+    await closeCampaign(fixture.campaignId);
+    expect((await store.getCampaign(fixture.campaignId))?.status).toBe("LOCKED");
+    expect((await store.getOrder(refundingOrder.id))?.status).toBe("REFUNDING");
+    expect((await store.getOrder(ordinaryOrder.id))?.status).toBe("LOCKED");
+
+    await store.saveOrderRefund({ ...(await store.getOrderRefundByProviderNo(`PENDING-CLOSE-${refundingOrder.id}`))!, status: "FAILED" });
+    expect([... (await store.getNetSalesQuantities(fixture.campaignId)).values()].reduce((sum, value) => sum + value, 0)).toBeGreaterThanOrEqual(2);
+    await store.saveOrderRefund({ ...(await store.getOrderRefundByProviderNo(`PENDING-CLOSE-${refundingOrder.id}`))!, status: "SUCCEEDED" });
+    expect([... (await store.getNetSalesQuantities(fixture.campaignId)).values()].reduce((sum, value) => sum + value, 0)).toBe(1);
+    expect((await store.getCampaign(fixture.campaignId))?.status).toBe("LOCKED");
+  });
+
+  it("excludes refunded sales and permits only one shared postponement when every point fails", async () => {
+    const fixture = await createOpenCampaign();
+    const secondPoint = await inject({ method: "POST", url: "/api/v1/admin/pickup-points", headers: admin, payload: {
+      serviceAreaId: fixture.areaId, name: "独立门槛二号点", address: "北侧服务站 3 号",
+      businessHours: "09:00-20:00", pickupInstructions: "请出示核销码", latitude: 39.91,
+      longitude: 116.41, contactName: "李店长", contactPhone: "13800000004", capacityPerDay: 300,
+      photoUrl: "https://example.com/north-pickup.jpg",
+    } });
+    expect(secondPoint.statusCode, secondPoint.body).toBe(201);
+    const secondPointId = secondPoint.json().data.id as string;
+    const cutoffAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const created = await inject({ method: "POST", url: "/api/v1/admin/campaign-groups", headers: admin, payload: {
+      title: "社区多点独立活动", cutoffAt, groupingMode: "PER_POINT", minTotalQuantity: 2,
+      failureAction: "POSTPONE",
+      points: [
+        { pickupPointId: fixture.pointId, dispatchAt: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(), estimatedArrivalStartAt: null, estimatedArrivalEndAt: null },
+        { pickupPointId: secondPointId, dispatchAt: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(), estimatedArrivalStartAt: null, estimatedArrivalEndAt: null },
+      ],
+      items: [{ catalogSkuId: fixture.skuId, retailPriceCents: 1500, stockByPoint: [
+        { pickupPointId: fixture.pointId, sellableQuantity: 5 },
+        { pickupPointId: secondPointId, sellableQuantity: 5 },
+      ] }],
+    } });
+    expect(created.statusCode, created.body).toBe(201);
+    const groupId = created.json().data.group.id as string;
+    const members = created.json().data.campaigns as Array<{ id: string }>;
+    const opened = await inject({ method: "POST", url: `/api/v1/admin/campaigns/${members[0]!.id}/open`, headers: admin });
+    expect(opened.statusCode, opened.body).toBe(200);
+    const paidOrder = await createAndPayOrder({ ...fixture, campaignId: members[0]!.id }, 2);
+    const orderAfterPartialRefund = await store.getOrder(paidOrder.id);
+    expect(orderAfterPartialRefund).not.toBeNull();
+    await store.saveOrderStatus({ ...orderAfterPartialRefund!, status: "REFUNDED" });
+    const succeededPayment = await store.getPaymentByOrder(paidOrder.id);
+    expect(succeededPayment).not.toBeNull();
+    await store.saveOrderRefund({
+      id: `test-success-refund-${paidOrder.id}`, orderId: paidOrder.id, paymentId: succeededPayment!.id,
+      providerRefundNo: `TEST-SUCCESS-${paidOrder.id}`, providerRefundId: `provider-success-${paidOrder.id}`,
+      status: "SUCCEEDED", amountCents: succeededPayment!.amountCents, createdAt: new Date().toISOString(),
+      submissionLeaseUntil: null, submissionClaimToken: null,
+    });
+    const progressAfterRefund = await inject({ method: "GET", url: `/api/v1/campaigns/${members[0]!.id}` });
+    expect(progressAfterRefund.json().data.paidQuantity).toBe(0);
+
+    const firstClose = await inject({ method: "POST", url: `/api/v1/admin/campaigns/${members[0]!.id}/close`, headers: admin, payload: { reason: "首轮未成团" } });
+    expect(firstClose.statusCode, firstClose.body).toBe(200);
+    expect((await store.getCampaignGroup(groupId))?.status).toBe("POSTPONED");
+    expect((await store.listCampaigns()).filter((campaign) => campaign.campaignGroupId === groupId).map((campaign) => campaign.status)).toEqual(["POSTPONED", "POSTPONED"]);
+    expect((await store.getOrder(paidOrder.id))?.status).toBe("REFUNDED");
+
+    const newCutoffAt = new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString();
+    const rescheduled = await inject({ method: "POST", url: `/api/v1/admin/campaign-groups/${groupId}/postpone`, headers: admin, payload: {
+      cutoffAt: newCutoffAt,
+      points: [
+        { campaignId: members[0]!.id, dispatchAt: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(), estimatedArrivalStartAt: null, estimatedArrivalEndAt: null },
+        { campaignId: members[1]!.id, dispatchAt: new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString(), estimatedArrivalStartAt: null, estimatedArrivalEndAt: null },
+      ],
+    } });
+    expect(rescheduled.statusCode, rescheduled.body).toBe(200);
+    expect((await store.getCampaignGroup(groupId))?.postponementCount).toBe(1);
+    const secondClose = await inject({ method: "POST", url: `/api/v1/admin/campaigns/${members[1]!.id}/close`, headers: admin, payload: { reason: "顺延后仍未达标" } });
+    expect(secondClose.statusCode, secondClose.body).toBe(200);
+    expect((await store.getCampaignGroup(groupId))?.status).toBe("CANCELLED");
+    expect((await store.getOrder(paidOrder.id))?.status).toBe("REFUNDED");
+  });
+
+  it("keeps a formed independent point locked while only a failed point is postponed and cancelled", async () => {
+    const fixture = await createOpenCampaign();
+    const secondPoint = await inject({ method: "POST", url: "/api/v1/admin/pickup-points", headers: admin, payload: {
+      serviceAreaId: fixture.areaId, name: "独立成团二号点", address: "北侧服务站 4 号",
+      businessHours: "09:00-20:00", pickupInstructions: "请出示核销码", latitude: 39.92,
+      longitude: 116.42, contactName: "赵店长", contactPhone: "13800000005", capacityPerDay: 300,
+      photoUrl: "https://example.com/north-pickup-2.jpg",
+    } });
+    expect(secondPoint.statusCode, secondPoint.body).toBe(201);
+    const secondPointId = secondPoint.json().data.id as string;
+    const cutoffAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const created = await inject({ method: "POST", url: "/api/v1/admin/campaign-groups", headers: admin, payload: {
+      title: "独立点位分别结算", cutoffAt, groupingMode: "PER_POINT", minTotalQuantity: 2,
+      failureAction: "POSTPONE",
+      points: [
+        { pickupPointId: fixture.pointId, dispatchAt: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(), estimatedArrivalStartAt: null, estimatedArrivalEndAt: null },
+        { pickupPointId: secondPointId, dispatchAt: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(), estimatedArrivalStartAt: null, estimatedArrivalEndAt: null },
+      ],
+      items: [{ catalogSkuId: fixture.skuId, retailPriceCents: 1500, stockByPoint: [
+        { pickupPointId: fixture.pointId, sellableQuantity: 5 },
+        { pickupPointId: secondPointId, sellableQuantity: 5 },
+      ] }],
+    } });
+    expect(created.statusCode, created.body).toBe(201);
+    const groupId = created.json().data.group.id as string;
+    const members = created.json().data.campaigns as Array<{ id: string }>;
+    expect((await inject({ method: "POST", url: `/api/v1/admin/campaigns/${members[0]!.id}/open`, headers: admin })).statusCode).toBe(200);
+    const formedOrder = await createAndPayOrder({ ...fixture, campaignId: members[0]!.id }, 2);
+    const linkedDetail = await inject({ method: "GET", url: `/api/v1/admin/orders/${formedOrder.id}`, headers: admin });
+    expect(linkedDetail.statusCode, linkedDetail.body).toBe(200);
+    expect(linkedDetail.json().data.id).toBe(formedOrder.id);
+
+    const closed = await inject({ method: "POST", url: `/api/v1/admin/campaigns/${members[1]!.id}/close`, headers: admin, payload: { reason: "逐点独立结算" } });
+    expect(closed.statusCode, closed.body).toBe(200);
+    expect((await store.listCampaigns()).filter((campaign) => campaign.campaignGroupId === groupId).map((campaign) => campaign.status)).toEqual(["LOCKED", "POSTPONED"]);
+    expect((await store.getOrder(formedOrder.id))?.status).toBe("LOCKED");
+    expect((await store.getCampaignGroup(groupId))?.status).toBe("PARTIAL");
+
+    const failedPointCutoffAt = new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString();
+    const rescheduled = await inject({ method: "POST", url: `/api/v1/admin/campaign-groups/${groupId}/postpone`, headers: admin, payload: {
+      cutoffAt: failedPointCutoffAt,
+      points: [{ campaignId: members[1]!.id, dispatchAt: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(), estimatedArrivalStartAt: null, estimatedArrivalEndAt: null }],
+    } });
+    expect(rescheduled.statusCode, rescheduled.body).toBe(200);
+    expect((await store.getCampaign(members[0]!.id))?.status).toBe("LOCKED");
+    expect((await store.getCampaign(members[1]!.id))?.status).toBe("OPEN");
+
+    const secondClose = await inject({ method: "POST", url: `/api/v1/admin/campaigns/${members[1]!.id}/close`, headers: admin, payload: { reason: "失败点位再次未达标" } });
+    expect(secondClose.statusCode, secondClose.body).toBe(200);
+    expect((await store.getCampaign(members[0]!.id))?.status).toBe("LOCKED");
+    expect((await store.getCampaign(members[1]!.id))?.status).toBe("CANCELLED");
+    expect((await store.getCampaignGroup(groupId))?.status).toBe("PARTIAL");
+    expect((await store.getOrder(formedOrder.id))?.status).toBe("LOCKED");
+  });
+
+  it("allows only one concurrent checkout to reserve the last unit in a grouped point", async () => {
+    const fixture = await createOpenCampaign();
+    const secondPoint = await inject({ method: "POST", url: "/api/v1/admin/pickup-points", headers: admin, payload: {
+      serviceAreaId: fixture.areaId, name: "并发库存二号点", address: "北侧服务站 8 号",
+      businessHours: "09:00-20:00", pickupInstructions: "请出示核销码", latitude: 39.93,
+      longitude: 116.43, contactName: "孙店长", contactPhone: "13800000008", capacityPerDay: 300,
+      photoUrl: "https://example.com/concurrent-pickup.jpg",
+    } });
+    expect(secondPoint.statusCode, secondPoint.body).toBe(201);
+    const secondPointId = secondPoint.json().data.id as string;
+    const cutoffAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const group = await inject({ method: "POST", url: "/api/v1/admin/campaign-groups", headers: admin, payload: {
+      title: "同点最后库存并发", cutoffAt, groupingMode: "ALL_POINTS", minTotalQuantity: 1,
+      failureAction: "CANCEL_AND_REFUND",
+      points: [
+        { pickupPointId: fixture.pointId, dispatchAt: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(), estimatedArrivalStartAt: null, estimatedArrivalEndAt: null },
+        { pickupPointId: secondPointId, dispatchAt: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(), estimatedArrivalStartAt: null, estimatedArrivalEndAt: null },
+      ],
+      items: [{ catalogSkuId: fixture.skuId, retailPriceCents: 1500, stockByPoint: [
+        { pickupPointId: fixture.pointId, sellableQuantity: 1 },
+        { pickupPointId: secondPointId, sellableQuantity: 1 },
+      ] }],
+    } });
+    expect(group.statusCode, group.body).toBe(201);
+    const members = group.json().data.campaigns as Array<{ id: string }>;
+    const opened = await inject({ method: "POST", url: `/api/v1/admin/campaigns/${members[0]!.id}/open`, headers: admin });
+    expect(opened.statusCode, opened.body).toBe(200);
+    const createCheckout = (key: string) => inject({ method: "POST", url: "/api/v1/order-checkouts", headers: { ...customer, "idempotency-key": key }, payload: {
+      groups: [{ campaignId: members[0]!.id, serviceAreaId: fixture.areaId, pickupPointId: fixture.pointId, items: [{ skuId: fixture.skuId, quantity: 1 }] }],
+    } });
+    const outcomes = await Promise.all([createCheckout("group-last-stock-001"), createCheckout("group-last-stock-002")]);
+    expect(outcomes.map((response) => response.statusCode).sort()).toEqual([201, 409]);
+    expect((await store.getCampaignItem(members[0]!.id, fixture.skuId))?.reservedQuantity).toBe(1);
+    expect((await store.listOrdersByCampaign(members[0]!.id)).filter((order) => order.status === "PENDING_PAYMENT")).toHaveLength(1);
+  });
+
+  it("creates an idempotent multi-point checkout and pays its independent orders once", async () => {
+    const paymentProvider: PaymentProvider = {
+      name: "wechat",
+      initiate: async (order) => ({ providerPaymentId: "prepay-batch", clientPayload: { package: `prepay_id=${order.orderNo}` }, providerContext: { outTradeNo: order.orderNo } }),
+      parseNotification: (rawBody) => {
+        const value = JSON.parse(rawBody) as { eventId: string; type: string; orderNo: string; providerPaymentId: string; amountCents: number };
+        return { ...value, bodyHash: rawBody };
+      },
+      refund: async () => ({ providerRefundId: "batch-refund", status: "SUCCEEDED" }),
+      queryRefund: async () => ({ providerRefundId: "batch-refund", status: "SUCCEEDED" }),
+      parseRefundNotification: () => { throw new Error("unused"); },
+    };
+    await app.close();
+    app = await buildApp({ config: loadConfig({ NODE_ENV: "test" }), store, paymentProvider });
+    const first = await createOpenCampaign();
+    const second = await createSecondPickupCampaign(first);
+    const payload = { groups: [
+      { campaignId: first.campaignId, serviceAreaId: first.areaId, pickupPointId: first.pointId, items: [{ skuId: first.skuId, quantity: 2 }] },
+      { campaignId: second.campaignId, serviceAreaId: second.areaId, pickupPointId: second.pointId, items: [{ skuId: second.skuId, quantity: 3 }] },
+    ] };
+    const headers = { ...customer, "idempotency-key": "multi-pickup-checkout-001" };
+    const created = await inject({ method: "POST", url: "/api/v1/order-checkouts", headers, payload });
+    expect(created.statusCode, created.body).toBe(201);
+    const value = created.json().data;
+    expect(value.orders).toHaveLength(2);
+    expect(value.checkoutBatch.totalCents).toBe(8700);
+    expect(new Set(value.orders.map((order: { pickupPointId: string }) => order.pickupPointId)).size).toBe(2);
+    const pendingStatus = await inject({ method: "GET", url: `/api/v1/order-checkouts/${value.checkoutBatch.id}`, headers: customer });
+    expect(pendingStatus.statusCode, pendingStatus.body).toBe(200);
+    expect(pendingStatus.json().data.checkoutBatch).toMatchObject({
+      id: value.checkoutBatch.id,
+      status: "PENDING_PAYMENT",
+      totalCents: 8700,
+      expired: false,
+    });
+    expect(pendingStatus.json().data.orders).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: value.orders[0].id, status: "PENDING_PAYMENT", pickupPointId: first.pointId, pickupPointName: "东门社区自提点" }),
+      expect.objectContaining({ id: value.orders[1].id, status: "PENDING_PAYMENT", pickupPointId: second.pointId, pickupPointName: "西门社区自提点" }),
+    ]));
+    expect(pendingStatus.json().data.checkoutBatch).not.toHaveProperty("outTradeNo");
+    expect(pendingStatus.json().data.orders[0]).not.toHaveProperty("userId");
+    const anonymousStatus = await inject({ method: "GET", url: `/api/v1/order-checkouts/${value.checkoutBatch.id}` });
+    expect(anonymousStatus.statusCode).toBe(401);
+    await store.saveUser({ id: "other-customer", wechatOpenId: "openid-other", status: "ACTIVE", createdAt: new Date().toISOString() });
+    const otherCustomerStatus = await inject({ method: "GET", url: `/api/v1/order-checkouts/${value.checkoutBatch.id}`, headers: { "x-demo-user-id": "other-customer", "x-demo-role": "USER" } });
+    expect(otherCustomerStatus.statusCode).toBe(404);
+    const missingStatus = await inject({ method: "GET", url: "/api/v1/order-checkouts/00000000-0000-4000-8000-000000000000", headers: customer });
+    expect(missingStatus.statusCode).toBe(404);
+    const replay = await inject({ method: "POST", url: "/api/v1/order-checkouts", headers, payload });
+    expect(replay.statusCode, replay.body).toBe(201);
+    expect(replay.json().data.checkoutBatch.id).toBe(value.checkoutBatch.id);
+    expect(replay.json().data.orders.map((order: { id: string }) => order.id)).toEqual(value.orders.map((order: { id: string }) => order.id));
+    const payment = await inject({ method: "POST", url: `/api/v1/order-checkouts/${value.checkoutBatch.id}/pay`, headers: customer });
+    expect(payment.statusCode, payment.body).toBe(200);
+    const callback = { eventId: "multi-pickup-payment-event", type: "TRANSACTION.SUCCESS", orderNo: value.checkoutBatch.outTradeNo, providerPaymentId: "wechat-batch-transaction", amountCents: 8700 };
+    const wrongAmount = await inject({ method: "POST", url: "/api/v1/payments/wechat/notify", payload: { ...callback, eventId: "multi-pickup-wrong-amount", amountCents: 8701 } });
+    expect(wrongAmount.statusCode).toBe(409);
+    const confirmed = await inject({ method: "POST", url: "/api/v1/payments/wechat/notify", payload: callback });
+    expect(confirmed.statusCode, confirmed.body).toBe(200);
+    const duplicate = await inject({ method: "POST", url: "/api/v1/payments/wechat/notify", payload: callback });
+    expect(duplicate.statusCode).toBe(200);
+    const orders = await inject({ method: "GET", url: "/api/v1/orders", headers: customer });
+    const paid = orders.json().data.filter((order: { id: string }) => value.orders.some((createdOrder: { id: string }) => createdOrder.id === order.id));
+    expect(paid).toHaveLength(2);
+    expect(paid.every((order: { status: string }) => order.status === "PAID_WAITING_CLOSE")).toBe(true);
+    expect(paid.every((order: { checkoutBatch?: { orderCount: number } }) => order.checkoutBatch?.orderCount === 2)).toBe(true);
+    const paidStatus = await inject({ method: "GET", url: `/api/v1/order-checkouts/${value.checkoutBatch.id}`, headers: customer });
+    expect(paidStatus.statusCode, paidStatus.body).toBe(200);
+    expect(paidStatus.json().data.checkoutBatch.status).toBe("PAID");
+    expect(paidStatus.json().data.orders.every((order: { status: string }) => order.status === "PAID_WAITING_CLOSE")).toBe(true);
+    expect(await store.listLedgerTransactions()).toHaveLength(2);
+  });
+
+  it("reports an expired pending checkout from the database clock without mutating it", async () => {
+    const fixture = await createOpenCampaign();
+    const created = await inject({ method: "POST", url: "/api/v1/order-checkouts", headers: { ...customer, "idempotency-key": "multi-point-status-expired-001" }, payload: { groups: [
+      { campaignId: fixture.campaignId, serviceAreaId: fixture.areaId, pickupPointId: fixture.pointId, items: [{ skuId: fixture.skuId, quantity: 1 }] },
+    ] } });
+    expect(created.statusCode, created.body).toBe(201);
+    const batch = created.json().data.checkoutBatch;
+    const current = await store.getCheckoutBatch(batch.id);
+    expect(current).not.toBeNull();
+    await store.saveCheckoutBatch({ ...current!, expiresAt: new Date(Date.now() - 1_000).toISOString() });
+
+    const status = await inject({ method: "GET", url: `/api/v1/order-checkouts/${batch.id}`, headers: customer });
+    expect(status.statusCode, status.body).toBe(200);
+    expect(status.json().data.checkoutBatch).toMatchObject({ status: "PENDING_PAYMENT", expired: true });
+    expect(Date.parse(status.json().data.checkoutBatch.serverTime)).toBeGreaterThanOrEqual(Date.parse(status.json().data.checkoutBatch.expiresAt));
+    expect((await store.getCheckoutBatch(batch.id))?.status).toBe("PENDING_PAYMENT");
+  });
+
+  it("rolls back all reservations when one multi-point group is unavailable", async () => {
+    const first = await createOpenCampaign();
+    const second = await createSecondPickupCampaign(first);
+    const response = await inject({ method: "POST", url: "/api/v1/order-checkouts", headers: { ...customer, "idempotency-key": "multi-pickup-checkout-002" }, payload: { groups: [
+      { campaignId: first.campaignId, serviceAreaId: first.areaId, pickupPointId: first.pointId, items: [{ skuId: first.skuId, quantity: 2 }] },
+      { campaignId: second.campaignId, serviceAreaId: second.areaId, pickupPointId: second.pointId, items: [{ skuId: second.skuId, quantity: 999 }] },
+    ] } });
+    expect(response.statusCode).toBe(409);
+    expect(await store.listOrdersByUser("customer")).toHaveLength(0);
+    expect((await store.getCampaign(first.campaignId))?.items[0]?.reservedQuantity).toBe(0);
+  });
+
+  it("cancels the whole unpaid batch when one campaign closes and refunds a racing late success", async () => {
+    let releaseInitiation!: () => void;
+    let markInitiationStarted!: () => void;
+    const initiationStarted = new Promise<void>((resolve) => { markInitiationStarted = resolve; });
+    const initiationGate = new Promise<void>((resolve) => { releaseInitiation = resolve; });
+    const paymentProvider: PaymentProvider = {
+      name: "wechat",
+      initiate: async (order) => {
+        markInitiationStarted();
+        await initiationGate;
+        return { providerPaymentId: "prepay-racing", clientPayload: { package: `prepay_id=${order.orderNo}` }, providerContext: { outTradeNo: order.orderNo } };
+      },
+      parseNotification: (rawBody) => {
+        const value = JSON.parse(rawBody) as { eventId: string; type: string; orderNo: string; providerPaymentId: string; amountCents: number };
+        return { ...value, bodyHash: rawBody };
+      },
+      refund: async () => ({ providerRefundId: "late-refund", status: "SUCCEEDED" }),
+      queryRefund: async () => ({ providerRefundId: "late-refund", status: "SUCCEEDED" }),
+      parseRefundNotification: () => { throw new Error("unused"); },
+    };
+    await app.close();
+    app = await buildApp({ config: loadConfig({ NODE_ENV: "test" }), store, paymentProvider });
+    const first = await createOpenCampaign();
+    const second = await createSecondPickupCampaign(first);
+    const created = await inject({ method: "POST", url: "/api/v1/order-checkouts", headers: { ...customer, "idempotency-key": "multi-point-close-race-001" }, payload: { groups: [
+      { campaignId: first.campaignId, serviceAreaId: first.areaId, pickupPointId: first.pointId, items: [{ skuId: first.skuId, quantity: 2 }] },
+      { campaignId: second.campaignId, serviceAreaId: second.areaId, pickupPointId: second.pointId, items: [{ skuId: second.skuId, quantity: 3 }] },
+    ] } });
+    expect(created.statusCode, created.body).toBe(201);
+    const batch = created.json().data.checkoutBatch;
+    const childOrders = created.json().data.orders as Array<{ id: string }>;
+
+    const inFlightPay = inject({ method: "POST", url: `/api/v1/order-checkouts/${batch.id}/pay`, headers: customer });
+    await initiationStarted;
+    const closed = await inject({ method: "POST", url: `/api/v1/admin/campaigns/${first.campaignId}/close`, headers: admin, payload: { reason: "关闭首个点位团期" } });
+    expect(closed.statusCode, closed.body).toBe(200);
+    expect((await store.getCheckoutBatch(batch.id))?.status).toBe("CANCELLED");
+    for (const order of childOrders) expect((await store.getOrder(order.id))?.status).toBe("CANCELLED");
+    expect((await store.getCampaignItem(first.campaignId, first.skuId))?.reservedQuantity).toBe(0);
+    expect((await store.getCampaignItem(second.campaignId, second.skuId))?.reservedQuantity).toBe(0);
+    const retry = await inject({ method: "POST", url: `/api/v1/order-checkouts/${batch.id}/pay`, headers: customer });
+    expect(retry.statusCode).toBe(409);
+
+    releaseInitiation();
+    const initiationResult = await inFlightPay;
+    expect(initiationResult.statusCode).toBe(409);
+    const lateSuccess = await inject({ method: "POST", url: "/api/v1/payments/wechat/notify", payload: {
+      eventId: "multi-point-close-late-success", type: "TRANSACTION.SUCCESS", orderNo: batch.outTradeNo,
+      providerPaymentId: "wx-late-success", amountCents: 8700,
+    } });
+    expect(lateSuccess.statusCode, lateSuccess.body).toBe(200);
+    for (const order of childOrders) {
+      expect((await store.getOrder(order.id))?.status).toBe("REFUNDING");
+      expect(await store.getOrderRefundByOrder(order.id)).toMatchObject({ amountCents: expect.any(Number), status: "CREATED" });
+    }
+  });
+
+  it("cancels a grouped checkout at cutoff and records a late successful payment as refund work", async () => {
+    let releaseInitiation!: () => void;
+    let markInitiationStarted!: () => void;
+    const initiationStarted = new Promise<void>((resolve) => { markInitiationStarted = resolve; });
+    const initiationGate = new Promise<void>((resolve) => { releaseInitiation = resolve; });
+    const paymentProvider: PaymentProvider = {
+      name: "wechat",
+      initiate: async (order) => {
+        markInitiationStarted();
+        await initiationGate;
+        return { providerPaymentId: "group-prepay-racing", clientPayload: { package: `prepay_id=${order.orderNo}` }, providerContext: { outTradeNo: order.orderNo } };
+      },
+      parseNotification: (rawBody) => {
+        const value = JSON.parse(rawBody) as { eventId: string; type: string; orderNo: string; providerPaymentId: string; amountCents: number };
+        return { ...value, bodyHash: rawBody };
+      },
+      refund: async () => ({ providerRefundId: "group-late-refund", status: "SUCCEEDED" }),
+      queryRefund: async () => ({ providerRefundId: "group-late-refund", status: "SUCCEEDED" }),
+      parseRefundNotification: () => { throw new Error("unused"); },
+    };
+    await app.close();
+    app = await buildApp({ config: loadConfig({ NODE_ENV: "test" }), store, paymentProvider });
+    const fixture = await createOpenCampaign();
+    const secondPoint = await inject({ method: "POST", url: "/api/v1/admin/pickup-points", headers: admin, payload: {
+      serviceAreaId: fixture.areaId, name: "团期关单竞争二号点", address: "北侧服务站 10 号",
+      businessHours: "09:00-20:00", pickupInstructions: "请出示核销码", latitude: 39.94,
+      longitude: 116.44, contactName: "陈店长", contactPhone: "13800000010", capacityPerDay: 300,
+      photoUrl: "https://example.com/group-cutoff-pickup.jpg",
+    } });
+    expect(secondPoint.statusCode, secondPoint.body).toBe(201);
+    const secondPointId = secondPoint.json().data.id as string;
+    const cutoffAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const group = await inject({ method: "POST", url: "/api/v1/admin/campaign-groups", headers: admin, payload: {
+      title: "团期截单与迟到支付并发", cutoffAt, groupingMode: "ALL_POINTS", minTotalQuantity: 2,
+      failureAction: "CANCEL_AND_REFUND",
+      points: [
+        { pickupPointId: fixture.pointId, dispatchAt: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(), estimatedArrivalStartAt: null, estimatedArrivalEndAt: null },
+        { pickupPointId: secondPointId, dispatchAt: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(), estimatedArrivalStartAt: null, estimatedArrivalEndAt: null },
+      ],
+      items: [{ catalogSkuId: fixture.skuId, retailPriceCents: 1500, stockByPoint: [
+        { pickupPointId: fixture.pointId, sellableQuantity: 2 },
+        { pickupPointId: secondPointId, sellableQuantity: 2 },
+      ] }],
+    } });
+    expect(group.statusCode, group.body).toBe(201);
+    const members = group.json().data.campaigns as Array<{ id: string }>;
+    expect((await inject({ method: "POST", url: `/api/v1/admin/campaigns/${members[0]!.id}/open`, headers: admin })).statusCode).toBe(200);
+    const checkout = await inject({ method: "POST", url: "/api/v1/order-checkouts", headers: { ...customer, "idempotency-key": "group-cutoff-late-pay-01" }, payload: {
+      groups: [{ campaignId: members[0]!.id, serviceAreaId: fixture.areaId, pickupPointId: fixture.pointId, items: [{ skuId: fixture.skuId, quantity: 1 }] }],
+    } });
+    expect(checkout.statusCode, checkout.body).toBe(201);
+    const batch = checkout.json().data.checkoutBatch;
+    const child = checkout.json().data.orders[0] as { id: string };
+    const inFlightPay = inject({ method: "POST", url: `/api/v1/order-checkouts/${batch.id}/pay`, headers: customer });
+    await initiationStarted;
+    const closed = await inject({ method: "POST", url: `/api/v1/admin/campaigns/${members[1]!.id}/close`, headers: admin, payload: { reason: "统一活动截单" } });
+    expect(closed.statusCode, closed.body).toBe(200);
+    expect((await store.getCampaignGroup(group.json().data.group.id))?.status).toBe("CANCELLED");
+    expect((await store.getCheckoutBatch(batch.id))?.status).toBe("CANCELLED");
+    expect((await store.getOrder(child.id))?.status).toBe("CANCELLED");
+    releaseInitiation();
+    expect((await inFlightPay).statusCode).toBe(409);
+    const lateSuccess = await inject({ method: "POST", url: "/api/v1/payments/wechat/notify", payload: {
+      eventId: "group-cutoff-late-success", type: "TRANSACTION.SUCCESS", orderNo: batch.outTradeNo,
+      providerPaymentId: "group-wx-late-success", amountCents: 1500,
+    } });
+    expect(lateSuccess.statusCode, lateSuccess.body).toBe(200);
+    expect((await store.getOrder(child.id))?.status).toBe("REFUNDING");
+    expect(await store.getOrderRefundByOrder(child.id)).toMatchObject({ amountCents: 1500, status: "CREATED" });
+  });
+
+  it("repairs a pending batch with an already-cancelled child when its remaining order expires", async () => {
+    const first = await createOpenCampaign();
+    const second = await createSecondPickupCampaign(first);
+    const created = await inject({ method: "POST", url: "/api/v1/order-checkouts", headers: { ...customer, "idempotency-key": "multi-point-expiry-recovery-001" }, payload: { groups: [
+      { campaignId: first.campaignId, serviceAreaId: first.areaId, pickupPointId: first.pointId, items: [{ skuId: first.skuId, quantity: 2 }] },
+      { campaignId: second.campaignId, serviceAreaId: second.areaId, pickupPointId: second.pointId, items: [{ skuId: second.skuId, quantity: 3 }] },
+    ] } });
+    expect(created.statusCode, created.body).toBe(201);
+    const batch = created.json().data.checkoutBatch;
+    const orders = created.json().data.orders as Array<{ id: string; campaignId: string; items: Array<{ skuId: string; quantity: number }> }>;
+    const firstOrder = orders.find((order) => order.campaignId === first.campaignId)!;
+    const secondOrder = orders.find((order) => order.campaignId === second.campaignId)!;
+    expect(await store.cancelPendingOrder(firstOrder.id)).toBe(true);
+    for (const item of firstOrder.items)
+      expect(await store.releaseCampaignInventory(first.campaignId, item.skuId, item.quantity)).toBe(true);
+    for (const order of orders) {
+      const current = await store.getOrder(order.id);
+      await store.saveOrder({ ...current!, expiresAt: new Date(Date.now() - 1000).toISOString() });
+    }
+
+    const campaigns = new CampaignService(store, new NoopCampaignScheduler());
+    const orderService = new OrderService(store, campaigns);
+    expect(await orderService.expirePendingOrders()).toBe(1);
+    expect((await store.getOrder(firstOrder.id))?.status).toBe("CANCELLED");
+    expect((await store.getOrder(secondOrder.id))?.status).toBe("CANCELLED");
+    expect((await store.getCheckoutBatch(batch.id))?.status).toBe("CANCELLED");
+    const status = await inject({ method: "GET", url: `/api/v1/order-checkouts/${batch.id}`, headers: customer });
+    expect(status.statusCode, status.body).toBe(200);
+    expect(status.json().data.checkoutBatch.status).toBe("CANCELLED");
+    expect(status.json().data.orders.every((order: { status: string }) => order.status === "CANCELLED")).toBe(true);
+    expect((await store.getCampaignItem(second.campaignId, second.skuId))?.reservedQuantity).toBe(0);
+  });
 
   async function closeCampaign(campaignId: string) {
     const closed = await inject({

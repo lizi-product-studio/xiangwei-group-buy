@@ -8,9 +8,9 @@ import {
   Modal,
   Select,
   Space,
-  Table,
   Tag,
 } from "antd";
+import { AdminTable as Table } from "./admin-table.tsx";
 import { PlusOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { api, type Campaign, type HomepageBanner, type ProductCategory, type ServiceArea } from "./api.ts";

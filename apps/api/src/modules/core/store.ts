@@ -4,8 +4,10 @@ import type {
   AuditLog,
   AuthSession,
   Campaign,
+  CampaignGroup,
   CampaignItem,
   CatalogSku,
+  CheckoutBatch,
   CommunityAllocationDraft,
   CommunityCancellationRequest,
   CommunityDeliveryConfirmation,
@@ -26,6 +28,7 @@ import type {
   OrderRefund,
   PartialRefund,
   Payment,
+  PaymentBatch,
   PasswordChangeToken,
   PickupCredential,
   PickupPoint,
@@ -39,10 +42,18 @@ import type {
 } from "./types.js";
 import { getCurrentInternalWriteActor } from "../auth/internal-write-context.js";
 import { BusinessError, moneyCents } from "@hometown/domain";
+import { productCategoryIconKeys } from "@hometown/api-contracts";
+import type { ReconciliationBill, ReconciliationReview } from "./historical-reconciliation.js";
 
 export const STORE_READ_METHODS: ReadonlySet<string> = new Set([
   "findUserByWechatOpenId",
   "listConsumerUsers",
+  "getUsersByIds",
+  "searchConsumerUsers",
+  "findConsumerUserByPublicNumber",
+  "findOtherConsumerUserByPhone",
+  "listConsumerUsersMissingPublicNumbers",
+  "hasDuplicateConsumerPublicNumbers",
   "getUser",
   "getActiveAuthSession",
   "getPrivacyConsent",
@@ -63,6 +74,12 @@ export const STORE_READ_METHODS: ReadonlySet<string> = new Set([
   "listHomepageBanners",
   "getHomepageBanner",
   "listCampaigns",
+  "listCampaignGroups",
+  "getCampaignGroup",
+  "listCampaignsByStatus",
+  "countCampaignsByServiceAreaStatuses",
+  "countActiveCampaignReferencesForCatalogSku",
+  "countInProgressDeliveryForPickupPoint",
   "getCampaign",
   "hasCampaignBusinessReferences",
   "getCampaignItem",
@@ -70,13 +87,24 @@ export const STORE_READ_METHODS: ReadonlySet<string> = new Set([
   "listOrdersByCampaign",
   "listOrdersByUser",
   "listOrders",
+  "searchOrders",
+  "countOrdersByStatus",
+  "listPickupCodeCandidates",
+  "getNetSalesQuantities",
   "listExpiredPendingOrders",
   "getOrder",
   "getOrderByNo",
   "listOrderLinesByCampaign",
   "listOrderDeliveryFacts",
   "getPaymentByOrder",
+  "getCheckoutBatch",
+  "getCheckoutBatchByOrder",
+  "getPaymentBatchByCheckoutBatch",
+  "getCheckoutBatch",
+  "getCheckoutBatchByOrder",
+  "getPaymentBatchByCheckoutBatch",
   "getOrderRefundByOrder",
+  "getOrderRefund",
   "getOrderRefundByProviderNo",
   "listOrderRefunds",
   "listPendingOrderRefunds",
@@ -88,16 +116,22 @@ export const STORE_READ_METHODS: ReadonlySet<string> = new Set([
   "listPartialRefundsByException",
   "listPendingPartialRefunds",
   "listLedgerTransactions",
+  "listFinanceRefundPage",
+  "listFinanceLedgerPage",
   "findLatestAudit",
   "listAuditLogs",
   "getDeliveryPlan",
   "getDeliveryPlanByCampaign",
   "listDeliveryPlans",
+  "listDeliveryPlansByCampaigns",
   "getDispatchBatch",
   "listDispatchBatches",
   "getPickupCredential",
+  "getCommunityPickupWindow",
+  "listExpiredAuthenticationData",
   "listCommunityPickupReceipts",
   "listCommunityPickupReceiptsByOrder",
+  "listPickupReceiptOrderPage",
   "getCommunityDeliveryConfirmationByBatch",
   "getFulfillmentException",
   "listFulfillmentExceptions",
@@ -113,6 +147,7 @@ export const STORE_READ_METHODS: ReadonlySet<string> = new Set([
   "listCommunityQualityCasesByOrder",
   "getServiceAreaInterest",
   "listServiceAreaInterests",
+  "listServiceAreaInterestPage",
   "listServiceAreaInterestsByUser",
   "getOrderNotification",
   "listOrderNotificationsByUser",
@@ -124,6 +159,7 @@ export const STORE_READ_METHODS: ReadonlySet<string> = new Set([
 export interface IdempotencyRecord {
   fingerprint: string;
   orderId: string;
+  checkoutBatchId?: string;
 }
 export interface OrderDeliveryFacts {
   partialRefunds: PartialRefund[];
@@ -144,6 +180,7 @@ export interface NewOrderLine {
   quantity: number;
   unitPriceCents: number;
   amountCents: number;
+  imageUrl?: string | null;
 }
 
 export interface OperationsQueueTypes {
@@ -160,24 +197,86 @@ export interface OperationsQueueQuery {
   allowedStatuses?: readonly string[];
   sourceStage?: "PICKUP_ARRIVAL" | "CUSTOMER_CLAIM" | undefined;
 }
+export interface StoreOrderSearchQuery {
+  userId?: string | undefined;
+  beforeCreatedAt?: string | undefined;
+  beforeId?: string | undefined;
+  status?: string | undefined;
+  statuses?: readonly string[] | undefined;
+  /** Include associated quality-aftercare orders alongside the selected statuses. */
+  includeCommunityQualityCases?: boolean | undefined;
+  excludeStatuses?: readonly string[] | undefined;
+  campaignId?: string | undefined;
+  pickupPointId?: string | undefined;
+  serviceAreaId?: string | undefined;
+  catalogSkuId?: string | undefined;
+  orderNo?: string | undefined;
+  from?: string | undefined;
+  to?: string | undefined;
+  dateType?: "CREATED_AT" | "PAID_AT" | undefined;
+  keyword?: string | undefined;
+  page?: number | undefined;
+  pageSize?: number | undefined;
+}
+export interface StoreOrderSearchPage {
+  items: Order[];
+  total: number;
+  page: number;
+  pageSize: number;
+  hasMore?: boolean;
+  nextCursor?: { createdAt: string; id: string } | null;
+}
+export interface ConsumerSearchPage {
+  items: User[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+export interface PickupReceiptOrderPage {
+  items: Array<{ receipt: CommunityPickupReceipt; order: Order }>;
+  total: number;
+  page: number;
+  pageSize: number;
+}
+export interface PickupCodeCandidate {
+  order: Order;
+  codeHash: string;
+}
 export interface OperationsQueuePage<T> {
   items: T[];
   total: number;
   page: number;
   pageSize: number;
 }
+export interface ServiceAreaInterestPageQuery { page: number; pageSize: number; status?: ServiceAreaInterest["status"] }
+export type ServiceAreaInterestPage = OperationsQueuePage<ServiceAreaInterest>;
+
+export interface FinanceRefundPageQuery { limit: number; status?: string; orderId?: string; reference?: string; cursor?: string }
+export interface FinanceRefundPage { items: Array<(OrderRefund | PartialRefund) & { refundType: "FULL" | "PARTIAL" }>; total: number; nextCursor: string | null; pageSize: number }
+export interface FinanceLedgerPageQuery { limit: number; referenceId?: string; cursor?: string }
+export interface FinanceLedgerPage { items: LedgerTransaction[]; total: number; nextCursor: string | null; pageSize: number }
 
 /** The complete persistence boundary for the single community group-buy product. */
 export interface CommerceStore {
+  listFinanceRefundPage(query: FinanceRefundPageQuery): Promise<FinanceRefundPage>;
+  listFinanceLedgerPage(query: FinanceLedgerPageQuery): Promise<FinanceLedgerPage>;
+  getAggregatePayloadStatus?(): { payloadBytes: number | null; tier: "ok" | "warning" | "critical" };
   readSnapshot<T>(work: (store: CommerceStore) => Promise<T>): Promise<T>;
   listOperationsQueue<K extends keyof OperationsQueueTypes>(kind: K, query: OperationsQueueQuery): Promise<OperationsQueuePage<OperationsQueueTypes[K]>>;
   transaction<T>(work: (store: CommerceStore) => Promise<T>): Promise<T>;
   health(): Promise<"ok">;
   databaseNow(): Promise<string>;
   close(): Promise<void>;
+  getPersistenceMode?(): Promise<"LEGACY" | "PREPARED" | "ENTITY">;
   findUserByWechatOpenId(openId: string): Promise<User | null>;
   getUser(id: string): Promise<User | null>;
   listConsumerUsers(): Promise<User[]>;
+  getUsersByIds(ids: readonly string[]): Promise<User[]>;
+  searchConsumerUsers(query: string, page: number, pageSize: number): Promise<ConsumerSearchPage>;
+  findConsumerUserByPublicNumber(number: number): Promise<User | null>;
+  findOtherConsumerUserByPhone(phone: string, excludeUserId: string): Promise<User | null>;
+  listConsumerUsersMissingPublicNumbers(limit: number): Promise<User[]>;
+  hasDuplicateConsumerPublicNumbers(): Promise<boolean>;
   allocateConsumerPublicNumber(userId: string): Promise<number>;
   saveUser(value: User): Promise<void>;
   savePrivacyConsent(userId: string, documentVersion: string): Promise<void>;
@@ -191,6 +290,8 @@ export interface CommerceStore {
   deleteAuthSession(tokenHash: string): Promise<void>;
   deleteAuthSessionsByUser(userId: string): Promise<void>;
   getPasswordChangeToken(tokenHash: string): Promise<PasswordChangeToken | null>;
+  listExpiredAuthenticationData(now: string, limit: number): Promise<{ sessions: string[]; passwordChangeTokens: string[] }>;
+  deleteExpiredAuthenticationData(now: string, sessions: string[], passwordChangeTokens: string[]): Promise<number>;
   savePasswordChangeToken(value: PasswordChangeToken): Promise<void>;
   deletePasswordChangeToken(tokenHash: string): Promise<void>;
   findAdminCredential(username: string): Promise<AdminCredential | null>;
@@ -242,6 +343,15 @@ export interface CommerceStore {
   saveHomepageBanner(value: HomepageBanner): Promise<void>;
   deleteHomepageBanner(id: string, expectedVersion: number): Promise<boolean>;
   listCampaigns(): Promise<Campaign[]>;
+  listCampaignGroups(): Promise<CampaignGroup[]>;
+  getCampaignGroup(id: string): Promise<CampaignGroup | null>;
+  saveCampaignGroup(value: CampaignGroup): Promise<void>;
+  updateCampaignGroup(value: CampaignGroup, expectedVersion: number): Promise<boolean>;
+  /** Campaigns in the given statuses only; avoids reading campaign history. */
+  listCampaignsByStatus(statuses: readonly string[]): Promise<Campaign[]>;
+  countCampaignsByServiceAreaStatuses(serviceAreaId: string, statuses: readonly string[]): Promise<number>;
+  countActiveCampaignReferencesForCatalogSku(catalogSkuId: string, statuses: readonly string[]): Promise<number>;
+  countInProgressDeliveryForPickupPoint(pickupPointId: string, planStatuses: readonly string[], campaignStatuses: readonly string[]): Promise<number>;
   getCampaign(id: string): Promise<Campaign | null>;
   getCampaignForUpdate(id: string): Promise<Campaign | null>;
   saveCampaign(value: Campaign): Promise<void>;
@@ -282,11 +392,26 @@ export interface CommerceStore {
   listOrdersByCampaign(campaignId: string): Promise<Order[]>;
   listOrdersByUser(userId: string): Promise<Order[]>;
   listOrders(limit: number): Promise<Order[]>;
+  searchOrders(query: StoreOrderSearchQuery): Promise<StoreOrderSearchPage>;
+  countOrdersByStatus(statuses?: readonly string[], excludeStatuses?: readonly string[]): Promise<number>;
+  listPickupCodeCandidates(pickupPointId: string, codeHash: string, orderNo?: string): Promise<PickupCodeCandidate[]>;
+  getNetSalesQuantities(campaignId?: string): Promise<Map<string, number>>;
+  listPickupReceiptOrderPage(pickupPointIds: readonly string[], orderNo: string | undefined, page: number, pageSize: number): Promise<PickupReceiptOrderPage>;
   listExpiredPendingOrders(now: string, limit: number): Promise<Order[]>;
   getOrder(id: string): Promise<Order | null>;
   getOrderForUpdate(id: string): Promise<Order | null>;
   getOrderByNo(orderNo: string): Promise<Order | null>;
   getOrderByNoForUpdate(orderNo: string): Promise<Order | null>;
+  getCheckoutBatch(id: string): Promise<CheckoutBatch | null>;
+  getCheckoutBatchForUpdate(id: string): Promise<CheckoutBatch | null>;
+  getCheckoutBatchByOrder(orderId: string): Promise<CheckoutBatch | null>;
+  getCheckoutBatchByOutTradeNoForUpdate(outTradeNo: string): Promise<CheckoutBatch | null>;
+  saveCheckoutBatch(value: CheckoutBatch): Promise<void>;
+  getCheckoutBatch(id: string): Promise<CheckoutBatch | null>;
+  getCheckoutBatchForUpdate(id: string): Promise<CheckoutBatch | null>;
+  getCheckoutBatchByOrder(orderId: string): Promise<CheckoutBatch | null>;
+  getCheckoutBatchByOutTradeNoForUpdate(outTradeNo: string): Promise<CheckoutBatch | null>;
+  saveCheckoutBatch(value: CheckoutBatch): Promise<void>;
   saveOrder(value: Order): Promise<void>;
   saveOrderStatus(value: Order): Promise<void>;
   transitionOrderStatus(
@@ -305,6 +430,14 @@ export interface CommerceStore {
   listOrderDeliveryFacts(orderIds: string[]): Promise<OrderDeliveryFacts>;
   getPaymentByOrder(orderId: string): Promise<Payment | null>;
   getPaymentByOrderForUpdate(orderId: string): Promise<Payment | null>;
+  getPaymentBatchByCheckoutBatch(checkoutBatchId: string): Promise<PaymentBatch | null>;
+  getPaymentBatchForUpdate(checkoutBatchId: string): Promise<PaymentBatch | null>;
+  savePaymentBatch(value: PaymentBatch): Promise<void>;
+  savePaymentBatchIfInitiationClaimed(value: PaymentBatch, token: string): Promise<boolean>;
+  getPaymentBatchByCheckoutBatch(checkoutBatchId: string): Promise<PaymentBatch | null>;
+  getPaymentBatchForUpdate(checkoutBatchId: string): Promise<PaymentBatch | null>;
+  savePaymentBatch(value: PaymentBatch): Promise<void>;
+  savePaymentBatchIfInitiationClaimed(value: PaymentBatch, token: string): Promise<boolean>;
   savePayment(value: Payment): Promise<void>;
   savePaymentIfStatus(
     value: Payment,
@@ -316,6 +449,7 @@ export interface CommerceStore {
   ): Promise<boolean>;
   claimPaymentCallback(eventId: string, bodyHash: string): Promise<boolean>;
   getOrderRefundByOrder(orderId: string): Promise<OrderRefund | null>;
+  getOrderRefund(id: string): Promise<OrderRefund | null>;
   getOrderRefundByProviderNo(
     providerRefundNo: string,
   ): Promise<OrderRefund | null>;
@@ -377,6 +511,8 @@ export interface CommerceStore {
   getDeliveryPlan(id: string): Promise<DeliveryPlan | null>;
   getDeliveryPlanByCampaign(campaignId: string): Promise<DeliveryPlan | null>;
   listDeliveryPlans(): Promise<DeliveryPlan[]>;
+  /** Delivery plans belonging to the given campaigns only. */
+  listDeliveryPlansByCampaigns(campaignIds: readonly string[]): Promise<DeliveryPlan[]>;
   saveDeliveryPlan(value: DeliveryPlan): Promise<void>;
   getDispatchBatch(id: string): Promise<DispatchBatch | null>;
   listDispatchBatches(): Promise<DispatchBatch[]>;
@@ -432,6 +568,7 @@ export interface CommerceStore {
   getCommunityPickupWindowForUpdate(
     orderId: string,
   ): Promise<CommunityPickupWindow | null>;
+  getCommunityPickupWindow(orderId: string): Promise<CommunityPickupWindow | null>;
   saveCommunityPickupWindow(value: CommunityPickupWindow): Promise<void>;
   listCommunityPickupWindowsPastDeadline(
     now: string,
@@ -480,6 +617,7 @@ export interface CommerceStore {
   saveServiceAreaInterest(value: ServiceAreaInterest): Promise<void>;
   getServiceAreaInterest(id: string): Promise<ServiceAreaInterest | null>;
   listServiceAreaInterests(limit: number): Promise<ServiceAreaInterest[]>;
+  listServiceAreaInterestPage(query: ServiceAreaInterestPageQuery): Promise<ServiceAreaInterestPage>;
   listServiceAreaInterestsByUser(
     userId: string,
   ): Promise<ServiceAreaInterest[]>;
@@ -549,6 +687,7 @@ interface MemoryState {
   credentials: Map<string, AdminCredential>;
   roles: Map<string, Role[]>;
   accessRoles: Map<string, AccessRole>;
+  deletedAccessRoleIds: Set<string>;
   staff: Map<string, InternalStaff>;
   staffPoints: Map<string, StaffPickupPointAssignment>;
   areas: Map<string, ServiceArea>;
@@ -557,10 +696,13 @@ interface MemoryState {
   categories: Map<string, ProductCategory>;
   homepageBanners: Map<string, HomepageBanner>;
   campaigns: Map<string, Campaign>;
+  campaignGroups: Map<string, CampaignGroup>;
   idempotency: Map<string, IdempotencyRecord>;
   orders: Map<string, Order>;
+  checkoutBatches: Map<string, CheckoutBatch>;
   lines: Map<string, StoredLine[]>;
   payments: Map<string, Payment>;
+  paymentBatches: Map<string, PaymentBatch>;
   callbacks: Map<string, string>;
   orderRefunds: Map<string, OrderRefund>;
   partialRefunds: Map<string, PartialRefund>;
@@ -581,6 +723,8 @@ interface MemoryState {
   interests: Map<string, ServiceAreaInterest>;
   notifications: Map<string, OrderNotification>;
   preferences: Map<string, NotificationPreference>;
+  reconciliationBills: Map<string, ReconciliationBill>;
+  reconciliationReviews: Map<string, ReconciliationReview>;
 }
 const emptyState = (): MemoryState => ({
   users: new Map(),
@@ -590,6 +734,7 @@ const emptyState = (): MemoryState => ({
   credentials: new Map(),
   roles: new Map(),
   accessRoles: new Map(),
+  deletedAccessRoleIds: new Set(),
   staff: new Map(),
   staffPoints: new Map(),
   areas: new Map(),
@@ -598,10 +743,13 @@ const emptyState = (): MemoryState => ({
   categories: new Map(),
   homepageBanners: new Map(),
   campaigns: new Map(),
+  campaignGroups: new Map(),
   idempotency: new Map(),
   orders: new Map(),
+  checkoutBatches: new Map(),
   lines: new Map(),
   payments: new Map(),
+  paymentBatches: new Map(),
   callbacks: new Map(),
   orderRefunds: new Map(),
   partialRefunds: new Map(),
@@ -622,14 +770,23 @@ const emptyState = (): MemoryState => ({
   interests: new Map(),
   notifications: new Map(),
   preferences: new Map(),
+  reconciliationBills: new Map(),
+  reconciliationReviews: new Map(),
 });
 const clone = <T>(value: T): T => structuredClone(value);
 const newest = <T extends { createdAt: string }>(values: T[]): T[] =>
-  values.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  values.sort((a, b) => {
+    const timestampOrder = b.createdAt.localeCompare(a.createdAt);
+    if (timestampOrder) return timestampOrder;
+    const aId = "id" in a && typeof a.id === "string" ? a.id : "";
+    const bId = "id" in b && typeof b.id === "string" ? b.id : "";
+    return bId.localeCompare(aId);
+  });
 
 /** Deterministic, transaction-serialised adapter for tests and local development. */
 export class MemoryStore implements CommerceStore {
   protected data = emptyState();
+  private auditDedupeKeys = new Set<string>();
   private transactionTail: Promise<void> = Promise.resolve();
   private controlledDatabaseNow: string | null = null;
   public constructor(seed = false) {
@@ -708,6 +865,20 @@ export class MemoryStore implements CommerceStore {
         estimatedArrivalEndAt: campaign.estimatedArrivalEndAt ?? "",
       });
     }
+    for (const [id, rawCategory] of next.categories) {
+      const category = rawCategory as ProductCategory;
+      const legacyName = `${category.id} ${category.name}`.toLocaleLowerCase();
+      const legacyIconKey = category.iconKey ? undefined : (
+        /蔬菜|青菜|绿叶|vegetable/.test(legacyName) ? "leaf" :
+        /水果|果品|fruit/.test(legacyName) ? "fruit" :
+        /熟食|熟制|即食|ready.?food/.test(legacyName) ? "ready-food" :
+        /工具|农具|五金|tool/.test(legacyName) ? "tools" :
+        "basket"
+      );
+      const iconKey = productCategoryIconKeys.includes(category.iconKey) ? category.iconKey :
+        legacyIconKey ?? "basket";
+      next.categories.set(id, { ...category, iconKey });
+    }
     // Add P1-C governance facts lazily so existing MySQL aggregate documents
     // remain readable during the rollout instead of producing partial records.
     for (const [id, rawCase] of next.quality) {
@@ -744,6 +915,48 @@ export class MemoryStore implements CommerceStore {
       });
     }
     this.data = next;
+    this.auditDedupeKeys = new Set(next.audits.map((value) => JSON.stringify([value.requestId, value.action])));
+  }
+  /** Internal adapter hook: merge only the entity rows loaded by a persistent store. */
+  public importEntityRows(collection: string, entries: Array<[string, unknown]>): void {
+    const state = JSON.parse(this.exportState()) as Record<string, unknown>;
+    const current = state[collection];
+    if (Array.isArray(current) && collection === "audits") {
+      const merged = new Map<string, unknown>();
+      for (const value of current) {
+        const audit = value as AuditLog;
+        merged.set(JSON.stringify([audit.requestId, audit.action]), audit);
+      }
+      for (const [, value] of entries) {
+        const audit = value as AuditLog;
+        merged.set(JSON.stringify([audit.requestId, audit.action]), value);
+      }
+      state[collection] = [...merged.values()];
+    } else if (collection === "pickupRecords") {
+      state[collection] = [...new Set([...(Array.isArray(current) ? current : []), ...entries.map(([, value]) => value)])];
+    } else if (collection === "deletedAccessRoleIds") {
+      state[collection] = [...new Set([...(Array.isArray(current) ? current as string[] : []), ...entries.map(([key]) => key)])];
+    } else {
+      const merged = new Map<string, unknown>(Array.isArray(current) ? current as Array<[string, unknown]> : []);
+      for (const [key, value] of entries) merged.set(key, value);
+      state[collection] = [...merged.entries()];
+    }
+    this.importState(JSON.stringify(state));
+  }
+  /** Internal adapter hook: return a stable serialized view of one in-memory collection. */
+  public exportEntityRows(collection: string): Array<[string, unknown]> {
+    const state = JSON.parse(this.exportState()) as Record<string, unknown>;
+    const value = state[collection];
+    if (collection === "audits") {
+      return (Array.isArray(value) ? value as AuditLog[] : []).map((audit) => [JSON.stringify([audit.requestId, audit.action]), audit]);
+    }
+    if (collection === "pickupRecords") {
+      return (Array.isArray(value) ? value as string[] : []).map((record) => [record, record]);
+    }
+    if (collection === "deletedAccessRoleIds") {
+      return (Array.isArray(value) ? value as string[] : []).map((id) => [id, id]);
+    }
+    return Array.isArray(value) ? value as Array<[string, unknown]> : [];
   }
   public async readSnapshot<T>(work: (store: CommerceStore) => Promise<T>): Promise<T> {
     const snapshot = new MemoryStore(false);
@@ -813,6 +1026,7 @@ export class MemoryStore implements CommerceStore {
       return await work(this);
     } catch (error) {
       this.data = snapshot;
+      this.auditDedupeKeys = new Set(snapshot.audits.map((value) => JSON.stringify([value.requestId, value.action])));
       throw error;
     } finally {
       release();
@@ -831,6 +1045,7 @@ export class MemoryStore implements CommerceStore {
     this.controlledDatabaseNow = value;
   }
   public async close() {}
+  public async getPersistenceMode(): Promise<"LEGACY" | "PREPARED" | "ENTITY"> { return "LEGACY"; }
   public async findUserByWechatOpenId(openId: string) {
     return clone(
       [...this.data.users.values()].find((v) => v.wechatOpenId === openId) ??
@@ -839,6 +1054,48 @@ export class MemoryStore implements CommerceStore {
   }
   public async listConsumerUsers() {
     return clone([...this.data.users.values()].filter(user => user.wechatOpenId !== null && !this.data.staff.has(user.id)));
+  }
+  public async getUsersByIds(ids: readonly string[]) {
+    return clone([...new Set(ids)].flatMap((id) => {
+      const user = this.data.users.get(id);
+      return user ? [user] : [];
+    }));
+  }
+  public async searchConsumerUsers(query: string, page: number, pageSize: number): Promise<ConsumerSearchPage> {
+    const needle = query.trim().toLocaleLowerCase("zh-CN");
+    const values = [...this.data.users.values()]
+      .filter((user) => user.wechatOpenId !== null && !this.data.staff.has(user.id))
+      .filter((user) => !needle || [String(user.consumerNumber ?? ""), user.phoneNumber ?? "", user.displayName ?? ""]
+        .some((value) => value.toLocaleLowerCase("zh-CN").includes(needle)))
+      .sort((left, right) => (left.consumerNumber ?? Number.MAX_SAFE_INTEGER) - (right.consumerNumber ?? Number.MAX_SAFE_INTEGER) || left.id.localeCompare(right.id));
+    const boundedPage = Math.max(1, Math.trunc(page));
+    const boundedPageSize = Math.max(1, Math.min(100, Math.trunc(pageSize)));
+    return clone({ items: values.slice((boundedPage - 1) * boundedPageSize, boundedPage * boundedPageSize), total: values.length, page: boundedPage, pageSize: boundedPageSize });
+  }
+  public async findConsumerUserByPublicNumber(number: number) {
+    const values = [...this.data.users.values()].filter((user) => user.wechatOpenId !== null && !this.data.staff.has(user.id) && user.consumerNumber === number);
+    if (values.length > 1) throw new BusinessError("INTEGRITY_VIOLATION", "用户ID重复，已停止返回用户列表", 500);
+    return clone(values[0] ?? null);
+  }
+  public async findOtherConsumerUserByPhone(phone: string, excludeUserId: string) {
+    const user = [...this.data.users.values()].find((value) => value.id !== excludeUserId && value.wechatOpenId !== null && !this.data.staff.has(value.id) && value.phoneNumber === phone);
+    return clone(user ?? null);
+  }
+  public async listConsumerUsersMissingPublicNumbers(limit: number) {
+    const boundedLimit = Math.max(1, Math.min(500, Math.trunc(limit)));
+    return clone([...this.data.users.values()]
+      .filter((user) => user.wechatOpenId !== null && !this.data.staff.has(user.id) && user.consumerNumber === undefined)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))
+      .slice(0, boundedLimit));
+  }
+  public async hasDuplicateConsumerPublicNumbers() {
+    const seen = new Set<number>();
+    for (const user of this.data.users.values()) {
+      if (user.wechatOpenId === null || this.data.staff.has(user.id) || user.consumerNumber === undefined) continue;
+      if (seen.has(user.consumerNumber)) return true;
+      seen.add(user.consumerNumber);
+    }
+    return false;
   }
   public async allocateConsumerPublicNumber(userId: string): Promise<number> {
     const user = this.data.users.get(userId);
@@ -930,6 +1187,31 @@ export class MemoryStore implements CommerceStore {
     }
     return clone(value);
   }
+  public async listExpiredAuthenticationData(now: string, limit: number) {
+    const boundedLimit = Math.max(1, Math.min(1000, Math.trunc(limit)));
+    const sessions = [...this.data.sessions.values()]
+      .filter((value) => value.expiresAt <= now)
+      .slice(0, boundedLimit)
+      .map((value) => value.tokenHash);
+    const remaining = Math.max(0, boundedLimit - sessions.length);
+    const passwordChangeTokens = [...this.data.passwordChangeTokens.values()]
+      .filter((value) => value.expiresAt <= now)
+      .slice(0, remaining)
+      .map((value) => value.tokenHash);
+    return { sessions, passwordChangeTokens };
+  }
+  public async deleteExpiredAuthenticationData(now: string, sessions: string[], passwordChangeTokens: string[]) {
+    let deleted = 0;
+    for (const hash of sessions) {
+      const value = this.data.sessions.get(hash);
+      if (value && value.expiresAt <= now) { this.data.sessions.delete(hash); deleted += 1; }
+    }
+    for (const hash of passwordChangeTokens) {
+      const value = this.data.passwordChangeTokens.get(hash);
+      if (value && value.expiresAt <= now) { this.data.passwordChangeTokens.delete(hash); deleted += 1; }
+    }
+    return deleted;
+  }
   public async savePasswordChangeToken(value: PasswordChangeToken) {
     this.data.passwordChangeTokens.set(value.tokenHash, clone(value));
   }
@@ -964,15 +1246,22 @@ export class MemoryStore implements CommerceStore {
     }
   }
   public async getAccessRole(id: string): Promise<AccessRole | null> {
+    if (this.data.deletedAccessRoleIds.has(id)) return null;
     return clone(this.data.accessRoles.get(id) ?? BUILTIN_ACCESS_ROLES.find(role => role.id === id) ?? null);
   }
   public async listAccessRoles(): Promise<AccessRole[]> {
-    const roles = new Map(BUILTIN_ACCESS_ROLES.map(role => [role.id, role]));
-    for (const [id, role] of this.data.accessRoles) roles.set(id, role);
+    const roles = new Map(BUILTIN_ACCESS_ROLES.filter(role => !this.data.deletedAccessRoleIds.has(role.id)).map(role => [role.id, role]));
+    for (const [id, role] of this.data.accessRoles) if (!this.data.deletedAccessRoleIds.has(id)) roles.set(id, role);
     return clone([...roles.values()]);
   }
-  public async saveAccessRole(value: AccessRole): Promise<void> { this.data.accessRoles.set(value.id, clone(value)); }
-  public async deleteAccessRole(id: string): Promise<void> { this.data.accessRoles.delete(id); }
+  public async saveAccessRole(value: AccessRole): Promise<void> {
+    if (this.data.deletedAccessRoleIds.has(value.id)) throw new BusinessError("RESOURCE_NOT_FOUND", "角色不存在", 404);
+    this.data.accessRoles.set(value.id, clone(value));
+  }
+  public async deleteAccessRole(id: string): Promise<void> {
+    this.data.accessRoles.delete(id);
+    this.data.deletedAccessRoleIds.add(id);
+  }
   public async getInternalStaff(id: string) {
     return clone(this.data.staff.get(id) ?? null);
   }
@@ -1105,6 +1394,38 @@ export class MemoryStore implements CommerceStore {
   public async listCampaigns() {
     return clone([...this.data.campaigns.values()]);
   }
+  public async listCampaignGroups() {
+    return clone([...this.data.campaignGroups.values()]);
+  }
+  public async getCampaignGroup(id: string) {
+    return clone(this.data.campaignGroups.get(id) ?? null);
+  }
+  public async saveCampaignGroup(value: CampaignGroup) {
+    this.data.campaignGroups.set(value.id, clone(value));
+  }
+  public async updateCampaignGroup(value: CampaignGroup, expectedVersion: number) {
+    const current = this.data.campaignGroups.get(value.id);
+    if (!current || current.version !== expectedVersion) return false;
+    this.data.campaignGroups.set(value.id, clone(value));
+    return true;
+  }
+  public async listCampaignsByStatus(statuses: readonly string[]) {
+    return clone([...this.data.campaigns.values()].filter((campaign) => statuses.includes(campaign.status)));
+  }
+  public async countCampaignsByServiceAreaStatuses(serviceAreaId: string, statuses: readonly string[]): Promise<number> {
+    return [...this.data.campaigns.values()].filter((campaign) => campaign.serviceAreaId === serviceAreaId && statuses.includes(campaign.status)).length;
+  }
+  public async countActiveCampaignReferencesForCatalogSku(catalogSkuId: string, statuses: readonly string[]): Promise<number> {
+    return [...this.data.campaigns.values()].filter((campaign) => statuses.includes(campaign.status) && campaign.items.some((item) => item.catalogSkuId === catalogSkuId)).length;
+  }
+  public async countInProgressDeliveryForPickupPoint(pickupPointId: string, planStatuses: readonly string[], campaignStatuses: readonly string[]): Promise<number> {
+    const campaigns = new Map([...this.data.campaigns.values()].map((campaign) => [campaign.id, campaign]));
+    return [...this.data.plans.values()].filter((plan) => {
+      if (plan.pickupPointId !== pickupPointId) return false;
+      const campaign = campaigns.get(plan.campaignId);
+      return planStatuses.includes(plan.status) || campaignStatuses.includes(campaign?.status ?? "");
+    }).length;
+  }
   public async getCampaign(id: string) {
     return clone(this.data.campaigns.get(id) ?? null);
   }
@@ -1204,6 +1525,7 @@ export class MemoryStore implements CommerceStore {
         skuId: line.catalogSkuId,
         productId: line.productId,
         name: line.skuName,
+        imageUrl: line.imageUrl ?? null,
         quantity: line.quantity,
         unitPriceCents: line.unitPriceCents,
         amountCents: line.amountCents,
@@ -1232,6 +1554,80 @@ export class MemoryStore implements CommerceStore {
       [...this.data.orders.values()].map((v) => this.hydrateOrder(v.id)!),
     ).slice(0, limit);
   }
+  public async searchOrders(query: StoreOrderSearchQuery): Promise<StoreOrderSearchPage> {
+    const page = Math.max(1, Math.trunc(query.page ?? 1));
+    const pageSize = Math.max(1, Math.min(1000, Math.trunc(query.pageSize ?? 100)));
+    const keyword = query.keyword?.trim().toLocaleLowerCase("zh-CN") ?? "";
+    const users = new Map([...this.data.users.values()].map((value) => [value.id, value]));
+    const qualityOrderIds = query.includeCommunityQualityCases
+      ? new Set([...this.data.quality.values()].map((value) => value.orderId))
+      : null;
+    const values = [...this.data.orders.values()]
+      .map((value) => this.hydrateOrder(value.id)!)
+      .filter((order) => !query.userId || order.userId === query.userId)
+      .filter((order) => !query.status || order.status === query.status)
+      .filter((order) => !query.statuses || query.statuses.includes(order.status) || Boolean(qualityOrderIds?.has(order.id)))
+      .filter((order) => !query.excludeStatuses?.includes(order.status))
+      .filter((order) => !query.campaignId || order.campaignId === query.campaignId)
+      .filter((order) => !query.pickupPointId || order.pickupPointId === query.pickupPointId)
+      .filter((order) => !query.serviceAreaId || order.serviceAreaId === query.serviceAreaId)
+      .filter((order) => !query.catalogSkuId || order.items.some((item) => item.skuId === query.catalogSkuId))
+      .filter((order) => !query.orderNo || order.orderNo.includes(query.orderNo))
+      .filter((order) => !query.beforeCreatedAt || !query.beforeId || order.createdAt < query.beforeCreatedAt || (order.createdAt === query.beforeCreatedAt && order.id < query.beforeId))
+      .filter((order) => {
+        if (!query.from && !query.to) return true;
+        const value = query.dateType === "PAID_AT" ? order.paidAt : order.createdAt;
+        if (!value) return false;
+        const timestamp = Date.parse(value);
+        return (!query.from || timestamp >= Date.parse(query.from)) && (!query.to || timestamp <= Date.parse(query.to));
+      })
+      .filter((order) => {
+        if (!keyword) return true;
+        const user = users.get(order.userId);
+        return [order.orderNo, String(user?.consumerNumber ?? ""), user?.phoneNumber ?? "", user?.displayName ?? ""]
+          .some((value) => value.toLocaleLowerCase("zh-CN").includes(keyword));
+      })
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id));
+    const offset = (page - 1) * pageSize;
+    const cursorMode = Boolean(query.beforeCreatedAt && query.beforeId);
+    const items = cursorMode ? values.slice(0, pageSize) : values.slice(offset, offset + pageSize);
+    const hasMore = cursorMode ? values.length > pageSize : offset + pageSize < values.length;
+    const last = items.at(-1);
+    return { items, total: values.length, page, pageSize, hasMore, nextCursor: hasMore && last ? { createdAt: last.createdAt, id: last.id } : null };
+  }
+  public async countOrdersByStatus(statuses?: readonly string[], excludeStatuses?: readonly string[]): Promise<number> {
+    return [...this.data.orders.values()].filter((order) =>
+      (!statuses || statuses.includes(order.status)) && (!excludeStatuses || !excludeStatuses.includes(order.status)),
+    ).length;
+  }
+  public async listPickupCodeCandidates(pickupPointId: string, codeHash: string, orderNo?: string): Promise<PickupCodeCandidate[]> {
+    const now = await this.databaseNow();
+    const matched: PickupCodeCandidate[] = [];
+    for (const order of this.data.orders.values()) {
+      if (order.pickupPointId !== pickupPointId || order.status !== "READY_FOR_PICKUP" || (orderNo && order.orderNo !== orderNo)) continue;
+      const credential = this.data.pickupCredentials.get(order.id);
+      const plan = this.data.plans.get(order.deliveryPlanId);
+      const window = this.data.windows.get(order.id);
+      if (credential?.codeHash !== codeHash || credential.status !== "ACTIVE" || credential.expiresAt <= now ||
+          plan?.pickupPointId !== pickupPointId || plan.status !== "ARRIVED" ||
+          !window || !["ACTIVE", "EXTENDED"].includes(window.status) || window.deadlineAt <= now) continue;
+      matched.push({ order: this.hydrateOrder(order.id)!, codeHash: credential.codeHash });
+    }
+    return matched;
+  }
+  public async getNetSalesQuantities(campaignId?: string): Promise<Map<string, number>> {
+    const fullyRefunded = new Set([...this.data.orderRefunds.values()].filter((refund) => refund.status === "SUCCEEDED").map((refund) => refund.orderId));
+    const totals = new Map<string, number>();
+    for (const raw of this.data.orders.values()) {
+      if (!raw.paidAt || ["PENDING_PAYMENT", "CANCELLED"].includes(raw.status) || (campaignId && raw.campaignId !== campaignId)) continue;
+      const order = this.hydrateOrder(raw.id)!;
+      for (const item of order.items) {
+        const quantity = raw.status === "REFUNDED" || fullyRefunded.has(raw.id) ? 0 : Math.max(0, item.quantity - item.refundedQuantity);
+        if (quantity) totals.set(item.skuId, (totals.get(item.skuId) ?? 0) + quantity);
+      }
+    }
+    return totals;
+  }
   public async listExpiredPendingOrders(now: string, limit: number) {
     return (await this.listOrders(Number.MAX_SAFE_INTEGER))
       .filter((v) => v.status === "PENDING_PAYMENT" && v.expiresAt <= now)
@@ -1249,6 +1645,21 @@ export class MemoryStore implements CommerceStore {
   }
   public async getOrderByNoForUpdate(no: string) {
     return this.getOrderByNo(no);
+  }
+  public async getCheckoutBatch(id: string) {
+    return clone(this.data.checkoutBatches.get(id) ?? null);
+  }
+  public async getCheckoutBatchForUpdate(id: string) {
+    return this.getCheckoutBatch(id);
+  }
+  public async getCheckoutBatchByOrder(orderId: string) {
+    return clone([...this.data.checkoutBatches.values()].find((value) => value.orderIds.includes(orderId)) ?? null);
+  }
+  public async getCheckoutBatchByOutTradeNoForUpdate(outTradeNo: string) {
+    return clone([...this.data.checkoutBatches.values()].find((value) => value.outTradeNo === outTradeNo) ?? null);
+  }
+  public async saveCheckoutBatch(value: CheckoutBatch) {
+    this.data.checkoutBatches.set(value.id, clone(value));
   }
   public async saveOrder(v: Order) {
     this.data.orders.set(v.id, clone(v));
@@ -1388,6 +1799,21 @@ export class MemoryStore implements CommerceStore {
   public async getPaymentByOrderForUpdate(id: string) {
     return this.getPaymentByOrder(id);
   }
+  public async getPaymentBatchByCheckoutBatch(checkoutBatchId: string) {
+    return clone([...this.data.paymentBatches.values()].find((value) => value.checkoutBatchId === checkoutBatchId) ?? null);
+  }
+  public async getPaymentBatchForUpdate(checkoutBatchId: string) {
+    return this.getPaymentBatchByCheckoutBatch(checkoutBatchId);
+  }
+  public async savePaymentBatch(value: PaymentBatch) {
+    this.data.paymentBatches.set(value.id, clone(value));
+  }
+  public async savePaymentBatchIfInitiationClaimed(value: PaymentBatch, token: string) {
+    const current = this.data.paymentBatches.get(value.id);
+    if (!current || current.initiationClaimToken !== token) return false;
+    this.data.paymentBatches.set(value.id, clone(value));
+    return true;
+  }
   public async savePayment(v: Payment) {
     this.data.payments.set(v.id, clone(v));
   }
@@ -1419,6 +1845,7 @@ export class MemoryStore implements CommerceStore {
         null,
     );
   }
+  public async getOrderRefund(id: string) { return clone(this.data.orderRefunds.get(id) ?? null); }
   public async getOrderRefundByProviderNo(no: string) {
     return clone(
       [...this.data.orderRefunds.values()].find(
@@ -1459,6 +1886,7 @@ export class MemoryStore implements CommerceStore {
         "PROCESSING",
         "SUBMISSION_UNKNOWN",
         "FAILED",
+        "MANUAL_HOLD",
       ].includes(v.status)
     )
       return false;
@@ -1630,10 +2058,11 @@ export class MemoryStore implements CommerceStore {
   }
   public async appendLedgerTransaction(v: LedgerTransaction) {
     const duplicate = [...this.data.ledger.values()].some(
-      (x) =>
-        x.referenceType === v.referenceType &&
-        x.referenceId === v.referenceId &&
-        x.eventType === v.eventType,
+      (x) => v.postingKey
+        ? x.postingKey === v.postingKey && x.referenceType === v.referenceType && x.referenceId === v.referenceId && x.eventType === v.eventType
+        : x.referenceType === v.referenceType &&
+          x.referenceId === v.referenceId &&
+          x.eventType === v.eventType,
     );
     if (duplicate) return false;
     this.data.ledger.set(v.id, clone(v));
@@ -1644,13 +2073,34 @@ export class MemoryStore implements CommerceStore {
       [...this.data.ledger.values()].filter((v) => !id || v.referenceId === id),
     );
   }
+  public async listFinanceRefundPage(query: FinanceRefundPageQuery): Promise<FinanceRefundPage> {
+    const limit = Math.max(1, Math.min(100, Math.trunc(query.limit) || 25));
+    const all = [
+      ...[...this.data.orderRefunds.values()].map((v) => ({ ...clone(v), refundType: "FULL" as const, collection: "orderRefunds" })),
+      ...[...this.data.partialRefunds.values()].map((v) => ({ ...clone(v), refundType: "PARTIAL" as const, collection: "partialRefunds" })),
+    ].filter((v) => (!query.status || v.status === query.status) && (!query.orderId || v.orderId === query.orderId) && (!query.reference || v.orderId === query.reference || v.providerRefundNo === query.reference || this.data.orders.get(v.orderId)?.orderNo === query.reference))
+      .sort((a,b) => Date.parse(b.createdAt)-Date.parse(a.createdAt) || a.collection.localeCompare(b.collection) || b.id.localeCompare(a.id));
+    const offset = query.cursor ? Number(Buffer.from(query.cursor, "base64url").toString("utf8")) : 0;
+    const page = all.slice(offset, offset + limit + 1);
+    const more = page.length > limit;
+    return { items: page.slice(0, limit).map((value) => {
+      const row = { ...value };
+      Reflect.deleteProperty(row, "collection");
+      return row;
+    }), total: all.length, pageSize: limit, nextCursor: more ? Buffer.from(String(offset + limit)).toString("base64url") : null };
+  }
+  public async listFinanceLedgerPage(query: FinanceLedgerPageQuery): Promise<FinanceLedgerPage> {
+    const limit = Math.max(1, Math.min(100, Math.trunc(query.limit) || 25));
+    const all = [...this.data.ledger.values()].filter((v)=>!query.referenceId || v.referenceId===query.referenceId).sort((a,b)=>Date.parse(b.createdAt)-Date.parse(a.createdAt)||b.id.localeCompare(a.id));
+    const offset = query.cursor ? Number(Buffer.from(query.cursor, "base64url").toString("utf8")) : 0;
+    const page=all.slice(offset,offset+limit+1);
+    return {items:clone(page.slice(0,limit)), total:all.length, pageSize:limit, nextCursor:page.length>limit?Buffer.from(String(offset+limit)).toString("base64url"):null};
+  }
   public async saveAuditLog(v: AuditLog) {
-    if (
-      !this.data.audits.some(
-        (x) => x.requestId === v.requestId && x.action === v.action,
-      )
-    )
-      this.data.audits.push(clone(v));
+    const key = JSON.stringify([v.requestId, v.action]);
+    if (this.auditDedupeKeys.has(key)) return;
+    this.auditDedupeKeys.add(key);
+    this.data.audits.push(clone(v));
   }
   public async findLatestAudit(type: string, id: string, action: string) {
     return clone(
@@ -1681,6 +2131,10 @@ export class MemoryStore implements CommerceStore {
   }
   public async listDeliveryPlans() {
     return clone([...this.data.plans.values()]);
+  }
+  public async listDeliveryPlansByCampaigns(campaignIds: readonly string[]) {
+    const wanted = new Set(campaignIds);
+    return clone([...this.data.plans.values()].filter((plan) => wanted.has(plan.campaignId)));
   }
   public async saveDeliveryPlan(v: DeliveryPlan) {
     this.data.plans.set(v.id, clone(v));
@@ -1733,6 +2187,19 @@ export class MemoryStore implements CommerceStore {
         right.createdAt.localeCompare(left.createdAt),
       ),
     );
+  }
+  public async listPickupReceiptOrderPage(pickupPointIds: readonly string[], orderNo: string | undefined, page: number, pageSize: number): Promise<PickupReceiptOrderPage> {
+    const pointIds = new Set(pickupPointIds);
+    const values = [...this.data.pickupReceipts.values()]
+      .flatMap((receipt) => {
+        const order = this.hydrateOrder(receipt.orderId);
+        return order && pointIds.has(order.pickupPointId) && (!orderNo || order.orderNo.includes(orderNo)) ? [{ receipt: clone(receipt), order }] : [];
+      })
+      .sort((left, right) => right.receipt.createdAt.localeCompare(left.receipt.createdAt));
+    const normalizedPage = Math.max(1, Math.trunc(page));
+    const normalizedPageSize = Math.max(1, Math.min(100, Math.trunc(pageSize)));
+    const offset = (normalizedPage - 1) * normalizedPageSize;
+    return { items: values.slice(offset, offset + normalizedPageSize), total: values.length, page: normalizedPage, pageSize: normalizedPageSize };
   }
   public async saveCommunityPickupReceipt(v: CommunityPickupReceipt) {
     const duplicate = [...this.data.pickupReceipts.values()].some(
@@ -1867,6 +2334,9 @@ export class MemoryStore implements CommerceStore {
   public async getCommunityPickupWindowForUpdate(id: string) {
     return clone(this.data.windows.get(id) ?? null);
   }
+  public async getCommunityPickupWindow(id: string) {
+    return clone(this.data.windows.get(id) ?? null);
+  }
   public async saveCommunityPickupWindow(v: CommunityPickupWindow) {
     this.data.windows.set(v.orderId, clone(v));
   }
@@ -1992,6 +2462,13 @@ export class MemoryStore implements CommerceStore {
     return newest([...this.data.interests.values()])
       .slice(0, limit)
       .map(clone);
+  }
+  public async listServiceAreaInterestPage(query: ServiceAreaInterestPageQuery): Promise<ServiceAreaInterestPage> {
+    const values = newest([...this.data.interests.values()])
+      .filter((value) => Boolean(value.privacyVersion) && Boolean(value.privacyConsentedAt))
+      .filter((value) => !query.status || value.status === query.status);
+    const offset = (query.page - 1) * query.pageSize;
+    return { items: values.slice(offset, offset + query.pageSize).map(clone), total: values.length, page: query.page, pageSize: query.pageSize };
   }
   public async listServiceAreaInterestsByUser(id: string) {
     return clone(

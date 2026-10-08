@@ -311,6 +311,12 @@ async function consumerAuthHeaders(): Promise<Record<string, string>> {
 }
 
 export const api = {
+  listProductCategories: () =>
+    request<ProductCategoryDto[]>({
+      url: "/api/v1/catalog/categories",
+      method: "GET",
+      auth: "none",
+    }),
   listCampaigns: () =>
     request<CampaignDto[]>({
       url: "/api/v1/campaigns",
@@ -349,6 +355,11 @@ export const api = {
     }),
   listOrders: () =>
     request<OrderDto[]>({ url: "/api/v1/orders", method: "GET" }),
+  listOrdersPage: (pageSize = 20, cursor?: { createdAt: string; id: string }, filter = "ALL") =>
+    request<{ items: OrderDto[]; hasMore: boolean; nextCursor: { createdAt: string; id: string } | null }>({
+      url: `/api/v1/orders?pageSize=${encodeURIComponent(String(pageSize))}&filter=${encodeURIComponent(filter)}${cursor ? `&cursorAt=${encodeURIComponent(cursor.createdAt)}&cursorId=${encodeURIComponent(cursor.id)}` : ""}`,
+      method: "GET",
+    }),
   getMyProfile: () =>
     request<ConsumerProfileDto>({ url: "/api/v1/me/profile", method: "GET" }),
   updateMyProfile: (payload: { displayName: string; avatarUrl: string | null; expectedVersion: number }) =>
@@ -463,6 +474,21 @@ export const api = {
       url: `/api/v1/orders/${orderId}/pay/mock-confirm`,
       method: "POST",
     }),
+  createOrderCheckout: (
+    groups: Array<{ campaignId: string; serviceAreaId: string; pickupPointId: string; items: Array<{ skuId: string; quantity: number }> }>,
+    key: string,
+  ) => request<{ checkoutBatch: { id: string; outTradeNo: string; orderIds: string[]; totalCents: number; expiresAt: string; status: string }; orders: OrderDto[] }>({
+    url: "/api/v1/order-checkouts",
+    method: "POST",
+    header: { "Idempotency-Key": key },
+    data: { groups },
+  }),
+  initiateCheckoutPayment: (checkoutBatchId: string) =>
+    request<PaymentResult>({ url: `/api/v1/order-checkouts/${encodeURIComponent(checkoutBatchId)}/pay`, method: "POST" }),
+  getCheckoutBatchPaymentStatus: (checkoutBatchId: string) =>
+    request<CheckoutBatchPaymentStatusDto>({ url: `/api/v1/order-checkouts/${encodeURIComponent(checkoutBatchId)}`, method: "GET" }),
+  mockPayCheckout: (checkoutBatchId: string) =>
+    request<{ status: string }>({ url: `/api/v1/order-checkouts/${encodeURIComponent(checkoutBatchId)}/pay/mock-confirm`, method: "POST" }),
   createServiceAreaInterest: (payload: {
     regionText: string;
     contactName: string;

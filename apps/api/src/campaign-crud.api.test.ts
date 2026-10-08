@@ -11,9 +11,19 @@ import type { CommunityCampaignInput } from './modules/fulfillment/community-ful
 class InspectableStore extends MemoryStore {
   salesOrderReads = 0;
   salesRefundReads = 0;
+  salesAggregateReads = 0;
+  globalSalesReads = 0;
   overrideOrders: Order[] | null = null;
   override async listOrders(limit: number) { this.salesOrderReads += 1; return this.overrideOrders?.slice(0, limit) ?? super.listOrders(limit); }
   override async listOrderRefunds(limit: number) { this.salesRefundReads += 1; return super.listOrderRefunds(limit); }
+  override async getNetSalesQuantities(campaignId?: string) { this.salesAggregateReads += 1; if (!campaignId) this.globalSalesReads += 1; return super.getNetSalesQuantities(campaignId); }
+  override async searchOrders(query: Parameters<MemoryStore["searchOrders"]>[0]) {
+    if (!this.overrideOrders) return super.searchOrders(query);
+    const page = Math.max(1, Math.trunc(query.page ?? 1));
+    const pageSize = Math.max(1, Math.min(1000, Math.trunc(query.pageSize ?? 100)));
+    const offset = (page - 1) * pageSize;
+    return { items: this.overrideOrders.slice(offset, offset + pageSize), total: this.overrideOrders.length, page, pageSize };
+  }
   businessSnapshot() {
     const value = JSON.parse(this.exportState()) as Record<string,unknown>;
     return {users:value.users,sessions:value.sessions,audit:value.audits,orders:value.orders,ledger:value.ledger};
@@ -53,6 +63,15 @@ describe('draft campaign CRUD and private consumer directory', () => {
     return response.json().data as {id:string;version:number;deliveryPlan:{id:string}};
   };
   const state = async (id:string) => ({campaign:await store.getCampaign(id),plans:await store.listDeliveryPlans(),orders:await store.listOrdersByCampaign(id),batches:await store.listDispatchBatches(),ledger:await store.listLedgerTransactions(),audit:await store.listAuditLogs(1000)});
+  it('lists enabled configured categories publicly in sort order without requiring products', async () => {
+    const now = new Date().toISOString();
+    await store.saveProductCategory({ id: 'fruit', name: '水果', iconKey: 'fruit', sortOrder: 20, status: 'ACTIVE', createdAt: now, updatedAt: now });
+    await store.saveProductCategory({ id: 'vegetables', name: '蔬菜', iconKey: 'leaf', sortOrder: 10, status: 'ACTIVE', createdAt: now, updatedAt: now });
+    await store.saveProductCategory({ id: 'hidden', name: '停用分类', iconKey: 'basket', sortOrder: 0, status: 'INACTIVE', createdAt: now, updatedAt: now });
+    const response = await app.inject({ method: 'GET', url: '/api/v1/catalog/categories' });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data).toEqual([{ id: 'vegetables', name: '蔬菜', iconKey: 'leaf' }, { id: 'fruit', name: '水果', iconKey: 'fruit' }]);
+  });
   it('uses current catalog images in open campaign list and detail without rewriting snapshots', async () => {
     const campaign = await create();
     expect((await call('POST', `/api/v1/admin/campaigns/${campaign.id}/open`)).statusCode).toBe(200);
@@ -80,25 +99,29 @@ describe('draft campaign CRUD and private consumer directory', () => {
     expect(hidden.json().data.items).toEqual([]);
     expect(await state(campaign.id)).toEqual(frozen);
   });
-  it('shares one net-sales aggregation across an admin campaign list request', async () => {
+  it('uses one global net-sales snapshot and one indexed aggregate per listed campaign', async () => {
     await create();
     await create({ ...input, title: '第二个团期' });
     store.salesOrderReads = 0;
     store.salesRefundReads = 0;
+    store.salesAggregateReads = 0;
+    store.globalSalesReads = 0;
     const response = await call('GET', '/api/v1/admin/campaigns');
     expect(response.statusCode, response.body).toBe(200);
     expect(response.json().data).toHaveLength(2);
-    expect(store.salesOrderReads).toBe(1);
-    expect(store.salesRefundReads).toBe(1);
+    expect(store.salesAggregateReads).toBe(3);
+    expect(store.globalSalesReads).toBe(1);
     const campaigns = response.json().data as Array<{ id: string }>;
     for (const campaign of campaigns) expect((await call('POST', `/api/v1/admin/campaigns/${campaign.id}/open`)).statusCode).toBe(200);
     store.salesOrderReads = 0;
     store.salesRefundReads = 0;
+    store.salesAggregateReads = 0;
+    store.globalSalesReads = 0;
     const publicResponse = await app.inject({ method: 'GET', url: '/api/v1/campaigns' });
     expect(publicResponse.statusCode, publicResponse.body).toBe(200);
     expect(publicResponse.json().data).toHaveLength(2);
-    expect(store.salesOrderReads).toBe(1);
-    expect(store.salesRefundReads).toBe(1);
+    expect(store.salesAggregateReads).toBe(3);
+    expect(store.globalSalesReads).toBe(1);
   });
   it('repairs expired draft through PATCH then opens with preserved identity and updated snapshot',async()=>{
     const campaign = await create({...input,cutoffAt:new Date(Date.now()-1000).toISOString()});

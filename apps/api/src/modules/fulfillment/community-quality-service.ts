@@ -7,6 +7,7 @@ import type {
   FulfillmentException,
 } from "../core/types.js";
 import type { CommunityQualityStore } from "./community-operations-store.js";
+import { completeCampaignIfSettled } from "./campaign-completion.js";
 export type CommunityQualityCaseInput = {
   clientRequestId: string;
   items: Array<{
@@ -316,6 +317,8 @@ export class CommunityQualityService {
           afterData: value,
           createdAt: now,
         });
+        const order = await store.getOrderForUpdate(value.orderId);
+        if (order) await completeCampaignIfSettled(store, order.campaignId);
         return value;
       }
       const order = await store.getOrderForUpdate(value.orderId);
@@ -437,6 +440,8 @@ export class CommunityQualityService {
         afterData: value,
         createdAt: value.financeExecutedAt,
       });
+      const order = await store.getOrderForUpdate(value.orderId);
+      if (order) await completeCampaignIfSettled(store, order.campaignId);
       return value;
     });
   }

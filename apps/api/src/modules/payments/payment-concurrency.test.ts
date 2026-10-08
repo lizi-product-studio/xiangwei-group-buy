@@ -72,6 +72,106 @@ async function fixture() {
 }
 
 describe("payment and refund concurrency", () => {
+  it("requires provider verification before staff retry and reuses the held refund number", async () => {
+    const store = await fixture();
+    const order = await store.getOrder("order");
+    const payment = await store.getPaymentByOrder("order");
+    await store.saveOrder({ ...order!, status: "REFUNDING" });
+    await store.savePayment({ ...payment!, status: "REFUNDING" });
+    await store.saveOrderRefund({ id: "held", orderId: "order", paymentId: "payment", providerRefundNo: "STABLE-REFUND", providerRefundId: null, status: "MANUAL_HOLD", amountCents: moneyCents(1200), createdAt: new Date().toISOString(), submissionLeaseUntil: null, submissionClaimToken: null, recoveryAttempts: 5 });
+    const queryRefund = vi.fn(async () => ({ kind: "NOT_FOUND" as const }));
+    const refund = vi.fn(async (input: { providerRefundNo: string }) => ({ providerRefundId: null, status: "PROCESSING" as const, input }));
+    const service = new PaymentService(store, { ...provider, queryRefund, refund }, new LedgerService());
+    await expect(service.retryManualRefund("FULL", "held", "finance", "request-retry")).rejects.toThrow();
+    expect(refund).not.toHaveBeenCalled();
+    await service.checkManualRefund("FULL", "held", "finance", "request-check");
+    expect(queryRefund).toHaveBeenCalledWith({ providerRefundNo: "STABLE-REFUND" });
+    expect(await store.getOrderRefund("held")).toMatchObject({
+      manualProviderStatus: "NOT_FOUND",
+      manualHoldReason: expect.stringContaining("恢复"),
+    });
+    await service.retryManualRefund("FULL", "held", "finance", "request-retry");
+    expect(refund).toHaveBeenCalledTimes(1);
+    expect(refund.mock.calls[0]?.[0].providerRefundNo).toBe("STABLE-REFUND");
+    await service.checkManualRefund("FULL", "held", "finance", "request-check-again");
+    await expect(service.retryManualRefund("FULL", "held", "finance", "request-retry-again")).rejects.toThrow();
+    expect(refund).toHaveBeenCalledTimes(1);
+    expect(await store.listAuditLogs(10)).toEqual(expect.arrayContaining([expect.objectContaining({ action: "FINANCE_REFUND_MANUAL_CHECKED" }), expect.objectContaining({ action: "FINANCE_REFUND_MANUAL_RETRY" })]));
+    await store.savePartialRefund({ id: "held-abnormal", exceptionId: "exception", orderId: "order", paymentId: "payment", providerRefundNo: "ABNORMAL-REFUND", providerRefundId: null, status: "MANUAL_HOLD", amountCents: moneyCents(100), createdAt: new Date().toISOString(), submissionLeaseUntil: null, submissionClaimToken: null, recoveryAttempts: 5 });
+    const abnormalProvider: PaymentProvider = { ...provider, queryRefund: async () => ({ providerRefundId: "wx-refund", status: "ABNORMAL" }) , refund };
+    const abnormalService = new PaymentService(store, abnormalProvider, new LedgerService());
+    await abnormalService.checkManualRefund("PARTIAL", "held-abnormal", "finance", "request-abnormal");
+    expect((await store.getPartialRefund("held-abnormal"))).toMatchObject({ status: "MANUAL_HOLD", manualProviderStatus: "ABNORMAL" });
+    await expect(abnormalService.retryManualRefund("PARTIAL", "held-abnormal", "finance", "request-abnormal-retry")).rejects.toThrow();
+    expect(refund).toHaveBeenCalledTimes(1);
+  });
+  it("does not describe a provider-confirmed FAILED refund as system-recoverable", async () => {
+    const store = await fixture();
+    await store.saveOrder({ ...(await store.getOrder("order"))!, status: "REFUNDING" });
+    await store.savePayment({ ...(await store.getPaymentByOrder("order"))!, status: "REFUNDING" });
+    await store.saveOrderRefund({ id: "failed-held", orderId: "order", paymentId: "payment", providerRefundNo: "FAILED-REFUND", providerRefundId: null, status: "MANUAL_HOLD", amountCents: moneyCents(1200), createdAt: new Date().toISOString(), submissionLeaseUntil: null, submissionClaimToken: null, recoveryAttempts: 5 });
+    const refund = vi.fn(provider.refund);
+    const service = new PaymentService(store, { ...provider, queryRefund: async () => ({ providerRefundId: null, status: "FAILED" as const }), refund }, new LedgerService());
+
+    await service.checkManualRefund("FULL", "failed-held", "finance", "check-failed-refund");
+
+    expect(await store.getOrderRefund("failed-held")).toMatchObject({
+      status: "MANUAL_HOLD",
+      manualProviderStatus: "FAILED",
+      manualHoldReason: expect.stringContaining("系统不提供重提"),
+    });
+    await expect(service.retryManualRefund("FULL", "failed-held", "finance", "retry-failed-refund")).rejects.toThrow();
+    expect(refund).not.toHaveBeenCalled();
+  });
+  it("keeps an exhausted manual retry PROCESSING in the finance tracking state without resetting the budget", async () => {
+    const store = await fixture();
+    await store.saveOrder({ ...(await store.getOrder("order"))!, status: "REFUNDING" });
+    await store.savePayment({ ...(await store.getPaymentByOrder("order"))!, status: "REFUNDING" });
+    const initial = { id: "manual-processing", orderId: "order", paymentId: "payment", providerRefundNo: "STABLE-PROCESSING", providerRefundId: null, status: "MANUAL_HOLD" as const, amountCents: moneyCents(1200), createdAt: new Date().toISOString(), submissionLeaseUntil: null, submissionClaimToken: null, recoveryAttempts: 5, manualRetryAttempts: 0, manualProviderStatus: "NOT_FOUND" as const, manualHoldReason: "机构确认退款单不存在，可按原退款单号确认后恢复" };
+    await store.saveOrderRefund(initial);
+    const submit = vi.fn(async () => ({ providerRefundId: "provider-processing", status: "PROCESSING" as const }));
+    const query = vi.fn(async () => ({ providerRefundId: "provider-processing", status: "PROCESSING" as const }));
+    const service = new PaymentService(store, { ...provider, refund: submit, queryRefund: query }, new LedgerService());
+
+    await service.retryManualRefund("FULL", initial.id, "finance", "manual-processing-retry");
+    expect(await store.getOrderRefund(initial.id)).toMatchObject({
+      status: "MANUAL_HOLD",
+      manualProviderStatus: "PROCESSING",
+      manualHoldReason: expect.stringContaining("PROCESSING"),
+      manualRetryAttempts: 1,
+      recoveryAttempts: 6,
+      providerRefundNo: initial.providerRefundNo,
+    });
+    await service.reconcileRefunds();
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(query).not.toHaveBeenCalled();
+    expect(await store.getOrderRefund(initial.id)).toMatchObject({ status: "MANUAL_HOLD", manualProviderStatus: "PROCESSING", recoveryAttempts: 6 });
+  });
+  it("keeps a manual PROCESSING query held and out of automatic provider work after budget exhaustion", async () => {
+    const store = await fixture();
+    await store.saveOrder({ ...(await store.getOrder("order"))!, status: "REFUNDING" });
+    await store.savePayment({ ...(await store.getPaymentByOrder("order"))!, status: "REFUNDING" });
+    await store.saveOrderRefund({ id: "manual-check-processing", orderId: "order", paymentId: "payment", providerRefundNo: "STABLE-CHECK-PROCESSING", providerRefundId: null, status: "MANUAL_HOLD", amountCents: moneyCents(1200), createdAt: new Date().toISOString(), submissionLeaseUntil: null, submissionClaimToken: null, recoveryAttempts: 5, manualRetryAttempts: 0, nextAttemptAt: null });
+    const query = vi.fn(async () => ({ providerRefundId: "provider-processing", status: "PROCESSING" as const }));
+    const submit = vi.fn(async () => ({ providerRefundId: null, status: "PROCESSING" as const }));
+    const service = new PaymentService(store, { ...provider, queryRefund: query, refund: submit }, new LedgerService());
+
+    await service.checkManualRefund("FULL", "manual-check-processing", "finance", "manual-check-processing");
+
+    expect(await store.getOrderRefund("manual-check-processing")).toMatchObject({
+      status: "MANUAL_HOLD",
+      manualProviderStatus: "PROCESSING",
+      manualHoldReason: expect.stringContaining("PROCESSING"),
+      recoveryAttempts: 5,
+      manualRetryAttempts: 0,
+      nextAttemptAt: null,
+    });
+    expect((await store.listPendingOrderRefunds(100)).some((value) => value.id === "manual-check-processing")).toBe(false);
+    await service.reconcileRefunds();
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(submit).not.toHaveBeenCalled();
+    expect(await store.getOrderRefund("manual-check-processing")).toMatchObject({ status: "MANUAL_HOLD", manualProviderStatus: "PROCESSING", recoveryAttempts: 5 });
+  });
   it("allows only payment or cancellation to win and deduplicates callbacks", async () => {
     const store = await fixture();
     const service = new PaymentService(store, provider, new LedgerService());
@@ -306,7 +406,7 @@ describe("payment and refund concurrency", () => {
     await partialReconcile;
     expect((await store.listPartialRefunds(10))[0]).toMatchObject({ status: "SUCCEEDED" });
   });
-  it("caps explicit provider failures and continues reconciling later obligations", async () => {
+  it("holds provider-declared refund failures for manual handling and continues later obligations", async () => {
     const store = await fixture();
     let calls = 0;
     const providerWithFailureBudget: PaymentProvider = {
@@ -335,27 +435,18 @@ describe("payment and refund concurrency", () => {
     });
     await service.reconcileRefunds();
     expect((await store.getOrderRefundByProviderNo("SECOND-REFUND"))?.status).toBe("SUCCEEDED");
-    for (let attempt = 1; attempt < 5; attempt += 1) {
-      const first = (await store.getOrderRefundByProviderNo("FIRST-REFUND"))!;
-      await store.saveOrderRefund({ ...first, nextAttemptAt: new Date(0).toISOString() });
-      await service.reconcileRefunds();
-    }
-    expect((await store.getOrderRefundByProviderNo("FIRST-REFUND"))).toMatchObject({ status: "MANUAL_HOLD", submissionAttempts: 5, recoveryAttempts: 5 });
+    expect((await store.getOrderRefundByProviderNo("FIRST-REFUND"))).toMatchObject({ status: "MANUAL_HOLD", submissionAttempts: 1, recoveryAttempts: 1, manualProviderStatus: "FAILED" });
     await store.savePartialRefund({
       id: "partial-budget", exceptionId: "exception-budget", orderId: "order", paymentId: "payment",
       providerRefundNo: "PARTIAL-BUDGET", providerRefundId: null, status: "CREATED",
       amountCents: moneyCents(100), createdAt: new Date().toISOString(), submissionLeaseUntil: null,
       submissionClaimToken: null, nextAttemptAt: new Date(0).toISOString(), recoveryAttempts: 0,
     });
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      const partial = (await store.getPartialRefund("partial-budget"))!;
-      await store.savePartialRefund({ ...partial, nextAttemptAt: new Date(0).toISOString() });
-      await service.reconcileRefunds();
-    }
-    expect((await store.getPartialRefund("partial-budget"))).toMatchObject({ status: "MANUAL_HOLD", submissionAttempts: 5, recoveryAttempts: 5 });
+    await service.reconcileRefunds();
+    expect((await store.getPartialRefund("partial-budget"))).toMatchObject({ status: "MANUAL_HOLD", submissionAttempts: 1, recoveryAttempts: 1, manualProviderStatus: "FAILED" });
     await service.reconcileRefunds();
     await service.reconcileRefunds();
-    expect(calls).toBe(11);
+    expect(calls).toBe(3);
   });
   it("stops at the fifth total provider call when submit or query returns PROCESSING", async () => {
     const store = await fixture();
@@ -380,7 +471,7 @@ describe("payment and refund concurrency", () => {
       submissionAttempts: 2, queryAttempts: 2, recoveryAttempts: 4, nextAttemptAt: new Date(0).toISOString(),
     });
     await service.reconcileRefunds();
-    expect((await store.getOrderRefundByProviderNo("FULL-BOUNDARY"))).toMatchObject({ status: "MANUAL_HOLD", recoveryAttempts: 5 });
+    expect((await store.getOrderRefundByProviderNo("FULL-BOUNDARY"))).toMatchObject({ status: "MANUAL_HOLD", recoveryAttempts: 5, manualProviderStatus: "PROCESSING", manualHoldReason: expect.stringContaining("PROCESSING") });
     await service.reconcileRefunds();
     expect({ submissions, queries }).toEqual({ submissions: 1, queries: 0 });
 
@@ -394,7 +485,7 @@ describe("payment and refund concurrency", () => {
       nextAttemptAt: new Date(0).toISOString(),
     });
     await service.reconcileRefunds();
-    expect((await store.getOrderRefundByProviderNo("FULL-QUERY-BOUNDARY"))).toMatchObject({ status: "MANUAL_HOLD", recoveryAttempts: 5 });
+    expect((await store.getOrderRefundByProviderNo("FULL-QUERY-BOUNDARY"))).toMatchObject({ status: "MANUAL_HOLD", recoveryAttempts: 5, manualProviderStatus: "PROCESSING", manualHoldReason: expect.stringContaining("PROCESSING") });
 
     await store.savePartialRefund({
       id: "partial-boundary", exceptionId: "exception-boundary", orderId: "order", paymentId: "payment",
@@ -404,7 +495,7 @@ describe("payment and refund concurrency", () => {
       nextAttemptAt: new Date(0).toISOString(),
     });
     await service.reconcileRefunds();
-    expect((await store.getPartialRefund("partial-boundary"))).toMatchObject({ status: "MANUAL_HOLD", recoveryAttempts: 5 });
+    expect((await store.getPartialRefund("partial-boundary"))).toMatchObject({ status: "MANUAL_HOLD", recoveryAttempts: 5, manualProviderStatus: "PROCESSING", manualHoldReason: expect.stringContaining("PROCESSING") });
     await service.reconcileRefunds();
     expect({ submissions, queries }).toEqual({ submissions: 1, queries: 2 });
     await store.savePartialRefund({
@@ -415,7 +506,7 @@ describe("payment and refund concurrency", () => {
       nextAttemptAt: new Date(0).toISOString(),
     });
     await service.reconcileRefunds();
-    expect((await store.getPartialRefund("partial-submit-boundary"))).toMatchObject({ status: "MANUAL_HOLD", recoveryAttempts: 5 });
+    expect((await store.getPartialRefund("partial-submit-boundary"))).toMatchObject({ status: "MANUAL_HOLD", recoveryAttempts: 5, manualProviderStatus: "PROCESSING", manualHoldReason: expect.stringContaining("PROCESSING") });
     await service.reconcileRefunds();
     expect({ submissions, queries }).toEqual({ submissions: 2, queries: 2 });
     await service.handleRefundNotification({ eventId: "late-boundary", type: "REFUND.SUCCESS", providerRefundNo: "PARTIAL-BOUNDARY", providerRefundId: "late", status: "SUCCEEDED", bodyHash: "late-boundary-hash" });

@@ -111,7 +111,7 @@ describe("consumer profile and homepage merchandising APIs", () => {
     directory = await mkdtemp(join(tmpdir(), "homepage-banner-api-"));
     const store = new MemoryStore(false);
     const now = new Date().toISOString();
-    await store.saveProductCategory({ id: "vegetables", name: "时蔬", sortOrder: 1, status: "ACTIVE", createdAt: now, updatedAt: now });
+    await store.saveProductCategory({ id: "vegetables", name: "时蔬", iconKey: "leaf", sortOrder: 1, status: "ACTIVE", createdAt: now, updatedAt: now });
     app = await buildApp({ config: loadConfig({ NODE_ENV: "test", PRODUCT_IMAGE_DIR: directory }), store });
     const admin = { "x-demo-user-id": "operator", "x-demo-role": "OPERATOR" };
     const user = { "x-demo-user-id": "consumer", "x-demo-role": "USER" };

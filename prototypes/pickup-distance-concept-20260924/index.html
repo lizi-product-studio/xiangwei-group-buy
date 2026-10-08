@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>乡味集 · 自提点选择交互原型</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <div class="mobile-scenarios" aria-label="切换原型情境">
+    <button type="button" class="active" data-scenario="entry">首次进入</button>
+    <button type="button" data-scenario="near">已定位</button>
+    <button type="button" data-scenario="denied">未定位</button>
+    <button type="button" data-scenario="fixed">指定团期</button>
+  </div>
+  <main class="preview">
+    <aside class="brief">
+      <div class="eyebrow"><span class="mark">乡</span> XIANG WEI JI / PICKUP</div>
+      <h1>选择自提点</h1>
+      <p class="lede">优先展示有本期团购的点位；获得定位后，各组按距离排列。</p>
+      <div class="scenario-panel">
+        <div class="panel-top"><span>查看状态</span><small>点击切换</small></div>
+        <button type="button" class="scenario active" data-scenario="entry"><span class="scenario-index">01</span><span><b>首次进入</b><small>优先请求定位</small></span><span class="arrow">↗</span></button>
+        <button type="button" class="scenario" data-scenario="near"><span class="scenario-index">02</span><span><b>已定位</b><small>同组由近到远</small></span><span class="arrow">↗</span></button>
+        <button type="button" class="scenario" data-scenario="denied"><span class="scenario-index">03</span><span><b>未定位</b><small>手动选择</small></span><span class="arrow">↗</span></button>
+        <button type="button" class="scenario" data-scenario="fixed"><span class="scenario-index">04</span><span><b>指定团期</b><small>固定领取点</small></span><span class="arrow">↗</span></button>
+      </div>
+      <p class="footnote">交互原型 · 示例距离与点位 · 不获取真实位置</p>
+    </aside>
+    <section class="device-wrap" aria-label="自提点选择页面原型">
+      <div class="phone">
+        <div class="phone-screen"><div id="app"></div></div>
+      </div>
+      <span class="device-caption">375 × 812 小程序视口示意</span>
+    </section>
+  </main>
+  <script src="./app.js"></script>
+</body>
+</html>

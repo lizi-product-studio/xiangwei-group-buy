@@ -16,7 +16,28 @@ export function readMiniProgramEnvironment(accountInfo: unknown): MiniProgramEnv
 const environment = readMiniProgramEnvironment(wx.getAccountInfoSync?.());
 const deployment = resolveDeployment(environment);
 
+function primeLocationPermission(): void {
+  wx.getSetting({
+    success(settings) {
+      const authorization = settings.authSetting['scope.userLocation'];
+      if (authorization === true) {
+        wx.getLocation({ type: 'gcj02', fail: () => undefined });
+        return;
+      }
+      if (authorization === false || wx.getStorageSync<boolean>('locationPermissionPrompted')) return;
+      wx.setStorageSync('locationPermissionPrompted', true);
+      wx.authorize({
+        scope: 'scope.userLocation',
+        success: () => wx.getLocation({ type: 'gcj02', fail: () => undefined }),
+        fail: () => undefined,
+      });
+    },
+    fail: () => undefined,
+  });
+}
+
 App<IAppOption>({
+  onLaunch() { primeLocationPermission(); },
   globalData: {
     apiBaseUrl: deployment.apiBaseUrl,
     authMode: deployment.authMode,

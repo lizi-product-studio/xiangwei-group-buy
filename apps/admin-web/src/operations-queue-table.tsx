@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, Button, Select, Table, type TableProps } from "antd";
+import { Alert, Button, Select, type TableProps } from "antd";
+import { AdminTable as Table } from "./admin-table.tsx";
 import { adminErrorText, type QueuePage, type QueueQuery } from "./api.ts";
 import { adminErrorNoticeFromText } from "./request-error.tsx";
 import { displayLabel } from "./labels.ts";

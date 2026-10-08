@@ -1,32 +1,69 @@
-import { api } from "./api";
+import { api, AuthExpiredError } from "./api";
 
-function requestWechatPayment(payload: Record<string, string>): Promise<void> {
+export type PaymentAttemptOutcome = "returned" | "cancelled" | "failed" | "uncertain";
+
+function requestWechatPayment(payload: Record<string, string>): Promise<PaymentAttemptOutcome> {
   const { timeStamp, nonceStr, paySign } = payload;
   const packageValue = payload.package;
   if (!timeStamp || !nonceStr || !packageValue || !paySign)
-    return Promise.reject(new Error("支付参数不完整"));
-  return new Promise((resolve, reject) =>
-    wx.requestPayment({
-      timeStamp,
-      nonceStr,
-      package: packageValue,
-      signType: "RSA",
-      paySign,
-      success: () => resolve(),
-      fail: (error) => reject(new Error(error.errMsg || "支付未完成")),
-    }),
-  );
+    return Promise.resolve("uncertain");
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (outcome: PaymentAttemptOutcome) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolve(outcome);
+    };
+    // A missing SDK callback must not trap the customer on checkout forever.
+    const timeout = setTimeout(() => finish("uncertain"), 45_000);
+    try {
+      wx.requestPayment({
+        timeStamp,
+        nonceStr,
+        package: packageValue,
+        signType: "RSA",
+        paySign,
+        success: () => finish("returned"),
+        fail: (error) => {
+          const errorMessage = error.errMsg ?? "";
+          finish(/cancel/i.test(errorMessage) ? "cancelled" : errorMessage ? "failed" : "uncertain");
+        },
+      });
+    } catch {
+      finish("uncertain");
+    }
+  });
 }
 
-export async function payOrder(orderId: string, beforeNext?: () => boolean): Promise<"mock" | "wechat"> {
-  const payment = await api.initiatePayment(orderId);
-  if (beforeNext && !beforeNext()) throw new Error("支付状态已变化，请重新查看订单");
-  if (payment.provider === "mock") {
-    await api.mockPay(orderId);
-    if (beforeNext && !beforeNext()) throw new Error("支付状态已变化，请重新查看订单");
-  } else {
-    await requestWechatPayment(payment.clientPayload);
-    if (beforeNext && !beforeNext()) throw new Error("支付状态已变化，请重新查看订单");
+/** Client callbacks are clues only; the result page must re-read server state. */
+export async function payOrder(orderId: string, beforeNext?: () => boolean): Promise<PaymentAttemptOutcome> {
+  try {
+    const payment = await api.initiatePayment(orderId);
+    if (beforeNext && !beforeNext()) return "uncertain";
+    if (payment.provider === "mock") {
+      await api.mockPay(orderId);
+      return "returned";
+    }
+    return await requestWechatPayment(payment.clientPayload);
+  } catch (error) {
+    if (error instanceof AuthExpiredError) throw error;
+    return "uncertain";
   }
-  return payment.provider;
+}
+
+/** Client callbacks are clues only; the result page must re-read server state. */
+export async function payOrderCheckout(checkoutBatchId: string, beforeNext?: () => boolean): Promise<PaymentAttemptOutcome> {
+  try {
+    const payment = await api.initiateCheckoutPayment(checkoutBatchId);
+    if (beforeNext && !beforeNext()) return "uncertain";
+    if (payment.provider === "mock") {
+      await api.mockPayCheckout(checkoutBatchId);
+      return "returned";
+    }
+    return await requestWechatPayment(payment.clientPayload);
+  } catch (error) {
+    if (error instanceof AuthExpiredError) throw error;
+    return "uncertain";
+  }
 }

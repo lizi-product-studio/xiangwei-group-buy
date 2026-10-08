@@ -22,7 +22,9 @@
       "version": null
     },
     "build": {
-      "evidence": ["evidence/admin-operability-closure-2026-09-02.md"],
+      "evidence": [
+        "evidence/admin-operability-closure-2026-09-02.md"
+      ],
       "status": "PASS",
       "version": "admin-operability-2026-09-02"
     },
@@ -32,12 +34,16 @@
       "version": null
     },
     "qa": {
-      "evidence": ["evidence/admin-operability-closure-2026-09-02.md"],
+      "evidence": [
+        "evidence/admin-operability-closure-2026-09-02.md"
+      ],
       "status": "PASS",
       "version": "admin-operability-2026-09-02"
     },
     "release": {
-      "evidence": ["evidence/admin-operability-closure-2026-09-02.md"],
+      "evidence": [
+        "evidence/admin-operability-closure-2026-09-02.md"
+      ],
       "status": "BLOCKED_EXTERNAL",
       "version": "admin-operability-2026-09-02"
     },
@@ -96,5 +102,27 @@
   "risk_acceptance_authority": "BLOCKING_UNKNOWN",
   "schema_version": 3,
   "updated_at": "2026-09-02T04:25:42Z",
-  "updated_by": "main_agent"
+  "updated_by": "main_agent",
+  "historical_snapshot_notice": "旧流程字段保留为历史证据，不代表现行阶段或门禁。当前交付状态以 current_delivery 和引用任务记录为准。",
+  "current_delivery": {
+    "as_of": "2026-09-28T03:34:00Z",
+    "api_version": "29cc56ed43a78c5d5913af9993068150bea0415e",
+    "api_deployed": true,
+    "api_health": "PASS",
+    "daily_same_host_backup_and_restore": "PASS",
+    "mini_uploaded_version": "0.2.20260928.2",
+    "mini_public_release": "NOT_CONFIRMED",
+    "entity_store": "IMPLEMENTING_NOT_DEPLOYED",
+    "records": [
+      "docs/task-20260928-overall-optimization.md",
+      "docs/task-20260928-mini-feedback.md"
+    ],
+    "open_items": [
+      "entity store migration and capacity acceptance",
+      "real fulfillment, partial refund, subscription delivery and combined payment acceptance",
+      "offsite backup destination",
+      "mini platform review and release",
+      "customer service and data retention decisions"
+    ]
+  }
 }

@@ -1,4 +1,5 @@
-import { Alert, Button, Descriptions, Spin, Table, Tooltip, Typography } from "antd";
+import { Alert, Button, Descriptions, Spin, Tooltip, Typography } from "antd";
+import { AdminTable as Table } from "./admin-table.tsx";
 import type { AuditLog, InternalStaff } from "./api.ts";
 import { formatAuditTime, resolveAuditActor, shortAuditId } from "./audit-display.ts";
 import { displayLabel } from "./labels.ts";

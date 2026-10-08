@@ -19,11 +19,18 @@ class UnhealthyScheduler extends NoopCampaignScheduler {
   }
 }
 class BrokenCampaignStore extends MemoryStore {
-  override async listCampaigns(): Promise<never> {
+  override async listCampaignsByStatus(): Promise<never> {
     const error = new Error("provider timeout token=secret phoneNumber=13800138000");
     error.name = "ProviderError";
     throw error;
   }
+}
+class AggregateStatusStore extends MemoryStore {
+  public getAggregatePayloadStatus() { return { payloadBytes: 4 * 1024 * 1024, tier: "critical" as const }; }
+}
+class EntityModeStore extends MemoryStore {
+  public constructor(private readonly mode: "PREPARED" | "ENTITY") { super(false); }
+  public override async getPersistenceMode() { return this.mode; }
 }
 describe("single community application surface", () => {
   let app: FastifyInstance | undefined;
@@ -46,6 +53,27 @@ describe("single community application surface", () => {
     const response = await app.inject({ method: "GET", url: "/health/ready" });
     expect(response.statusCode, response.body).toBe(503);
     expect(response.json()).toMatchObject({ status: "degraded", dependencies: { [_name]: "degraded" } });
+  });
+  it("reports only aggregate byte count and tier in reconciliation health", async () => {
+    app = await buildApp({ config: loadConfig({ NODE_ENV: "test" }), store: new AggregateStatusStore(false) });
+    const response = await app.inject({ method: "GET", url: "/health/reconciliation" });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ status: "degraded", aggregatePayload: { payloadBytes: 4 * 1024 * 1024, tier: "critical" } });
+    expect(response.body).not.toContain("orders");
+  });
+  it.each([
+    ["PREPARED", true],
+    ["ENTITY", false],
+  ] as const)("keeps %s mode routes closed without single-writer confirmation", async (mode) => {
+    app = await buildApp({ config: loadConfig({ NODE_ENV: "test", SINGLE_WRITER_CONFIRMED: "false" }), store: new EntityModeStore(mode) });
+    expect((await app.inject({ method: "GET", url: "/health/live" })).statusCode).toBe(200);
+    const blocked = await app.inject({ method: "GET", url: "/api/v1/admin/orders", headers: admin });
+    expect(blocked.statusCode).toBe(503);
+    expect(blocked.json()).toMatchObject({ error: { code: "MAINTENANCE_MODE" } });
+  });
+  it("allows routes in ENTITY mode only after single-writer confirmation", async () => {
+    app = await buildApp({ config: loadConfig({ NODE_ENV: "test", SINGLE_WRITER_CONFIRMED: "true" }), store: new EntityModeStore("ENTITY") });
+    expect((await app.inject({ method: "GET", url: "/api/v1/admin/orders", headers: admin })).statusCode).toBe(200);
   });
   it("rejects mismatched subscription IDs without reporting a false preference save", async () => {
     const store = new MemoryStore(false);
@@ -117,7 +145,7 @@ describe("single community application surface", () => {
     const log = lines.join("");
     expect(log).toContain("unhandled request error");
     expect(log).toContain("ProviderError");
-    expect(log).toContain("BrokenCampaignStore.listCampaigns");
+    expect(log).toContain("BrokenCampaignStore.listCampaignsByStatus");
     expect(log).not.toContain("secret");
     expect(log).not.toContain("13800138000");
   });
@@ -806,10 +834,11 @@ describe("single community application surface", () => {
       method: "POST",
       url: "/api/v1/admin/catalog/categories",
       headers: admin,
-      payload: { name: "蔬菜", sortOrder: 1 },
+      payload: { name: "蔬菜", iconKey: "leaf", sortOrder: 1 },
     });
     expect(created.statusCode, created.body).toBe(201);
     const categoryId = created.json().data.id as string;
+    expect(created.json().data.iconKey).toBe("leaf");
     expect((await app.inject({ method: "GET", url: "/api/v1/admin/catalog/categories", headers: admin })).json().data).toHaveLength(1);
     const renamed = await app.inject({
       method: "POST",
@@ -818,7 +847,9 @@ describe("single community application surface", () => {
       payload: { id: categoryId, name: "叶菜", sortOrder: 2 },
     });
     expect(renamed.statusCode, renamed.body).toBe(200);
-    expect(renamed.json().data).toMatchObject({ id: categoryId, name: "叶菜", sortOrder: 2 });
+    expect(renamed.json().data).toMatchObject({ id: categoryId, name: "叶菜", iconKey: "leaf", sortOrder: 2 });
+    const publicCategories = await app.inject({ method: "GET", url: "/api/v1/catalog/categories" });
+    expect(publicCategories.json().data).toEqual([{ id: categoryId, name: "叶菜", iconKey: "leaf" }]);
     const sku = await app.inject({
       method: "POST",
       url: "/api/v1/admin/catalog/skus",

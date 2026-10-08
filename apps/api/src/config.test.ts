@@ -35,6 +35,10 @@ const productionBase = {
 };
 
 describe("production configuration safety", () => {
+  it("requires the aggregate critical threshold to exceed the warning threshold", () => {
+    expect(() => loadConfig({ NODE_ENV: "test", AGGREGATE_PAYLOAD_WARNING_BYTES: "4096", AGGREGATE_PAYLOAD_CRITICAL_BYTES: "4096" })).toThrow(/严重告警阈值/);
+    expect(loadConfig({ NODE_ENV: "test" })).toMatchObject({ AGGREGATE_PAYLOAD_WARNING_BYTES: 2 * 1024 * 1024, AGGREGATE_PAYLOAD_CRITICAL_BYTES: 4 * 1024 * 1024 });
+  });
   it("rejects placeholder payment callback hosts", () => {
     expect(() =>
       loadConfig({

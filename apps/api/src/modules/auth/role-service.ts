@@ -34,9 +34,9 @@ export class RoleService {
   async delete(id: string, actor: Actor, requestId: string): Promise<void> {
     if (!actor.roles.includes("SUPER_ADMIN")) throw new BusinessError("FORBIDDEN", "只有超级管理员可以删除角色", 403);
     await this.store.transaction(async store => {
+      if (id === "SUPER_ADMIN") throw new BusinessError("INVALID_STATE_TRANSITION", "超级管理员是系统保留角色，不能删除", 409);
       const role = await store.getAccessRole(id);
       if (!role) throw new BusinessError("RESOURCE_NOT_FOUND", "角色不存在", 404);
-      if (role.builtIn) throw new BusinessError("INVALID_STATE_TRANSITION", "预置角色可编辑或停用，不能删除", 409);
       if ((await store.listInternalStaff()).some(staff => !staff.archivedAt && (staff.accessRoleId ?? staff.role) === id)) throw new BusinessError("RESOURCE_IN_USE", "该角色仍关联员工，请先调整员工角色", 409);
       await store.deleteAccessRole(id);
       await store.saveAuditLog({ id: randomUUID(), actorId: actor.userId, action: "ACCESS_ROLE_DELETED", resourceType: "ACCESS_ROLE", resourceId: id, requestId, beforeData: role, afterData: null, createdAt: await store.databaseNow() });

@@ -4,11 +4,12 @@ type CategoryPage = { data: Record<string, unknown>; setData?: (patch: Record<st
 
 const mocks = vi.hoisted(() => ({
   listCampaigns: vi.fn(),
+  listProductCategories: vi.fn(),
   loadServiceAreaContext: vi.fn(),
   loadPickupPoints: vi.fn(),
   isCampaignPurchasable: vi.fn(),
 }));
-vi.mock("../../utils/api", () => ({ api: { listCampaigns: mocks.listCampaigns }, customerErrorMessage: (_error: unknown, fallback: string) => fallback }));
+vi.mock("../../utils/api", () => ({ api: { listCampaigns: mocks.listCampaigns, listProductCategories: mocks.listProductCategories }, customerErrorMessage: (_error: unknown, fallback: string) => fallback }));
 vi.mock("../../utils/service-area", () => ({ loadServiceAreaContext: mocks.loadServiceAreaContext }));
 vi.mock("../../utils/pickup-point", () => ({ loadPickupPoints: mocks.loadPickupPoints }));
 vi.mock("../../utils/consumer-display", () => ({ isCampaignPurchasable: mocks.isCampaignPurchasable, formatChinaDateTime: vi.fn(() => "今晚 21:00"), estimatedArrivalText: vi.fn(() => "到货后通知") }));
@@ -20,6 +21,7 @@ describe("category page", () => {
     storage.clear();
     vi.resetModules();
     vi.clearAllMocks();
+    mocks.listProductCategories.mockResolvedValue([{ id: 'tools', name: '工具' }, { id: 'food', name: '食品' }]);
     vi.stubGlobal("wx", {
       getStorageSync: (key: string) => storage.get(key),
       removeStorageSync: (key: string) => storage.delete(key),
@@ -61,5 +63,21 @@ describe("category page", () => {
     expect(page.data.activeCategory).toBe("工具");
     expect(page.data.products).toHaveLength(1);
     expect(storage.has("categoryFilter")).toBe(false);
+  });
+
+  it("keeps a configured category visible with an empty product list", async () => {
+    mocks.loadServiceAreaContext.mockResolvedValue({ selected: { id: "area-1", name: "服务区" } });
+    mocks.loadPickupPoints.mockResolvedValue({ selected: { id: "point-1", name: "自提点" } });
+    mocks.listCampaigns.mockResolvedValue([]);
+    mocks.listProductCategories.mockResolvedValue([{ id: "fruit", name: "水果" }]);
+    let page: CategoryPage | undefined;
+    vi.stubGlobal("Page", (definition: CategoryPage) => { page = definition; return definition; });
+    await import("./index");
+    if (!page) throw new Error("category page was not registered");
+    page.setData = (patch) => Object.assign(page!.data, patch);
+    await page.loadProducts.call(page);
+    expect(page.data.categories).toEqual(["全部", "水果"]);
+    page.selectCategory.call(page, { currentTarget: { dataset: { category: "水果" } } });
+    expect(page.data.products).toEqual([]);
   });
 });

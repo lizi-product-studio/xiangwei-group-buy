@@ -1,0 +1,12 @@
+TASK-20260907-UI-PROTOTYPE / attempt 1 / frontend_worker
+Implementation evidence, not independent acceptance:
+PASS node --check app.js (final syntax)
+PASS Node VM render of all 14 mini pages and all 12 admin modules
+PASS Node VM dispatch of seed click: logged=true and profile identity rendered
+PASS Node VM default point drawer includes disabled save control
+PASS explicit raster asset references exist
+Server: Python PID 31321 / 127.0.0.1:4180 / exec session 3029
+NOT_RUN by writer: actual browser rendering, real viewport layout and click testing.
+Browser and independent QA assigned to root; shared CUA not accessed by writer.
+Only prototypes/ui-redesign-20260907 written in this task; no product edits.
+Attempt 2: PASS node verify.cjs — filtered stable row identity, unknown refund query-only action, arrival quantity form + sum guard, order status mismatch empty state, payment stage-skip disclosure, all point form fields preserved.

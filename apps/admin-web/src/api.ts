@@ -77,6 +77,7 @@ export interface CatalogSku {
 export interface ProductCategory {
   id: string;
   name: string;
+  iconKey: "basket" | "leaf" | "grain" | "beans" | "ready-food" | "seasoning" | "fruit" | "tools";
   sortOrder: number;
   status: "ACTIVE" | "INACTIVE";
   createdAt: string;
@@ -115,8 +116,21 @@ export type CampaignInput = {
       sellableQuantity: number;
     }>;
   };
+export type CampaignGroupInput = {
+  title: string;
+  cutoffAt: string;
+  groupingMode: "PER_POINT" | "ALL_POINTS";
+  minTotalQuantity: number;
+  failureAction: "CANCEL_AND_REFUND" | "POSTPONE";
+  points: Array<{ pickupPointId: string; dispatchAt: string; estimatedArrivalStartAt: string | null; estimatedArrivalEndAt: string | null }>;
+  items: Array<{ catalogSkuId: string; retailPriceCents: number; stockByPoint: Array<{ pickupPointId: string; sellableQuantity: number }> }>;
+};
 export interface Campaign {
   id: string;
+  campaignGroupId?: string;
+  campaignGroupVersion?: number | null;
+  groupingMode?: "PER_POINT" | "ALL_POINTS";
+  groupPaidQuantity?: number;
   createdAt?: string;
   title: string;
   serviceAreaId: string;
@@ -313,6 +327,8 @@ export interface QualityCase {
   status: string;
   /** Provider-facing partial-refund fact, if finance has started execution. */
   financeRefundStatus: string | null;
+  /** Status of every provider refund obligation attached to this quality case. */
+  financeRefundStatuses?: string[];
   refundAmountCents: number | null;
   financialFactsError: string | null;
   refundAmountKind: "PENDING" | "RECORDED" | null;
@@ -419,6 +435,8 @@ export interface Refund {
   amountCents: number;
   createdAt: string;
 }
+export interface FinancePage<T> { items: T[]; total: number; nextCursor: string | null; pageSize: number }
+export interface RefundHistoryRow extends Refund { refundType: "FULL" | "PARTIAL"; manualProviderStatus?: string | null; manualHoldReason?: string | null; lastError?: string | null; manualRetryAttempts?: number }
 export interface LedgerTransaction {
   id: string;
   referenceId: string;
@@ -546,14 +564,6 @@ export function parseRetryAfterSeconds(
   return Math.max(1, Math.ceil((date - now) / 1_000));
 }
 
-export function loginRetryRemainingSeconds(until: number | null, now = Date.now()): number {
-  return until ? Math.max(0, Math.ceil((until - now) / 1_000)) : 0;
-}
-
-export function loginRetryMessage(seconds: number): string {
-  return `登录尝试过于频繁，请在 ${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒后重试；持续失败请联系超级管理员`;
-}
-
 const validationFieldNames: Record<string, string> = {
   category: "分类",
   title: "商品名称",
@@ -638,8 +648,8 @@ function adminErrorTextBase(error: unknown): string {
     return "该账号已停用，请联系超级管理员";
   if (statusCode === 403 && value?.code === "PASSWORD_SETUP_REQUIRED")
     return "该账号需要超级管理员重置临时密码";
-  if (statusCode === 429 || value?.code === "LOGIN_RATE_LIMITED")
-    return "登录尝试过于频繁，请稍后再试";
+  if (statusCode === 429)
+    return "请求过于频繁，请稍后再试";
   if (statusCode === 403 || value?.code === "FORBIDDEN")
     return "当前账号没有执行此操作的权限";
   if (statusCode === 404) return "未找到要操作的数据，请刷新后重试";
@@ -827,6 +837,7 @@ export const api = {
   pickupWindowsPage: (query: QueueQuery) => queuePage<PickupWindow>("/api/v1/admin/community/pickup-windows", query),
   exceptionsPage: (query: QueueQuery) => queuePage<FulfillmentException>("/api/v1/admin/fulfillment-exceptions", query),
   manualNotificationsPage: (query: QueueQuery) => queuePage<Notification>("/api/v1/admin/notifications/manual", query),
+  serviceAreaInterestsPage: (query: QueueQuery) => queuePage<ServiceAreaInterest>("/api/v1/admin/service-area-interests", query),
   login: async (username: string, password: string) => {
     const v = await post<
       | { nextAction: "LOGIN"; accessToken: string; roles: string[]; userId: string }
@@ -886,6 +897,7 @@ export const api = {
   saveCategory: (body: {
     id?: string;
     name: string;
+    iconKey: ProductCategory["iconKey"];
     sortOrder?: number;
     status?: "ACTIVE" | "INACTIVE";
   }) => post<ProductCategory>("/api/v1/admin/catalog/categories", body),
@@ -1001,6 +1013,10 @@ export const api = {
   consumerPhone: (id:number) => request<{phoneNumber:string}>(`/api/v1/admin/consumers/${encodeURIComponent(String(id))}/phone`),
   campaigns: () => request<Campaign[]>("/api/v1/admin/campaigns"),
   createCampaign: (body: CampaignInput) => post<Campaign>("/api/v1/admin/campaigns", body),
+  createCampaignGroup: (body: CampaignGroupInput) => post<{ group: unknown; campaigns: Campaign[] }>("/api/v1/admin/campaign-groups", body),
+  updateCampaignGroup: (id: string, version: number, body: CampaignGroupInput) => patch<{ group: unknown; campaigns: Campaign[] }>(`/api/v1/admin/campaign-groups/${encodeURIComponent(id)}`, { ...body, version }),
+  postponeCampaignGroup: (id: string, body: { cutoffAt: string; points: Array<{ campaignId: string; dispatchAt: string; estimatedArrivalStartAt: string | null; estimatedArrivalEndAt: string | null }> }) =>
+    post<Campaign[]>(`/api/v1/admin/campaign-groups/${encodeURIComponent(id)}/postpone`, body),
   updateCampaign: (id: string, body: CampaignInput & {version: number}) => patch<Campaign>(`/api/v1/admin/campaigns/${id}`, body),
   deleteCampaign: (id: string, version: number) => request<{id:string;deleted:boolean}>(`/api/v1/admin/campaigns/${id}`, {method:"DELETE",body:JSON.stringify({version})}),
   campaignAction: (
@@ -1029,6 +1045,7 @@ export const api = {
     request<Order[]>(
       `/api/v1/admin/orders${orderNo ? `?orderNo=${encodeURIComponent(orderNo)}` : ""}`,
     ),
+  adminOrder: (id: string) => request<Order>(`/api/v1/admin/orders/${encodeURIComponent(id)}`),
   ordersSearch: (query: {
     keyword: string;
     status?: string;
@@ -1226,11 +1243,18 @@ export const api = {
     post(`/api/v1/admin/fulfillment-exceptions/${id}/refund`, {
       confirmationNote: note,
     }),
-  finance: () =>
-    request<{ full: Refund[]; partial: Refund[] }>(
-      "/api/v1/admin/finance/refunds",
-    ),
-  ledger: () => request<LedgerTransaction[]>("/api/v1/admin/finance/ledger"),
+  finance: (query: { cursor?: string; pageSize?: number; status?: string; orderId?: string; reference?: string } = {}) => {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== "") params.set(key, String(value));
+    return request<FinancePage<RefundHistoryRow>>(`/api/v1/admin/finance/refunds?${params}`);
+  },
+  checkManualRefund: (type: "FULL" | "PARTIAL", id: string) => post<{status: string}>(`/api/v1/admin/finance/refunds/${type}/${id}/check`),
+  retryManualRefund: (type: "FULL" | "PARTIAL", id: string) => post<{status: string}>(`/api/v1/admin/finance/refunds/${type}/${id}/retry`),
+  ledger: (query: { cursor?: string; pageSize?: number; referenceId?: string } = {}) => {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== "") params.set(key, String(value));
+    return request<FinancePage<LedgerTransaction>>(`/api/v1/admin/finance/ledger?${params}`);
+  },
   manualNotifications: () =>
     request<Notification[]>("/api/v1/admin/notifications/manual"),
   retryNotification: (id: string) =>
@@ -1247,8 +1271,6 @@ export const api = {
     post<Notification>(`/api/v1/admin/notifications/${id}/manual-complete`, {
       ...value,
     }),
-  serviceAreaInterests: () =>
-    request<ServiceAreaInterest[]>("/api/v1/admin/service-area-interests"),
   updateServiceAreaInterest: (
     id: string,
     body: { status: "CONTACTED" | "CLOSED"; note: string },

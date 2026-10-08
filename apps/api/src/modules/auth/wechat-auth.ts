@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { BusinessError } from '@hometown/domain';
 import type { CommerceStore } from '../core/store.js';
-import { ensureConsumerPublicNumbers } from '../customers/consumer-directory-service.js';
+import { ensureConsumerPublicNumber } from '../customers/consumer-directory-service.js';
 import type { User } from '../core/types.js';
 import type { WechatPhoneExchange } from './wechat-phone.js';
 import type { Actor } from './auth.js';
@@ -56,10 +56,14 @@ export class AuthService {
     const bound = hasVerifiedPhone(existing);
     if (!bound && !phoneCode) return { phoneRequired: true };
     const verified = bound ? null : await this.phoneExchange.exchange(phoneCode!, openId);
+    // Backfill outside the login transaction: the helper takes its own write
+    // transaction when legacy consumers lack numbers, and MemoryStore cannot
+    // re-enter the transaction lock held by the caller.
+    if (existing && existing.consumerNumber === undefined)
+      await ensureConsumerPublicNumber(this.store, existing.id);
     const token = randomBytes(32).toString('base64url');
     const expiresAt = new Date(Date.now() + this.sessionTtlSeconds * 1_000).toISOString();
     const user = await this.store.transaction(async (store) => {
-      await ensureConsumerPublicNumbers(store);
       let value = await store.findUserByWechatOpenId(openId);
       if (!value) {
         const now = new Date().toISOString();
@@ -83,14 +87,14 @@ export class AuthService {
     return { phoneRequired: false, accessToken: token, expiresAt, userId: user.id };
   }
 
-  public async authenticate(authorization: string | undefined): Promise<Actor | null> {
+  public async authenticate(authorization: string | undefined, scopedStore: CommerceStore = this.store): Promise<Actor | null> {
     if (!authorization?.startsWith('Bearer ')) return null;
     const token = authorization.slice(7).trim();
     if (token.length < 32 || token.length > 128) return null;
-    const session = await this.store.getActiveAuthSession(tokenHash(token));
+    const session = await scopedStore.getActiveAuthSession(tokenHash(token));
     if (!session || session.roles.length !== 1 || session.roles[0] !== 'USER') return null;
-    const user = await this.store.getUser(session.userId);
-    if (!user || user.status !== 'ACTIVE' || !hasVerifiedPhone(user) || !await this.store.getPrivacyConsent(user.id, this.privacyVersion)) return null;
+    const user = await scopedStore.getUser(session.userId);
+    if (!user || user.status !== 'ACTIVE' || !hasVerifiedPhone(user) || !await scopedStore.getPrivacyConsent(user.id, this.privacyVersion)) return null;
     return { userId: session.userId, roles: session.roles };
   }
 
@@ -118,9 +122,7 @@ export class AuthService {
         throw new BusinessError('AUTH_REQUIRED', '请先完成微信登录', 401);
       if (version !== expectedVersion)
         throw new BusinessError('CONCURRENT_MODIFICATION', '个人资料已更新，请刷新后重试', 409);
-      const duplicate = (await store.listConsumerUsers()).find(
-        (user) => user.id !== userId && user.phoneNumber === verified.phoneNumber,
-      );
+      const duplicate = await store.findOtherConsumerUserByPhone(verified.phoneNumber, userId);
       if (duplicate)
         throw new BusinessError('RESOURCE_IN_USE', '该手机号已绑定其他账号', 409);
       const after = {

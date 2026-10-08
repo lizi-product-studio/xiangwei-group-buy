@@ -109,4 +109,11 @@ describe('stored phone qualification', () => {
     expect(exchange).not.toHaveBeenCalled();
     await expect(service.login('new-code', 'old')).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
   });
+  it('does not scan the consumer directory during login for an already numbered user', async () => {
+    const { store, service } = setup();
+    await store.saveUser({ id: 'numbered-user', wechatOpenId: 'openid-privacy-user', consumerNumber: 1, status: 'ACTIVE', createdAt: new Date().toISOString(), ...phone });
+    vi.spyOn(store, 'listConsumerUsers').mockRejectedValue(new Error('unbounded consumer scan'));
+    const result = await service.login('new-code', version);
+    expect(result).toMatchObject({ phoneRequired: false, userId: 'numbered-user' });
+  });
 });

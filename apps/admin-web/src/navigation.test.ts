@@ -4,6 +4,7 @@ import {
   getAdminNavigationPath,
   getDefaultAdminPage,
   isAllowedAdminPage,
+  resolveAdminPageFromSearch,
 } from "./navigation.ts";
 
 const visibleItems = (roles: string[]) =>
@@ -32,6 +33,7 @@ describe("admin navigation", () => {
     ]);
     expect(groups.flatMap(group => group.items.map(item => item.key))).toContain("categories");
     expect(groups.flatMap(group => group.items.map(item => item.key))).toContain("finance-ledger");
+    expect(groups.flatMap(group => group.items.map(item => item.key))).not.toContain("finance-reconciliation");
     expect(groups.flatMap(group => group.items.map(item => item.key))).toContain("homepage-banners");
   });
 
@@ -76,6 +78,13 @@ describe("admin navigation", () => {
 
   it("never gives a consumer an admin default page", () => {
     expect(getDefaultAdminPage(["USER"])).toBeNull();
+  });
+
+  it("restores a permitted page from the URL and ignores unknown or forbidden pages", () => {
+    expect(resolveAdminPageFromSearch("?page=finance-reconciliation&billId=old", ["FINANCE"], undefined, "finance")).toBe("finance");
+    expect(resolveAdminPageFromSearch("?page=orders", ["FINANCE"], undefined, "finance")).toBe("orders");
+    expect(resolveAdminPageFromSearch("?page=campaigns", ["FINANCE"], undefined, "finance")).toBe("finance");
+    expect(resolveAdminPageFromSearch("?page=not-a-page", ["SUPER_ADMIN"], undefined, "dashboard")).toBe("dashboard");
   });
 
   it("resolves a stable parent and child path for the active page", () => {

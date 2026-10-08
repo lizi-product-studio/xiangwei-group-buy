@@ -28,9 +28,10 @@ export interface RefundRequest {
   amountCents: number;
   totalCents: number;
 }
+export type ProviderRefundStatus = "PROCESSING" | "SUCCEEDED" | "FAILED" | "CLOSED" | "ABNORMAL";
 export interface RefundResult {
   providerRefundId: string | null;
-  status: "PROCESSING" | "SUCCEEDED" | "FAILED";
+  status: ProviderRefundStatus;
 }
 export interface RefundNotFound {
   kind: "NOT_FOUND";
@@ -41,12 +42,22 @@ export interface RefundNotification {
   type: string;
   providerRefundNo: string;
   providerRefundId: string | null;
-  status: "PROCESSING" | "SUCCEEDED" | "FAILED";
+  status: ProviderRefundStatus;
   bodyHash: string;
 }
 
+export interface PaymentReference { outTradeNo: string }
+export type PaymentQueryResult =
+  | { status: "SUCCEEDED" | "REFUNDING"; outTradeNo: string; providerPaymentId: string; amountCents: number }
+  | { status: "NOTPAY" | "CLOSED" | "REVOKED" | "USERPAYING" | "PAYERROR" | "NOT_FOUND"; outTradeNo: string };
+export interface PaymentCloseResult { status: "CLOSED" }
+
 export interface PaymentProvider {
   readonly name: "mock" | "wechat";
+  // Optional for existing custom/mock providers. Callers must fail closed when
+  // the configured real provider lacks cancellation reconciliation capability.
+  queryPayment?(input: PaymentReference): Promise<PaymentQueryResult>;
+  closePayment?(input: PaymentReference): Promise<PaymentCloseResult>;
   initiate(
     order: Order,
     payerOpenId: string | null,
@@ -73,6 +84,12 @@ export class MockPaymentProvider implements PaymentProvider {
       clientPayload: { mock: "true" },
       providerContext: { outTradeNo: order.orderNo },
     };
+  }
+  public async queryPayment(input: PaymentReference): Promise<PaymentQueryResult> {
+    return { status: "NOT_FOUND", outTradeNo: input.outTradeNo };
+  }
+  public async closePayment(): Promise<PaymentCloseResult> {
+    return { status: "CLOSED" };
   }
   public parseNotification(): PaymentNotification {
     throw new BusinessError("FORBIDDEN", "模拟支付不接收外部回调", 403);
@@ -129,6 +146,11 @@ export class WechatPaymentProvider implements PaymentProvider {
         "支付用户缺少微信 OpenID",
         409,
       );
+    const expiresAt = Date.parse(order.expiresAt);
+    // WeChat silently extends shorter windows to one minute. Never extend the
+    // local reservation deadline by creating a new prepay near its expiry.
+    if (!Number.isFinite(expiresAt) || expiresAt - Date.now() <= 60_000)
+      throw new BusinessError("INVALID_STATE_TRANSITION", "订单剩余支付时间不足，请重新下单", 409);
     const response = await this.request<{ prepay_id: string }>(
       "POST",
       "/v3/pay/transactions/jsapi",
@@ -136,6 +158,7 @@ export class WechatPaymentProvider implements PaymentProvider {
         appid: this.config.appId,
         mchid: this.config.mchid,
         out_trade_no: order.orderNo,
+        time_expire: new Date(expiresAt).toISOString(),
         description: `${this.config.merchantName}社区团购订单`.slice(0, 127),
         notify_url: this.config.notifyUrl,
         amount: { total: Number(order.totalCents), currency: "CNY" },
@@ -158,6 +181,45 @@ export class WechatPaymentProvider implements PaymentProvider {
       },
       providerContext: { outTradeNo: order.orderNo },
     };
+  }
+
+  public async closePayment(input: PaymentReference): Promise<PaymentCloseResult> {
+    await this.request<void>("POST",
+      `/v3/pay/transactions/out-trade-no/${encodeURIComponent(input.outTradeNo)}/close`,
+      { mchid: this.config.mchid }, true);
+    return { status: "CLOSED" };
+  }
+
+  public async queryPayment(input: PaymentReference): Promise<PaymentQueryResult> {
+    let value: { appid?: string; mchid?: string; out_trade_no?: string; trade_state?: string;
+      transaction_id?: string; amount?: { total?: number; currency?: string } };
+    try {
+      value = await this.request("GET",
+        `/v3/pay/transactions/out-trade-no/${encodeURIComponent(input.outTradeNo)}?mchid=${encodeURIComponent(this.config.mchid)}`);
+    } catch (error) {
+      const details = error instanceof BusinessError
+        ? error.details as { httpStatus?: number; providerCode?: string } | undefined : undefined;
+      if (details?.httpStatus === 404 && details.providerCode === "ORDER_NOT_EXIST")
+        return { status: "NOT_FOUND", outTradeNo: input.outTradeNo };
+      throw error;
+    }
+    if (!value || value.appid !== this.config.appId || value.mchid !== this.config.mchid
+      || value.out_trade_no !== input.outTradeNo)
+      throw new BusinessError("FINANCIAL_INCONSISTENT", "微信支付查询身份不一致", 502);
+    if (value.trade_state === "SUCCESS" || value.trade_state === "REFUND") {
+      if (!value.transaction_id || !Number.isSafeInteger(value.amount?.total)
+        || Number(value.amount?.total) <= 0 || value.amount?.currency !== "CNY")
+        throw new BusinessError("FINANCIAL_INCONSISTENT", "微信支付查询交易或金额不完整", 502);
+      return { status: value.trade_state === "SUCCESS" ? "SUCCEEDED" : "REFUNDING",
+        outTradeNo: input.outTradeNo, providerPaymentId: value.transaction_id,
+        amountCents: value.amount!.total! };
+    }
+    switch (value.trade_state) {
+      case "NOTPAY": case "CLOSED": case "REVOKED": case "USERPAYING": case "PAYERROR":
+        return { status: value.trade_state, outTradeNo: input.outTradeNo };
+      default:
+        throw new BusinessError("EXTERNAL_SERVICE_ERROR", "微信支付返回未知交易状态", 502);
+    }
   }
 
   public parseNotification(
@@ -231,8 +293,8 @@ export class WechatPaymentProvider implements PaymentProvider {
     } catch (error) {
       if (
         error instanceof BusinessError &&
-        (error.details as { httpStatus?: number } | undefined)?.httpStatus ===
-          404
+        (error.details as { httpStatus?: number; providerCode?: string } | undefined)?.httpStatus === 404 &&
+        (error.details as { providerCode?: string } | undefined)?.providerCode === "RESOURCE_NOT_EXISTS"
       )
         return { kind: "NOT_FOUND" };
       throw error;
@@ -277,6 +339,7 @@ export class WechatPaymentProvider implements PaymentProvider {
     method: string,
     path: string,
     payload?: unknown,
+    expectNoContent = false,
   ): Promise<T> {
     const body = payload === undefined ? "" : JSON.stringify(payload);
     const timestamp = String(Math.floor(Date.now() / 1000));
@@ -311,6 +374,11 @@ export class WechatPaymentProvider implements PaymentProvider {
         502,
         { providerCode: error.code, httpStatus: response.status },
       );
+    }
+    if (expectNoContent) {
+      if (response.status !== 204 || raw !== "")
+        throw new BusinessError("EXTERNAL_SERVICE_ERROR", "微信关单返回意外应答", 502);
+      return undefined as T;
     }
     return JSON.parse(raw) as T;
   }
@@ -370,10 +438,11 @@ export class WechatPaymentProvider implements PaymentProvider {
     ) as unknown;
   }
   private refundStatus(status: string | undefined): RefundResult["status"] {
-    return status === "SUCCESS"
-      ? "SUCCEEDED"
-      : status === "PROCESSING"
-        ? "PROCESSING"
-        : "FAILED";
+    if (status === "SUCCESS") return "SUCCEEDED";
+    if (status === "PROCESSING") return "PROCESSING";
+    if (status === "CLOSED") return "CLOSED";
+    if (status === "ABNORMAL") return "ABNORMAL";
+    if (status === "FAIL" || status === "FAILED") return "FAILED";
+    throw new BusinessError("EXTERNAL_SERVICE_ERROR", "微信支付返回未知退款状态", 502);
   }
 }

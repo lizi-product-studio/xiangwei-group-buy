@@ -144,8 +144,8 @@ test("治理和审计读取的同身份迟到响应不会覆盖最新 generation
       },
     });
   });
-  await page.route("**/api/v1/admin/service-area-interests", (route) =>
-    route.fulfill({ json: { data: [] } }),
+  await page.route("**/api/v1/admin/service-area-interests?**", (route) =>
+    route.fulfill({ json: { data: [], pagination: { page: 1, pageSize: 20, total: 0 } } }),
   );
   await page.goto("/");
   await login(page, account.username, account.password);
@@ -208,9 +208,9 @@ test("跨身份后迟到的治理和审计响应不会泄露前一身份数据",
       json: { pagination: {page: 1, pageSize: 20, total: 2}, data: [notification("current-operator", "CURRENT-OPERATOR")] },
     });
   });
-  await page.route("**/api/v1/admin/service-area-interests", (route) =>
+  await page.route("**/api/v1/admin/service-area-interests?**", (route) =>
     route.fulfill({
-      json: { data: [interest("current-operator", "CURRENT-OPERATOR")] },
+      json: { data: [interest("current-operator", "CURRENT-OPERATOR")], pagination: { page: 1, pageSize: 20, total: 1 } },
     }),
   );
   await page.route("**/api/v1/admin/audit-logs", (route) =>

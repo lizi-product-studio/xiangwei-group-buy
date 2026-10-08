@@ -5,6 +5,7 @@ type CartPage = {
   setData: (patch: Record<string, unknown>) => void;
   refresh: () => void;
   openPickup: () => void;
+  showPickupAddress: (event: WechatMiniprogram.BaseEvent) => void;
 };
 
 describe('empty cart pickup context', () => {
@@ -36,7 +37,21 @@ describe('empty cart pickup context', () => {
     await import('./index');
     page!.setData = (patch) => Object.assign(page!.data, patch);
     page!.refresh.call(page);
-    expect(page!.data.cart).toBeNull();
+    expect(page!.data.groups).toEqual([]);
     expect(page!.data.pickupPoint).toMatchObject({ name: '松林社区自提点', address: '松林路 8 号' });
+  });
+
+  it("opens the full address from the selected cart group rather than the current area", async () => {
+    let page: CartPage | undefined;
+    vi.stubGlobal('Page', (definition: CartPage) => { page = definition; return definition; });
+    await import('./index');
+    const showModal = vi.mocked(wx.showModal);
+    page!.data.groups = [{ groupKey: 'area-b:point-b', pickupPointName: '北区三中自提点', pickupPointAddress: '河北省北区第三中学东门 2 号楼' }];
+    page!.showPickupAddress.call(page, { currentTarget: { dataset: { key: 'area-b:point-b' } } } as unknown as WechatMiniprogram.BaseEvent);
+    expect(showModal).toHaveBeenCalledWith(expect.objectContaining({
+      title: '北区三中自提点',
+      content: '河北省北区第三中学东门 2 号楼',
+      showCancel: false,
+    }));
   });
 });

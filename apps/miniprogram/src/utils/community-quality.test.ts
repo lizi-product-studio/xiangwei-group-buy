@@ -15,6 +15,7 @@ describe("community quality entry", () => {
         Date.parse(deadline) - 1,
       ),
     ).toBe(true);
+    expect(canSubmitCommunityQualityCase({ status: "COMPLETED", qualityDeadlineAt: deadline }, Date.parse(deadline) - 1)).toBe(true);
     expect(
       canSubmitCommunityQualityCase(
         { status: "PICKED_UP", qualityDeadlineAt: deadline },
@@ -33,5 +34,6 @@ describe("community quality entry", () => {
   it("renders a user-facing pending status rather than an internal enum", () => {
     expect(communityQualityCaseStatusText("REGISTERED")).toBe("待客服受理");
     expect(communityQualityCaseStatusText("REFUNDING")).toBe("退款处理中");
+    expect(communityQualityCaseStatusText("REJECTED")).toBe("已驳回");
   });
 });

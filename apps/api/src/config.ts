@@ -18,6 +18,8 @@ const configSchema = z.object({
     .default("info"),
   TRUST_PROXY: z.stringbool().default(false),
   RATE_LIMIT_MAX: z.coerce.number().int().min(10).max(10000).default(300),
+  AGGREGATE_PAYLOAD_WARNING_BYTES: z.coerce.number().int().min(1024).default(2 * 1024 * 1024),
+  AGGREGATE_PAYLOAD_CRITICAL_BYTES: z.coerce.number().int().min(2048).default(4 * 1024 * 1024),
   REQUIRE_HTTPS: z.stringbool().default(false),
   AUTH_PROVIDER: z.enum(["demo", "wechat"]).default("demo"),
   PRIVACY_NOTICE_VERSION: z
@@ -58,6 +60,10 @@ const configSchema = z.object({
   WECHAT_PAY_REFUND_NOTIFY_URL: z.string().url().optional(),
   WECHAT_PAY_MERCHANT_NAME: z.string().min(2).max(120).optional(),
   DATA_STORE: z.enum(["memory", "mysql"]).default("memory"),
+  /** Explicit cutover gate: blocks all application routes except health and skips workers/reconciliation. */
+  MAINTENANCE_MODE: z.stringbool().default(false),
+  /** Operator attestation set only after all prior writers are stopped. */
+  SINGLE_WRITER_CONFIRMED: z.stringbool().default(false),
   DATABASE_URL: z.string().url().optional(),
   QUEUE_DRIVER: z.enum(["memory", "redis"]).default("memory"),
   REDIS_URL: z.string().url().optional(),
@@ -101,6 +107,8 @@ export function loadConfig(
   environment: NodeJS.ProcessEnv = process.env,
 ): AppConfig {
   const config = configSchema.parse(environment);
+  if (config.AGGREGATE_PAYLOAD_CRITICAL_BYTES <= config.AGGREGATE_PAYLOAD_WARNING_BYTES)
+    throw new BusinessError("VALIDATION_ERROR", "聚合体积严重告警阈值必须高于预警阈值", 500);
   if (config.DATA_STORE === "mysql" && !config.DATABASE_URL)
     throw new BusinessError(
       "VALIDATION_ERROR",

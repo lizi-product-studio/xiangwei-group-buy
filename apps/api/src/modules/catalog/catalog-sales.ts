@@ -26,6 +26,12 @@ export async function calculateNetSalesSnapshot(
   store: CommerceStore,
   orders?: Awaited<ReturnType<CommerceStore["listOrders"]>>,
 ): Promise<NetSalesSnapshot> {
+  if (!orders) {
+    return {
+      quantities: await store.getNetSalesQuantities(),
+      fullyRefundedOrderIds: new Set(),
+    };
+  }
   const values = orders ?? await store.listOrders(Number.MAX_SAFE_INTEGER);
   const refunds = await store.listOrderRefunds(Number.MAX_SAFE_INTEGER);
   const fullyRefundedOrderIds = new Set(

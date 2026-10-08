@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily hometown database backup
+
+[Timer]
+OnCalendar=*-*-* 03:20:00
+RandomizedDelaySec=300
+Persistent=true
+Unit=hometown-database-backup.service
+
+[Install]
+WantedBy=timers.target

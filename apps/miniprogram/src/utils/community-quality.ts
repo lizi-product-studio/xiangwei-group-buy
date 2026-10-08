@@ -7,7 +7,7 @@ const COMMUNITY_QUALITY_STATUS: Record<
 > = {
   REGISTERED: "待客服受理",
   ACCEPTED: "处理中",
-  REJECTED: "未受理",
+  REJECTED: "已驳回",
   REFUNDING: "退款处理中",
   RESOLVED: "已处理完成",
 };

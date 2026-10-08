@@ -1,19 +1,29 @@
 <view class="ui-view cart-page">
-  <view class="cart-heading"><text class="cart-heading__title">购物车</text><text class="cart-heading__note">本期好物 · 固定自提点领取</text></view>
-  <view wx:if="{{!cart}}" class="cart-empty-state">
+  <view class="cart-heading"><text class="cart-heading__title">购物车</text><text class="cart-heading__note">切换点位或团期，已选商品都会保留</text></view>
+  <view wx:if="{{!groups.length}}" class="cart-empty-state">
     <view class="empty-pickup-card" bindtap="openPickup">
       <view wx:if="{{pickupPoint && pickupPoint.photoUrl}}" class="empty-pickup-card__photo"><product-image src="{{pickupPoint.photoUrl}}" image-mode="aspectFill" label="当前自提点照片" /></view>
-      <view wx:elif="{{pickupPoint}}" class="empty-pickup-card__photo empty-pickup-card__photo--empty"><text>暂无点位照片</text></view>
-      <view wx:else class="empty-pickup-card__photo empty-pickup-card__photo--empty"><text>选择点位</text></view>
-      <view class="empty-pickup-card__copy"><text class="ui-text empty-pickup-card__eyebrow">当前固定自提点</text><text class="ui-text empty-pickup-card__name">{{pickupPoint ? pickupPoint.name : '尚未选择固定自提点'}}</text><text class="ui-text empty-pickup-card__address">{{pickupPoint ? pickupPoint.address : '选择方便领取的附近点位'}}</text></view>
-      <text class="empty-pickup-card__chevron">›</text>
+      <view wx:else class="empty-pickup-card__photo empty-pickup-card__photo--empty"><text>{{pickupPoint ? '暂无点位照片' : '选择点位'}}</text></view>
+      <view class="empty-pickup-card__copy"><text class="ui-text empty-pickup-card__eyebrow">当前固定自提点</text><text class="ui-text empty-pickup-card__name">{{pickupPoint ? pickupPoint.name : '尚未选择固定自提点'}}</text><text wx:if="{{pickupPoint && pickupPointDisplayAddress}}" class="empty-pickup-card__address">{{pickupPointDisplayAddress}}</text><text wx:elif="{{!pickupPoint}}" class="empty-pickup-card__address">选择方便领取的附近点位</text></view><text class="empty-pickup-card__chevron">›</text>
     </view>
-    <view class="ui-view cart-empty"><view class="ui-view cart-empty__mark"><image class="ui-image empty-asset" src="/assets/tab-cart-default.png" mode="aspectFit"/></view><text class="ui-text">购物车还是空的</text><text class="ui-text">从当前收货区域正在收单的商品里挑几件吧。</text><navigator class="ui-navigator" open-type="switchTab" url="/pages/home/index">去逛团购</navigator></view>
+    <view class="ui-view cart-empty"><view class="ui-view cart-empty__mark"><image class="ui-image empty-asset" src="/assets/tab-cart-default.png" mode="aspectFit"/></view><text class="ui-text">购物车还是空的</text><text class="ui-text">不同团期、不同自提点的商品可以一起结算。</text><navigator class="ui-navigator" open-type="switchTab" url="/pages/home/index">去逛团购</navigator></view>
   </view>
   <block wx:else>
-    <view class="ui-view cart-context"><view class="ui-view"><text class="ui-text">{{cart.campaignTitle}}</text><text class="ui-text">{{cart.pickupPointName}} · {{cart.pickupPointAddress}}</text></view><text class="ui-text" bindtap="clearAll">清空</text></view>
-    <view wx:if="{{areaMismatch}}" class="ui-view cart-warning">当前固定自提点与购物车不一致，请切回该自提点或清空后重新选购。</view>
-    <view class="ui-view cart-list"><view wx:for="{{cart.items}}" wx:key="skuId" class="ui-view cart-line"><view class="ui-image"><product-image src="{{item.imageUrl || ''}}" /></view><view class="ui-view cart-line__copy"><text class="ui-text">{{item.title}}</text><text class="ui-text">{{item.skuName}}</text><text class="ui-text money">{{item.priceText}}</text></view><view class="ui-view cart-line__tools"><text class="ui-text remove" data-id="{{item.skuId}}" bindtap="removeLine">删除</text><view class="ui-view qty"><text class="ui-text" data-id="{{item.skuId}}" data-step="-1" bindtap="changeQuantity">−</text><text class="ui-text">{{item.quantity}}</text><text class="ui-text" data-id="{{item.skuId}}" data-step="1" bindtap="changeQuantity">＋</text></view></view></view></view>
-    <view wx:if="{{count > 0}}" class="ui-view cart-bar"><view class="ui-view"><text class="ui-text">共 {{count}} 件</text><text class="ui-text money">{{total}}</text></view><button class="ui-button {{areaMismatch ? 'ui-disabled' : ''}} primary-button" disabled="{{areaMismatch}}" bindtap="checkout">去结算</button></view>
+    <view class="cart-toolbar"><view class="group-select" data-key="all" bindtap="toggleAll"><text class="checkmark {{allSelected ? 'checked' : ''}}">{{allSelected ? '✓' : ''}}</text><text>全选</text></view><text class="cart-clear" bindtap="clearAll">清空</text></view>
+    <view wx:for="{{groups}}" wx:key="groupKey" class="multi-cart-group">
+      <view class="group-heading" data-key="{{item.groupKey}}" bindtap="toggleGroup">
+        <text class="checkmark {{item.selected ? 'checked' : ''}}">{{item.selected ? '✓' : ''}}</text>
+        <view class="group-heading__copy"><text class="group-title">{{item.campaignTitle}}</text><text class="group-subtitle" data-key="{{item.groupKey}}" catchtap="showPickupAddress">{{item.pickupPointName}}<text wx:if="{{item.pickupPointDisplayAddress}}"> · {{item.pickupPointDisplayAddress}}</text></text><text class="group-arrival">预计领取：{{item.arrivalLabel}}</text><text class="group-cutoff">截单：{{item.cutoffText}}</text></view>
+        <text class="group-count">{{item.itemCount}}件</text>
+      </view>
+      <view wx:for="{{item.items}}" wx:for-item="line" wx:key="skuId" class="ui-view cart-line">
+        <view class="ui-image cart-line__image"><product-image src="{{line.imageUrl || ''}}" /></view>
+        <view class="ui-view cart-line__copy"><text class="ui-text cart-line__title">{{line.title}}</text><text class="ui-text cart-line__sku">{{line.skuName}}</text><text class="ui-text money">{{line.priceText}}</text></view>
+        <view class="ui-view cart-line__tools"><text class="ui-text remove" data-key="{{item.groupKey}}" data-id="{{line.skuId}}" catchtap="removeLine">删除</text><view class="ui-view qty"><text class="ui-text" data-key="{{item.groupKey}}" data-id="{{line.skuId}}" data-step="-1" catchtap="changeQuantity">−</text><text class="ui-text">{{line.quantity}}</text><text class="ui-text" data-key="{{item.groupKey}}" data-id="{{line.skuId}}" data-step="1" catchtap="changeQuantity">＋</text></view></view>
+      </view>
+      <view class="group-total"><text>{{item.itemCount}} 件商品</text><text>小计 <text class="money">{{item.totalText}}</text></text></view>
+    </view>
+    <view class="multi-cart-note">每个团期和自提点各生成一张订单；付款前会再次核对价格、库存、截单时间和领取地点。</view>
+    <view class="ui-view cart-bar"><view class="cart-bar__summary"><text class="selected-groups">已选 {{selectedGroupCount}} 组 · {{selectedCount}} 件</text><text class="money">{{selectedTotal}}</text></view><button class="ui-button primary-button {{!selectedGroupCount ? 'ui-disabled' : ''}}" disabled="{{!selectedGroupCount}}" bindtap="checkout">去结算</button></view>
   </block>
 </view>

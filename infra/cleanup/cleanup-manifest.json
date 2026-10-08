@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "allowedRoots": [
+    "/tmp/hometown-release-staging",
+    "/var/tmp/hometown-release-staging"
+  ],
+  "entries": []
+}

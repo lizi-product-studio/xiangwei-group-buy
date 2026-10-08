@@ -226,7 +226,8 @@ describe('registered consumer and authenticated staff full business flow', () =>
     await unchanged(() => request({ method: 'POST', url: '/api/v1/pickup/verify', headers: manager.headers, payload: { ...pickup, items: [{ catalogSkuId: sku.id, quantity: 2 }] } }, 409));
     expect((await post('/api/v1/pickup/verify', manager.headers, { ...pickup, pickupRequestId: randomUUID() })).items[0].pickedUpQuantity).toBe(2);
     const complete = await snapshot();
-    expect(complete.status).toBe('PICKED_UP');
+    expect(complete.status).toBe('COMPLETED');
+    expect((await store.getCampaign(campaign.id))?.status).toBe('COMPLETED');
     expect(complete.items[0].name).toBe(expectedItemName);
     expect(complete.items[0].pickedUpQuantity).toBe(2);
     expect(complete.pickupReceipts).toHaveLength(2);

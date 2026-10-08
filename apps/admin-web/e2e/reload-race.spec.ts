@@ -91,7 +91,19 @@ test("同一身份的迟到员工列表响应不会覆盖创建后的最新刷�
   await expect(page.getByRole("heading", { name: "员工管理" })).toBeVisible();
   await expect.poll(() => firstStaffResponseHeld).toBe(true);
 
-  await page.getByRole("button", { name: "新增员工" }).click();
+  // The page-wide loading overlay correctly blocks staff mutations while the
+  // active settings read is pending. Start a newer page generation, let its
+  // staff read complete, then return to the staff flow while the original
+  // response remains held for the stale-response assertion below.
+  await page.getByRole("menuitem", { name: "操作日志" }).click();
+  await expect(page.getByRole("heading", { name: "审计记录" })).toBeVisible();
+  await page.getByRole("menuitem", { name: "员工管理" }).click();
+  await expect(page.getByRole("heading", { name: "员工管理" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "刷新" })).not.toHaveClass(/ant-btn-loading/);
+
+  const addStaffButton = page.getByRole("button", { name: "新增员工" });
+  await expect(addStaffButton).toBeEnabled();
+  await addStaffButton.click();
   await page.getByLabel("姓名").fill("迟到响应后仍存在的新员工");
   await page.getByLabel("登录账号").fill(`reload.race.staff.${suffix}`);
   await page.getByLabel("手机号").fill(`136${suffix.slice(-8)}`);

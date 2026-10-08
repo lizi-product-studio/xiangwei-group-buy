@@ -32,6 +32,36 @@ async function account(store:MemoryStore,id:string,role:Role,accessRoleId?:strin
   return {authorization:`Bearer ${login.accessToken}`};
 }
 describe("configurable access roles",()=>{
+  it("maps campaign-group and order-detail routes to explicit capabilities", async()=>{
+    expect(ROUTE_PERMISSIONS["POST /api/v1/admin/campaign-groups"]).toEqual(["campaigns.create"]);
+    expect(ROUTE_PERMISSIONS["PATCH /api/v1/admin/campaign-groups/:id"]).toEqual(["campaigns.edit"]);
+    expect(ROUTE_PERMISSIONS["POST /api/v1/admin/campaign-groups/:id/postpone"]).toEqual(["campaigns.edit"]);
+    expect(ROUTE_PERMISSIONS["GET /api/v1/admin/orders/:id"]).toEqual(["orders.view"]);
+
+    const store=new SnapshotStore(false);await account(store,"super","SUPER_ADMIN");
+    const roles=new RoleService(store);
+    const creator=await roles.save(null,{...roleInput,name:"活动新建",permissions:["campaigns.create"]},superActor,"create");
+    const editor=await roles.save(null,{...roleInput,name:"活动编辑",permissions:["campaigns.edit"]},superActor,"edit");
+    const orderViewer=await roles.save(null,{...roleInput,name:"订单查看",permissions:["orders.view"]},superActor,"orders");
+    const unrelated=await roles.save(null,{...roleInput,name:"无关查看",permissions:["products.view"]},superActor,"unrelated");
+    const creatorHeaders=await account(store,"campaign-creator","OPERATOR",creator.id);
+    const editorHeaders=await account(store,"campaign-editor","OPERATOR",editor.id);
+    const orderHeaders=await account(store,"order-viewer","OPERATOR",orderViewer.id);
+    const unrelatedHeaders=await account(store,"unrelated-viewer","OPERATOR",unrelated.id);
+    app=await buildApp({store,config:loadConfig({NODE_ENV:"test"})});
+    const requests=[
+      {method:"POST" as const,url:"/api/v1/admin/campaign-groups",headers:creatorHeaders,payload:{}},
+      {method:"PATCH" as const,url:"/api/v1/admin/campaign-groups/missing-group",headers:editorHeaders,payload:{}},
+      {method:"POST" as const,url:"/api/v1/admin/campaign-groups/missing-group/postpone",headers:editorHeaders,payload:{}},
+      {method:"GET" as const,url:"/api/v1/admin/orders/missing-order",headers:orderHeaders},
+    ];
+    for(const request of requests){
+      const allowed=await app.inject(request);
+      expect(allowed.statusCode,`${request.method} ${request.url}`).not.toBe(403);
+      const denied=await app.inject({...request,headers:unrelatedHeaders});
+      expect(denied.statusCode,`${request.method} ${request.url}`).toBe(403);
+    }
+  });
   it("keeps phone-detail permission separate from the consumer directory while granting it to customer service",()=>{
     expect(BUILTIN_ACCESS_ROLES.find(role=>role.id==="CUSTOMER_SERVICE")?.permissions).toContain("consumers.phone.view");
     expect(BUILTIN_ACCESS_ROLES.find(role=>role.id==="OPERATOR")?.permissions).not.toContain("consumers.phone.view");
@@ -70,11 +100,65 @@ describe("configurable access roles",()=>{
     await expect(service.save(null,{...roleInput,permissions:["point-pickup.verify"]},superActor,"scope")).rejects.toThrow();
     const custom=await service.save(null,roleInput,superActor,"create");
     await expect(service.save(custom.id,{...roleInput,version:99},superActor,"stale")).rejects.toMatchObject({code:"CONCURRENT_MODIFICATION"});
-    await expect(service.delete("OPERATOR",superActor,"builtin")).rejects.toMatchObject({code:"INVALID_STATE_TRANSITION"});
+    await expect(service.delete("SUPER_ADMIN",superActor,"reserved")).rejects.toMatchObject({code:"INVALID_STATE_TRANSITION"});
     await account(store,"viewer","OPERATOR",custom.id);
     await expect(service.delete(custom.id,superActor,"bound")).rejects.toMatchObject({code:"RESOURCE_IN_USE"});
     await expect(new StaffService(store).update("viewer",{role:"PICKUP_MANAGER",accessRoleId:custom.id,reason:"调整岗位"},superActor,"assign")).rejects.toMatchObject({code:"VALIDATION_ERROR"});
     const extra=await service.save(null,{...roleInput,name:"待删除"},superActor,"extra");await service.delete(extra.id,superActor,"delete");expect(await store.getAccessRole(extra.id)).toBeNull();
+  });
+  it("allows deleting an unassigned built-in, but suspended non-archived staff still block it and archived history stays intact",async()=>{
+    const store=new SnapshotStore(false);await account(store,"super","SUPER_ADMIN");const service=new RoleService(store);
+    await account(store,"operator-active","OPERATOR","OPERATOR");
+    await expect(service.delete("OPERATOR",superActor,"active-bound")).rejects.toMatchObject({code:"RESOURCE_IN_USE"});
+    const suspended=await store.getInternalStaff("operator-active");expect(suspended).not.toBeNull();
+    await store.saveInternalStaff({...suspended!,status:"SUSPENDED",suspendedAt:new Date().toISOString(),suspensionReason:"测试停用"});
+    await expect(service.delete("OPERATOR",superActor,"suspended-bound")).rejects.toMatchObject({code:"RESOURCE_IN_USE"});
+    await new StaffService(store).archiveSuspended("operator-active","测试归档",superActor,"archive");
+    const archived=await store.getInternalStaff("operator-active");expect(archived).toMatchObject({role:"OPERATOR",accessRoleId:"OPERATOR"});expect(archived?.archivedAt).toBeTruthy();
+    await service.delete("OPERATOR",superActor,"delete-built-in");
+    expect(await store.getAccessRole("OPERATOR")).toBeNull();
+    expect((await store.listAccessRoles()).some(role=>role.id==="OPERATOR")).toBe(false);
+    expect((JSON.parse(store.dump()) as {deletedAccessRoleIds:string[]}).deletedAccessRoleIds).toContain("OPERATOR");
+    const restored=new SnapshotStore(false);restored.restore(store.dump());
+    expect(await restored.getAccessRole("OPERATOR")).toBeNull();
+    expect(await restored.getInternalStaff("operator-active")).toMatchObject({role:"OPERATOR",archivedAt:archived?.archivedAt});
+    const legacy=new SnapshotStore(false);legacy.restore('{"accessRoles":[]}');
+    expect(await legacy.getAccessRole("CUSTOMER_SERVICE")).not.toBeNull();
+  });
+  it("keeps role deletion and concurrent employee binding atomic, and rolls back failed audits",async()=>{
+    const store=new SnapshotStore(false);await account(store,"super","SUPER_ADMIN");const service=new RoleService(store);const staff=new StaffService(store);
+    const createFirst=await service.save(null,{...roleInput,name:"并发先绑定"},superActor,"race-create");
+    const created=staff.create({displayName:"并发员工",username:"race-create",phone:"13900000001",role:"OPERATOR",accessRoleId:createFirst.id,status:"ACTIVE",pickupPointIds:[]},superActor,"race-staff");
+    const deleteAfterCreate=service.delete(createFirst.id,superActor,"race-delete");
+    const createOutcome=await Promise.allSettled([created,deleteAfterCreate]);
+    expect(createOutcome[0]?.status).toBe("fulfilled");
+    expect(createOutcome[1]).toMatchObject({status:"rejected",reason:{code:"RESOURCE_IN_USE"}});
+    expect(await store.getAccessRole(createFirst.id)).not.toBeNull();
+
+    const deleteFirstRole=await service.save(null,{...roleInput,name:"并发先删除"},superActor,"race-delete-create");
+    const deleteFirst=service.delete(deleteFirstRole.id,superActor,"race-delete-wins");
+    const assignAfterDelete=staff.create({displayName:"并发未绑定",username:"race-delete",phone:"13900000002",role:"OPERATOR",accessRoleId:deleteFirstRole.id,status:"ACTIVE",pickupPointIds:[]},superActor,"race-create-loses");
+    const deleteOutcome=await Promise.allSettled([deleteFirst,assignAfterDelete]);
+    expect(deleteOutcome[0]?.status).toBe("fulfilled");
+    expect(deleteOutcome[1]).toMatchObject({status:"rejected",reason:{code:"VALIDATION_ERROR"}});
+    expect(await store.getAccessRole(deleteFirstRole.id)).toBeNull();
+
+    class FailingDeleteAudit extends MemoryStore { dump(){return this.exportState();} override async saveAuditLog(...args:Parameters<MemoryStore["saveAuditLog"]>){if(args[0].action==="ACCESS_ROLE_DELETED")throw new Error("audit unavailable");return super.saveAuditLog(...args);} }
+    const failing=new FailingDeleteAudit(false);await account(failing,"super","SUPER_ADMIN");const failingService=new RoleService(failing);
+    const role=await failingService.save(null,{...roleInput,name:"审计回滚删除"},superActor,"rollback-create");
+    await expect(failingService.delete(role.id,superActor,"rollback-delete")).rejects.toThrow("audit unavailable");
+    expect(await failing.getAccessRole(role.id)).toMatchObject({id:role.id,permissions:["products.view"]});
+    expect((JSON.parse(failing.dump()) as {deletedAccessRoleIds:string[]}).deletedAccessRoleIds).not.toContain(role.id);
+  });
+  it("rejects non-super-admin API deletion while auditing successful built-in deletion",async()=>{
+    const store=new SnapshotStore(false);await account(store,"super","SUPER_ADMIN");const operator=await account(store,"operator","OPERATOR");
+    app=await buildApp({store,config:loadConfig({NODE_ENV:"test"})});
+    expect((await app.inject({method:"DELETE",url:"/api/v1/admin/access/roles/FINANCE",headers:operator})).statusCode).toBe(403);
+    const root=await account(store,"root-admin","SUPER_ADMIN");
+    const response=await app.inject({method:"DELETE",url:"/api/v1/admin/access/roles/FINANCE",headers:root});
+    expect(response.statusCode,response.body).toBe(200);
+    expect(await store.getAccessRole("FINANCE")).toBeNull();
+    expect((JSON.parse(store.dump()) as {audits:Array<{action:string;resourceId:string;beforeData:unknown}>}).audits).toContainEqual(expect.objectContaining({action:"ACCESS_ROLE_DELETED",resourceId:"FINANCE",beforeData:expect.objectContaining({id:"FINANCE",builtIn:true})}));
   });
   it("preserves legacy identities and permits a custom finance grant without granting platform governance",async()=>{
     const store=new MemoryStore(false);await account(store,"super","SUPER_ADMIN");

@@ -16,8 +16,6 @@ import {
 } from "../../utils/service-area";
 import {
   addCartLine,
-  clearCart,
-  readCart,
   saveCheckoutDraft,
   type CartSnapshot,
 } from "../../utils/cart";
@@ -30,6 +28,7 @@ import { PageLoadCoordinator } from "../../utils/page-load-guard";
 
 let countdownTimer: number | null = null;
 const loadCoordinator = new PageLoadCoordinator();
+const initialShows = new WeakSet<object>();
 
 function deliveryCopy(plan: DeliveryPlanDto | null): {
   title: string;
@@ -169,7 +168,17 @@ Page({
 
   async onShow() {
     loadCoordinator.show();
-    if (!this.data.campaign) return;
+    if (!initialShows.has(this)) {
+      initialShows.add(this);
+      if (!this.data.campaign && !this.data.loading && this.data.campaignId)
+        void this.loadCampaign(this.data.campaignId, this.data.skuId || undefined);
+      if (!this.data.campaign) return;
+    }
+    if (!this.data.campaign) {
+      if (this.data.campaignId)
+        void this.loadCampaign(this.data.campaignId, this.data.skuId || undefined);
+      return;
+    }
     try {
       this.setData({
         area: (await loadServiceAreaContext(this.data.campaign.serviceAreaId))
@@ -187,6 +196,8 @@ Page({
 
   onHide() {
     loadCoordinator.hide();
+    if (this.data.loading && !this.data.campaign)
+      this.setData({ loading: false, error: "团期加载已中断，返回后将重新核对" });
   },
 
   startCountdown() {
@@ -299,6 +310,8 @@ Page({
       pickupPointId: point.id,
       pickupPointName: point.name,
       pickupPointAddress: point.address,
+      cutoffAt: campaign.cutoffAt,
+      arrivalText: estimatedArrivalText(campaign) ?? "到货时间待确认",
       updatedAt: Date.now(),
       items: [
         {
@@ -317,21 +330,6 @@ Page({
   async addToCart() {
     const draft = this.buildDraft();
     if (!draft || this.data.soldOut || !this.data.canBuy) return;
-    const current = readCart();
-    if (
-      current &&
-      (current.campaignId !== draft.campaignId ||
-        current.serviceAreaId !== draft.serviceAreaId)
-    ) {
-      const result = await wx.showModal({
-        title: "更换购物车商品？",
-        content: "购物车只能保留同一团期、同一收货区域的商品。",
-        confirmText: "清空并加入",
-        confirmColor: "#d7472f",
-      });
-      if (!result.confirm) return;
-      clearCart();
-    }
     addCartLine(
       {
         source: "cart",
@@ -342,6 +340,8 @@ Page({
         pickupPointId: draft.pickupPointId,
         pickupPointName: draft.pickupPointName,
         pickupPointAddress: draft.pickupPointAddress,
+        ...(draft.cutoffAt ? { cutoffAt: draft.cutoffAt } : {}),
+        ...(draft.arrivalText ? { arrivalText: draft.arrivalText } : {}),
       },
       draft.items[0]!,
     );

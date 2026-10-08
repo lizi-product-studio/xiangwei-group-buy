@@ -97,9 +97,23 @@ export const catalogSkuSchema = z.object({
   defaultSellableQuantity: z.int().min(0).max(10_000_000).default(0),
   status: z.enum(["ACTIVE", "INACTIVE"]).default("ACTIVE"),
 });
+export const productCategoryIconKeys = [
+  "basket",
+  "leaf",
+  "grain",
+  "beans",
+  "ready-food",
+  "seasoning",
+  "fruit",
+  "tools",
+] as const;
+export const productCategoryIconKeySchema = z.enum(productCategoryIconKeys);
+export type ProductCategoryIconKey = (typeof productCategoryIconKeys)[number];
+
 export const productCategorySchema = z.object({
   id: identifierSchema.optional(),
   name: z.string().trim().min(2).max(40),
+  iconKey: productCategoryIconKeySchema.optional(),
   sortOrder: z.int().min(0).max(1_000_000).default(0),
   status: z.enum(["ACTIVE", "INACTIVE"]).default("ACTIVE"),
 });
@@ -211,6 +225,75 @@ export const communityCampaignSchema = z
       seen.add(item.catalogSkuId);
     }
   });
+
+export const communityCampaignGroupSchema = z.object({
+  title: z.string().trim().min(2).max(80),
+  cutoffAt: z.iso.datetime({ offset: true }),
+  groupingMode: z.enum(["PER_POINT", "ALL_POINTS"]),
+  minTotalQuantity: z.int().min(1).max(1_000_000),
+  failureAction: z.enum(["CANCEL_AND_REFUND", "POSTPONE"]),
+  points: z.array(z.object({
+    pickupPointId: identifierSchema,
+    dispatchAt: z.iso.datetime({ offset: true }),
+    estimatedArrivalStartAt: z.iso.datetime({ offset: true }).nullable().default(null),
+    estimatedArrivalEndAt: z.iso.datetime({ offset: true }).nullable().default(null),
+  })).min(1).max(100),
+  items: z.array(z.object({
+    catalogSkuId: identifierSchema,
+    retailPriceCents: z.int().min(1),
+    stockByPoint: z.array(z.object({ pickupPointId: identifierSchema, sellableQuantity: z.int().min(0).max(1_000_000) })).min(2).max(100),
+  })).min(1).max(500),
+}).superRefine((value, context) => {
+  const pointIds = new Set<string>();
+  for (const [index, point] of value.points.entries()) {
+    if (pointIds.has(point.pickupPointId)) context.addIssue({ code: "custom", path: ["points", index, "pickupPointId"], message: "自提点不能重复" });
+    pointIds.add(point.pickupPointId);
+    if (Date.parse(point.dispatchAt) <= Date.parse(value.cutoffAt)) context.addIssue({ code: "custom", path: ["points", index, "dispatchAt"], message: "发车时间必须晚于截单时间" });
+    if (Boolean(point.estimatedArrivalStartAt) !== Boolean(point.estimatedArrivalEndAt)) context.addIssue({ code: "custom", path: ["points", index], message: "预计到货时间必须成对填写" });
+    if (point.estimatedArrivalStartAt && Date.parse(point.estimatedArrivalStartAt) < Date.parse(point.dispatchAt)) context.addIssue({ code: "custom", path: ["points", index, "estimatedArrivalStartAt"], message: "预计到货不能早于发车" });
+    if (point.estimatedArrivalStartAt && point.estimatedArrivalEndAt && Date.parse(point.estimatedArrivalEndAt) < Date.parse(point.estimatedArrivalStartAt)) context.addIssue({ code: "custom", path: ["points", index, "estimatedArrivalEndAt"], message: "预计到货结束不能早于开始" });
+  }
+  const itemIds = new Set<string>();
+  for (const [itemIndex, item] of value.items.entries()) {
+    if (itemIds.has(item.catalogSkuId)) context.addIssue({ code: "custom", path: ["items", itemIndex, "catalogSkuId"], message: "同一商品不能重复添加" });
+    itemIds.add(item.catalogSkuId);
+    const stocks = new Map<string, number>();
+    for (const [stockIndex, stock] of item.stockByPoint.entries()) {
+      if (!pointIds.has(stock.pickupPointId) || stocks.has(stock.pickupPointId)) context.addIssue({ code: "custom", path: ["items", itemIndex, "stockByPoint", stockIndex], message: "库存必须按所选自提点各配置一次" });
+      stocks.set(stock.pickupPointId, stock.sellableQuantity);
+    }
+    if (stocks.size !== pointIds.size) context.addIssue({ code: "custom", path: ["items", itemIndex, "stockByPoint"], message: "每个自提点都必须配置商品库存" });
+  }
+  if (value.groupingMode === "PER_POINT") {
+    for (const pointId of pointIds) {
+      const stock = value.items.reduce((sum, item) => sum + (item.stockByPoint.find((entry) => entry.pickupPointId === pointId)?.sellableQuantity ?? 0), 0);
+      if (stock < value.minTotalQuantity) context.addIssue({ code: "custom", path: ["minTotalQuantity"], message: `自提点 ${pointId} 的总库存低于独立成团门槛` });
+    }
+  } else {
+    const stock = value.items.reduce((sum, item) => sum + item.stockByPoint.reduce((subtotal, entry) => subtotal + entry.sellableQuantity, 0), 0);
+    if (stock < value.minTotalQuantity) context.addIssue({ code: "custom", path: ["minTotalQuantity"], message: "所有点位的总库存低于合计成团门槛" });
+  }
+});
+
+export const communityCampaignGroupPostponeSchema = z.object({
+  cutoffAt: z.iso.datetime({ offset: true }),
+  points: z.array(z.object({
+    campaignId: identifierSchema,
+    dispatchAt: z.iso.datetime({ offset: true }),
+    estimatedArrivalStartAt: z.iso.datetime({ offset: true }).nullable(),
+    estimatedArrivalEndAt: z.iso.datetime({ offset: true }).nullable(),
+  })).min(1).max(100),
+}).superRefine((value, context) => {
+  const seen = new Set<string>();
+  for (const [index, point] of value.points.entries()) {
+    if (seen.has(point.campaignId)) context.addIssue({ code: "custom", path: ["points", index, "campaignId"], message: "同一自提点团期不能重复" });
+    seen.add(point.campaignId);
+    if (Date.parse(point.dispatchAt) <= Date.parse(value.cutoffAt)) context.addIssue({ code: "custom", path: ["points", index, "dispatchAt"], message: "发车时间必须晚于统一截单时间" });
+    if (Boolean(point.estimatedArrivalStartAt) !== Boolean(point.estimatedArrivalEndAt)) context.addIssue({ code: "custom", path: ["points", index], message: "预计到货时间必须成对填写" });
+    if (point.estimatedArrivalStartAt && Date.parse(point.estimatedArrivalStartAt) < Date.parse(point.dispatchAt)) context.addIssue({ code: "custom", path: ["points", index, "estimatedArrivalStartAt"], message: "预计到货不能早于发车" });
+    if (point.estimatedArrivalStartAt && point.estimatedArrivalEndAt && Date.parse(point.estimatedArrivalEndAt) < Date.parse(point.estimatedArrivalStartAt)) context.addIssue({ code: "custom", path: ["points", index, "estimatedArrivalEndAt"], message: "预计到货结束不能早于开始" });
+  }
+});
 export const postponeCampaignSchema = z
   .object({
     cutoffAt: z.iso.datetime({ offset: true }),
@@ -259,6 +342,16 @@ export const orderRequestSchema = z.object({
   serviceAreaId: identifierSchema,
   pickupPointId: identifierSchema,
   items: z.array(orderLineSchema).min(1).max(100),
+});
+export const multiOrderCheckoutSchema = z.object({
+  groups: z.array(orderRequestSchema).min(1).max(20).superRefine((groups, context) => {
+    const keys = new Set<string>();
+    groups.forEach((group, index) => {
+      const key = `${group.campaignId}\u0000${group.pickupPointId}`;
+      if (keys.has(key)) context.addIssue({ code: "custom", path: [index], message: "相同团期与自提点只能结算一组订单" });
+      keys.add(key);
+    });
+  }),
 });
 
 export const adminOrderSearchQuerySchema = z.object({
@@ -584,6 +677,7 @@ export const notificationPreferenceSchema = z.object({
 export type CommunityCampaignInput = z.infer<typeof communityCampaignSchema>;
 export type PostponeCampaignInput = z.infer<typeof postponeCampaignSchema>;
 export type OrderRequest = z.infer<typeof orderRequestSchema>;
+export type MultiOrderCheckoutRequest = z.infer<typeof multiOrderCheckoutSchema>;
 export type OpenServiceAreaInput = z.infer<typeof openServiceAreaSchema>;
 export type CreatePickupPointInput = z.infer<typeof createPickupPointSchema>;
 export type UpdatePickupPointInput = z.infer<typeof updatePickupPointSchema>;

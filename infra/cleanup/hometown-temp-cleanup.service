@@ -1,0 +1,16 @@
+[Unit]
+Description=Clean reviewed closed hometown release staging directories
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/bin/python3 /usr/local/lib/hometown-backup/cleanup_manifest.py --apply
+UMask=0077
+LimitCORE=0
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/tmp/hometown-release-staging /var/tmp/hometown-release-staging /run/lock
+MemoryMax=128M
+TimeoutStartSec=600

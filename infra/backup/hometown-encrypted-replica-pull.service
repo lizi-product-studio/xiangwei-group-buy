@@ -1,0 +1,22 @@
+[Unit]
+Description=Pull and verify encrypted hometown database replicas
+Wants=network-online.target
+After=network-online.target ssh.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+EnvironmentFile=/etc/hometown-replica/source.env
+ExecStart=/usr/bin/python3 /usr/local/lib/hometown-backup/encrypted_replica.py pull --source ${REPLICA_SOURCE} --ssh-identity /etc/hometown-replica/ssh_identity --known-hosts /etc/hometown-replica/known_hosts --identity /etc/hometown-replica/age-identity.txt --incoming /var/lib/hometown-replica/incoming
+ExecStartPost=/usr/bin/python3 /usr/local/lib/hometown-backup/encrypted_replica.py status --config-dir /etc/hometown-replica --incoming /var/lib/hometown-replica/incoming --receipts /var/lib/hometown-replica/incoming/receipts
+UMask=0077
+LimitCORE=0
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadOnlyPaths=/etc/hometown-replica
+ReadWritePaths=/var/lib/hometown-replica
+MemoryMax=128M
+TimeoutStartSec=3600

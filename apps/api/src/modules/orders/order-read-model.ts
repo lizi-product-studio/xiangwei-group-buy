@@ -30,6 +30,7 @@ function publicDeliveryPlan(plan: DeliveryPlan | undefined) {
 export async function buildOrderDeliveryViews(
   store: CommerceStore,
   orders: Order[],
+  serverTime?: string,
 ) {
   const facts = await store.listOrderDeliveryFacts(
     orders.map((order) => order.id),
@@ -49,7 +50,7 @@ export async function buildOrderDeliveryViews(
     facts.pickupWindows.map((value) => [value.orderId, value]),
   );
 
-  const now = Date.parse(await store.databaseNow());
+  const now = Date.parse(serverTime ?? await store.databaseNow());
   return orders.map((order) => {
     const { items, ...consumerOrder } = order;
     const orderRefunds = refunds.get(order.id) ?? [];
@@ -126,6 +127,7 @@ export async function buildOrderDeliveryViews(
           skuId: item.skuId,
           productId: item.productId,
           name: item.name,
+          imageUrl: item.imageUrl ?? null,
           quantity: item.quantity,
           unitPriceCents: item.unitPriceCents,
           amountCents: item.amountCents,
