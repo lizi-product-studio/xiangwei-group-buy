@@ -1,5 +1,5 @@
 [Unit]
-Description=Pull and verify encrypted hometown database replicas
+Description=Pull and verify hometown snapshot ciphertext and source metadata
 Wants=network-online.target
 After=network-online.target ssh.service
 
@@ -8,8 +8,8 @@ Type=oneshot
 User=root
 Group=root
 EnvironmentFile=/etc/hometown-replica/source.env
-ExecStart=/usr/bin/python3 /usr/local/lib/hometown-backup/encrypted_replica.py pull --source ${REPLICA_SOURCE} --ssh-identity /etc/hometown-replica/ssh_identity --known-hosts /etc/hometown-replica/known_hosts --identity /etc/hometown-replica/age-identity.txt --incoming /var/lib/hometown-replica/incoming
-ExecStartPost=/usr/bin/python3 /usr/local/lib/hometown-backup/encrypted_replica.py status --config-dir /etc/hometown-replica --incoming /var/lib/hometown-replica/incoming --receipts /var/lib/hometown-replica/incoming/receipts
+ExecStart=/usr/bin/python3 /usr/local/lib/hometown-backup/encrypted_replica.py pull-ciphertext --source ${REPLICA_SOURCE} --expected-uuid ${SOURCE_MYSQL_UUID} --database hometown_food --ssh-identity /etc/hometown-replica/ssh_identity --known-hosts /etc/hometown-replica/known_hosts --incoming /var/lib/hometown-replica/incoming
+ExecStartPost=/usr/bin/python3 /usr/local/lib/hometown-backup/encrypted_replica.py status --ciphertext-only --expected-uuid ${SOURCE_MYSQL_UUID} --database hometown_food --config-dir /etc/hometown-replica --incoming /var/lib/hometown-replica/incoming --receipts /var/lib/hometown-replica/incoming/receipts
 UMask=0077
 LimitCORE=0
 NoNewPrivileges=true

@@ -1,0 +1,18 @@
+[Unit]
+Description=Hometown health, recovery and operations alert monitor
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/lib/hometown-alert/ops_monitor.py
+UMask=0077
+TimeoutStartSec=90
+MemoryMax=96M
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadOnlyPaths=/etc/hometown-alert /var/backups/hometown-database /var/lib/hometown-replica
+ReadWritePaths=/var/lib/hometown-alert

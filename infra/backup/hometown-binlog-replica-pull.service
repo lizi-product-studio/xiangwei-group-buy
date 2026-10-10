@@ -1,0 +1,21 @@
+[Unit]
+Description=Pull, decrypt-verify and continuity-check hometown MySQL binlogs
+Wants=network-online.target
+After=network-online.target ssh.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+EnvironmentFile=/etc/hometown-replica/source.env
+ExecStart=/usr/bin/python3 /usr/local/lib/hometown-backup/binlog_archive.py pull --source ${REPLICA_SOURCE} --expected-uuid ${SOURCE_MYSQL_UUID} --ssh-identity /etc/hometown-replica/ssh_identity --known-hosts /etc/hometown-replica/known_hosts --incoming /var/lib/hometown-replica/binlog
+UMask=0077
+LimitCORE=0
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadOnlyPaths=/etc/hometown-replica
+ReadWritePaths=/var/lib/hometown-replica
+MemoryMax=128M
+TimeoutStartSec=3600

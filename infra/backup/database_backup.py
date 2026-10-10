@@ -28,15 +28,58 @@ def dump(container, database, target):
     command = ["docker", "exec", container, "sh", "-c",
                'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysqldump -uroot --default-character-set=utf8mb4 '
                '--single-transaction --skip-lock-tables --no-tablespaces '
-               '--set-gtid-purged=OFF --hex-blob --order-by-primary '
+               '--set-gtid-purged=OFF --source-data=2 --hex-blob --order-by-primary '
                '--skip-comments --compact --skip-extended-insert "$@"',
                "mysqldump", database]
     subprocess.run(command, stdout=target, stderr=subprocess.DEVNULL, check=True)
 
 
+def snapshot_binlog_position(path):
+    """Read mysqldump's source-data coordinate without loading the dump into memory."""
+    pattern = re.compile(rb"CHANGE (?:REPLICATION SOURCE TO SOURCE_LOG_FILE|MASTER TO MASTER_LOG_FILE)='([^']+)', (?:SOURCE_LOG_POS|MASTER_LOG_POS)=(\d+)")
+    with Path(path).open("rb") as source:
+        prefix = source.read(1024 * 1024)
+    match = pattern.search(prefix)
+    if not match:
+        raise RuntimeError("Snapshot is missing its transactional binary-log coordinate")
+    filename = match.group(1).decode("ascii")
+    position = int(match.group(2))
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+\.\d{6}", filename) or position < 4:
+        raise RuntimeError("Snapshot binary-log coordinate is invalid")
+    return filename, position
+
+
+def source_uuid(container, database):
+    value = mysql(container, database, "SELECT @@server_uuid;").decode("ascii").strip()
+    if not re.fullmatch(r"[0-9a-fA-F-]{36}", value):
+        raise RuntimeError("MySQL server UUID is unavailable")
+    return value.lower()
+
+
 def digest(path):
     with path.open("rb") as source:
         return hashlib.file_digest(source, "sha256").hexdigest()
+
+
+_SOURCE_COORDINATE = re.compile(
+    rb"^\s*-- CHANGE (?:REPLICATION SOURCE TO SOURCE_LOG_FILE='[^']+', SOURCE_LOG_POS=\d+|"
+    rb"MASTER TO MASTER_LOG_FILE='[^']+', MASTER_LOG_POS=\d+);\s*(?:\r?\n)?$"
+)
+
+
+def comparable_dump_digest(path):
+    """Hash every dump byte except mysqldump's one source-position comment."""
+    digest = hashlib.sha256()
+    removed = 0
+    with Path(path).open("rb") as source:
+        for line in source:
+            if _SOURCE_COORDINATE.fullmatch(line):
+                removed += 1
+                continue
+            digest.update(line)
+    if removed > 1:
+        raise RuntimeError("Dump contains multiple source-coordinate statements")
+    return digest.hexdigest()
 
 
 def run(args):
@@ -60,10 +103,12 @@ def run(args):
         target = root / (stamp + "-" + uuid.uuid4().hex[:8] + ".sql.gz")
         with tempfile.TemporaryDirectory(prefix=".snapshot-", dir=root) as tmp:
             plain = Path(tmp) / "snapshot.sql"
+            database_uuid = source_uuid(args.container, args.database)
             with plain.open("xb") as output:
                 dump(args.container, args.database, output)
             if plain.stat().st_size < 100:
                 raise RuntimeError("Database snapshot is unexpectedly small")
+            binlog_file, binlog_position = snapshot_binlog_position(plain)
             source_digest = digest(plain)
             compressed = Path(tmp) / "snapshot.sql.gz"
             with plain.open("rb") as source, compressed.open("xb") as raw:
@@ -77,6 +122,8 @@ def run(args):
             compressed.replace(target)
             receipt = {"status": "BACKUP_OK", "createdAtUtc": stamp,
                        "database": args.database, "file": target.name,
+                       "sourceUuid": database_uuid, "snapshotBinlogFile": binlog_file,
+                       "snapshotBinlogPosition": binlog_position,
                        "compressedSha256": digest(target), "sqlSha256": source_digest,
                        "sizeBytes": target.stat().st_size,
                        "backupSeconds": round(time.monotonic() - started, 3)}
@@ -106,7 +153,7 @@ def run(args):
                         mysql(args.container, drill, source=source)
                     with restored.open("xb") as output:
                         dump(args.container, drill, output)
-                    if digest(restored) != source_digest:
+                    if comparable_dump_digest(restored) != comparable_dump_digest(plain):
                         raise RuntimeError("Restored snapshot differs from original")
                     mysql(args.container, "mysql", f"DROP DATABASE `{drill}`;")
                     receipt.update(restoreStatus="PASS", restoreSchemaRemoved=True,

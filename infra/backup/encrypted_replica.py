@@ -86,6 +86,16 @@ def read_bundle_metadata(bundle: Path, expected_bundle_id: str | None = None) ->
     for name in ("compressedSha256", "sqlSha256", "encryptedSha256"):
         if not isinstance(manifest.get(name), str) or not HEX.fullmatch(manifest[name]):
             raise ValueError("invalid digest in bundle manifest")
+    coordinate_keys = ("sourceUuid", "snapshotBinlogFile", "snapshotBinlogPosition")
+    coordinate_count = sum(key in manifest for key in coordinate_keys)
+    if coordinate_count not in (0, len(coordinate_keys)):
+        raise ValueError("snapshot bundle contains an incomplete binlog coordinate")
+    if coordinate_count:
+        source_uuid, snapshot_file, snapshot_position = (manifest[key] for key in coordinate_keys)
+        if (not isinstance(source_uuid, str) or not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", source_uuid)
+                or not isinstance(snapshot_file, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+\.\d{6}", snapshot_file)
+                or not isinstance(snapshot_position, int) or snapshot_position < 4):
+            raise ValueError("snapshot source UUID or transactional binlog coordinate is invalid")
     encrypted_size = manifest.get("encryptedSizeBytes")
     recipients = manifest.get("recipientKeyIds")
     if (not isinstance(encrypted_size, int) or encrypted_size < 1
@@ -94,7 +104,10 @@ def read_bundle_metadata(bundle: Path, expected_bundle_id: str | None = None) ->
         raise ValueError("invalid size or recipient identities in bundle manifest")
     if (complete.get("encryptedSha256") != manifest["encryptedSha256"]
             or complete.get("sourceFile") != source_file
-            or complete.get("sourceCompressedSha256") != manifest["compressedSha256"]):
+            or complete.get("sourceCompressedSha256") != manifest["compressedSha256"]
+            or (coordinate_count and (complete.get("sourceUuid") != manifest["sourceUuid"]
+                                      or complete.get("snapshotBinlogFile") != manifest["snapshotBinlogFile"]
+                                      or complete.get("snapshotBinlogPosition") != manifest["snapshotBinlogPosition"]))):
         raise ValueError("completion marker does not match source or encrypted digests")
     return {"complete": complete, "manifest": manifest, "manifestSha256": manifest_hash}
 
@@ -187,6 +200,9 @@ def publish_backup(source: Path, backup_dir: Path, recipient_path: Path, export:
                 "exportedAtUtc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "retentionEligible": True,
                 "database": receipt.get("database"),
+                "sourceUuid": receipt["sourceUuid"],
+                "snapshotBinlogFile": receipt["snapshotBinlogFile"],
+                "snapshotBinlogPosition": receipt["snapshotBinlogPosition"],
                 "compressedSha256": compressed_hash,
                 "sqlSha256": receipt["sqlSha256"],
                 "sizeBytes": receipt.get("sizeBytes"),
@@ -207,6 +223,9 @@ def publish_backup(source: Path, backup_dir: Path, recipient_path: Path, export:
                 "encryptedSha256": cipher_hash,
                 "sourceFile": source.name,
                 "sourceCompressedSha256": compressed_hash,
+                "sourceUuid": receipt["sourceUuid"],
+                "snapshotBinlogFile": receipt["snapshotBinlogFile"],
+                "snapshotBinlogPosition": receipt["snapshotBinlogPosition"],
             }
             temporary_complete = stage / ".complete.tmp"
             write_json(temporary_complete, complete)
@@ -254,14 +273,21 @@ def verify(args: argparse.Namespace) -> dict:
         if proc.poll() is None:
             proc.kill()
             proc.wait()
-    return {"status": "VERIFIED_CIPHERTEXT_ONLY", "sourceFile": manifest["sourceFile"], "sqlSha256": sql_hash.hexdigest(), "encryptedSha256": manifest["encryptedSha256"], "manifestSha256": manifest_hash, "plaintextWritten": False}
+    result = {"status": "DECRYPTION_VERIFIED", "sourceFile": manifest["sourceFile"],
+              "sqlSha256": sql_hash.hexdigest(), "encryptedSha256": manifest["encryptedSha256"],
+              "manifestSha256": manifest_hash, "plaintextWritten": False,
+              "verificationBoundary": "age decryption, gzip and content hashes; no plaintext file"}
+    if "sourceUuid" in manifest:
+        result.update(sourceUuid=manifest["sourceUuid"], snapshotBinlogFile=manifest["snapshotBinlogFile"],
+                      snapshotBinlogPosition=manifest["snapshotBinlogPosition"])
+    return result
 
 
 def sftp(args: argparse.Namespace, batch: str) -> str:
     binary = shutil.which("sftp")
     if not binary:
         raise RuntimeError("OpenSSH sftp client is required")
-    command = [binary, "-q", "-oBatchMode=yes", "-oStrictHostKeyChecking=yes",
+    command = [binary, "-q", "-P", str(getattr(args, "port", 22)), "-oBatchMode=yes", "-oStrictHostKeyChecking=yes",
                "-oIdentitiesOnly=yes", f"-oUserKnownHostsFile={args.known_hosts}",
                "-oConnectTimeout=15", "-i", args.ssh_identity, "-b", "-", args.source]
     result = subprocess.run(command, input=batch, text=True, capture_output=True, timeout=120)
@@ -312,15 +338,37 @@ def rotation_state_document(rotated: dict) -> dict:
     return {"format": "hometown-replica-rotation-state-v1", "rotated": rotated}
 
 
+def bind_ciphertext_source(manifest: dict, args: argparse.Namespace) -> None:
+    expected = getattr(args, "expected_uuid", None)
+    database = getattr(args, "database", None)
+    if (not isinstance(expected, str) or not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", expected)
+            or manifest.get("sourceUuid") != expected or manifest.get("database") != database
+            or not isinstance(database, str) or not re.fullmatch(r"[A-Za-z0-9_]+", database)):
+        raise ValueError("snapshot ciphertext UUID or database differs from receiver trust configuration")
+
+
+def verify_ciphertext(bundle: Path, args: argparse.Namespace, expected_bundle_id: str | None = None) -> dict:
+    inspected = inspect_bundle(bundle, expected_bundle_id)
+    manifest = inspected["manifest"]
+    bind_ciphertext_source(manifest, args)
+    return {"status": "CIPHERTEXT_VERIFIED", "sourceFile": manifest["sourceFile"],
+            "sourceUuid": manifest["sourceUuid"], "database": manifest["database"],
+            "encryptedSha256": inspected["encryptedSha256"], "manifestSha256": inspected["manifestSha256"],
+            "compressedSha256": manifest["compressedSha256"], "sqlSha256": manifest["sqlSha256"],
+            "plaintextWritten": False, "decryptionPerformed": False,
+            "verificationBoundary": "ciphertext hashes and bound source metadata only; no age call"}
+
+
 def pull(args: argparse.Namespace) -> dict:
     incoming = Path(args.incoming).resolve()
     incoming.mkdir(parents=True, exist_ok=True, mode=0o700)
     if incoming.stat().st_mode & 0o077:
         raise ValueError("incoming directory must be private (0700)")
-    identity = Path(args.identity).resolve(strict=True)
+    ciphertext_only = getattr(args, "ciphertext_only", False)
+    identity = None if ciphertext_only else Path(args.identity).resolve(strict=True)
     ssh_identity = Path(args.ssh_identity).resolve(strict=True)
     known_hosts = Path(args.known_hosts).resolve(strict=True)
-    for path in (identity, ssh_identity):
+    for path in ((ssh_identity,) if ciphertext_only else (identity, ssh_identity)):
         if path.stat().st_mode & 0o077 or path.parent.stat().st_mode & 0o077:
             raise ValueError("replica identities and parent directories must be private")
     if not re.fullmatch(r"[A-Za-z0-9_.-]+@[A-Za-z0-9_.-]+", args.source):
@@ -344,6 +392,8 @@ def pull(args: argparse.Namespace) -> dict:
                     metadata = read_bundle_metadata(stage, bundle_id)
                     prior = rotated[bundle_id]
                     current = metadata["manifest"]
+                    if ciphertext_only:
+                        bind_ciphertext_source(current, args)
                     if (metadata["manifestSha256"] != prior["manifestSha256"]
                             or current["compressedSha256"] != prior["compressedSha256"]
                             or current["encryptedSha256"] != prior["encryptedSha256"]):
@@ -361,15 +411,21 @@ def pull(args: argparse.Namespace) -> dict:
                 if not final.is_dir() or final.is_symlink():
                     raise ValueError("existing incoming path is not a bundle directory")
                 existing_receipt = receipts_dir / f"{bundle_id}.json"
-                if existing_receipt.is_file() and load_json(existing_receipt).get("status") == "VERIFIED_CIPHERTEXT_ONLY":
+                accepted = ("CIPHERTEXT_VERIFIED", "DECRYPTION_VERIFIED", "VERIFIED_CIPHERTEXT_ONLY") if ciphertext_only else ("DECRYPTION_VERIFIED", "VERIFIED_CIPHERTEXT_ONLY")
+                if existing_receipt.is_file() and load_json(existing_receipt).get("status") in accepted:
                     inspected = inspect_bundle(final)
                     receipt = load_json(existing_receipt)
                     if (receipt.get("encryptedSha256") != inspected["encryptedSha256"]
                             or receipt.get("manifestSha256") != inspected["manifestSha256"]):
                         raise ValueError("previously verified local replica changed; preserving evidence and failing pull")
+                    if ciphertext_only:
+                        verification = verify_ciphertext(final, args)
+                        atomic_json(existing_receipt, {**verification, "verifiedAtEpoch": time.time(),
+                            "verifiedAtUtc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
                     verified.append(bundle_id)
                     continue
-                verification = verify(argparse.Namespace(bundle=str(final), identity=str(identity)))
+                verification = (verify_ciphertext(final, args) if ciphertext_only else
+                                verify(argparse.Namespace(bundle=str(final), identity=str(identity))))
                 receipts_dir.mkdir(mode=0o700, exist_ok=True)
                 atomic_json(existing_receipt, {**verification, "verifiedAtEpoch": time.time(), "verifiedAtUtc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
                 verified.append(bundle_id)
@@ -382,6 +438,8 @@ def pull(args: argparse.Namespace) -> dict:
                 complete = load_json(stage / "complete.json")
                 manifest_bytes = (stage / "manifest.json").read_bytes()
                 manifest = json.loads(manifest_bytes)
+                if ciphertext_only:
+                    bind_ciphertext_source(read_bundle_metadata(stage, bundle_id)["manifest"], args)
                 if manifest.get("sourceFile") != bundle_id + ".sql.gz":
                     raise ValueError("remote bundle identity does not match its source manifest")
                 if complete.get("manifestSha256") != hashlib.sha256(manifest_bytes).hexdigest() or manifest.get("format") != "hometown-encrypted-db-replica-v1":
@@ -393,7 +451,8 @@ def pull(args: argparse.Namespace) -> dict:
                 if not isinstance(payload_size, int) or payload_size < 1 or shutil.disk_usage(incoming).free < payload_size + args.minimum_free_bytes:
                     raise RuntimeError("insufficient free space to preserve existing verified replicas")
                 sftp(args, f"get {remote}/{payload_name} {stage}/{payload_name}\n")
-                verification = verify(argparse.Namespace(bundle=str(stage), identity=str(identity), expected_bundle_id=bundle_id))
+                verification = (verify_ciphertext(stage, args, bundle_id) if ciphertext_only else
+                                verify(argparse.Namespace(bundle=str(stage), identity=str(identity), expected_bundle_id=bundle_id)))
                 receipts_dir.mkdir(mode=0o700, exist_ok=True)
                 atomic_json(receipts_dir / f"{bundle_id}.json", {**verification, "verifiedAtEpoch": time.time(), "verifiedAtUtc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
                 os.replace(stage, final)
@@ -407,13 +466,17 @@ def pull(args: argparse.Namespace) -> dict:
                     fsync_dir(incoming)
                 raise
         state = {"status": "REPLICATED" if verified else "WAITING_FOR_FIRST_BACKUP", "verifiedBundleCount": len(verified), "latestBundle": verified[-1] if verified else None, "rotationSkippedBundleCount": len(rotation_skipped), "checkedAtUtc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+        state["verificationBoundary"] = "ciphertext/metadata only" if ciphertext_only else "decryption verification or matching historical decryption receipt"
         atomic_json(state_path, state)
         return state
 
 
 def status(args: argparse.Namespace) -> dict:
     config = Path(args.config_dir)
-    required = [config / "source.env", config / "ssh_identity", config / "known_hosts", config / "age-identity.txt"]
+    required = [config / "source.env", config / "ssh_identity", config / "known_hosts"]
+    ciphertext_only = getattr(args, "ciphertext_only", False)
+    if not ciphertext_only:
+        required.append(config / "age-identity.txt")
     if any(not path.is_file() for path in required):
         return {"status": "NOT_CONFIGURED", "verifiedBundleCount": 0}
     state_path = Path(args.incoming) / "status.json"
@@ -436,7 +499,10 @@ def status(args: argparse.Namespace) -> dict:
         inspected = inspect_bundle(latest)
     except Exception:
         return {"status": "FAILED", "reason": "latest verified replica failed local integrity recheck"}
-    if (receipt.get("status") != "VERIFIED_CIPHERTEXT_ONLY"
+    accepted = ("CIPHERTEXT_VERIFIED", "DECRYPTION_VERIFIED", "VERIFIED_CIPHERTEXT_ONLY") if ciphertext_only else ("DECRYPTION_VERIFIED", "VERIFIED_CIPHERTEXT_ONLY")
+    if ciphertext_only:
+        bind_ciphertext_source(inspected["manifest"], args)
+    if (receipt.get("status") not in accepted
             or receipt.get("encryptedSha256") != inspected["encryptedSha256"]
             or receipt.get("manifestSha256") != inspected["manifestSha256"]):
         return {"status": "FAILED", "reason": "latest verified replica no longer matches its verification receipt"}
@@ -446,7 +512,8 @@ def status(args: argparse.Namespace) -> dict:
         return {"status": "LOW_DISK", "freeBytes": free_bytes, "minimumFreeBytes": args.minimum_free_bytes}
     if age_hours > args.stale_after_hours:
         return {"status": "STALE", "latestBundle": state.get("latestBundle"), "ageHours": round(age_hours, 2), "freeBytes": free_bytes}
-    return {"status": "REPLICATED", "latestBundle": state.get("latestBundle"), "verifiedBundleCount": state.get("verifiedBundleCount"), "ageHours": round(age_hours, 2), "freeBytes": free_bytes}
+    return {"status": "REPLICATED", "latestBundle": state.get("latestBundle"), "verifiedBundleCount": state.get("verifiedBundleCount"), "ageHours": round(age_hours, 2), "freeBytes": free_bytes,
+            "verificationBoundary": "ciphertext/metadata only" if ciphertext_only else "prior decryption receipt and current ciphertext hashes"}
 
 
 def _utc(value: str) -> datetime:
@@ -484,7 +551,7 @@ def retention_plan(args: argparse.Namespace) -> dict:
             continue
         encrypted_hash = sha256(payload)
         manifest_hash = hashlib.sha256(manifest_bytes).hexdigest()
-        if receipt.get("status") != "VERIFIED_CIPHERTEXT_ONLY" or receipt.get("encryptedSha256") != encrypted_hash or receipt.get("manifestSha256") != manifest_hash:
+        if receipt.get("status") not in ("VERIFIED_CIPHERTEXT_ONLY", "DECRYPTION_VERIFIED") or receipt.get("encryptedSha256") != encrypted_hash or receipt.get("manifestSha256") != manifest_hash:
             continue
         if complete.get("encryptedSha256") != encrypted_hash or complete.get("manifestSha256") != manifest_hash:
             continue
@@ -606,12 +673,25 @@ def main() -> None:
     pull_parser.add_argument("--identity", required=True)
     pull_parser.add_argument("--incoming", default="/var/lib/hometown-replica/incoming")
     pull_parser.add_argument("--minimum-free-bytes", type=int, default=512 * 1024 * 1024)
+    ciphertext_parser = sub.add_parser("pull-ciphertext")
+    ciphertext_parser.add_argument("--source", required=True)
+    ciphertext_parser.add_argument("--ssh-identity", required=True)
+    ciphertext_parser.add_argument("--known-hosts", required=True)
+    ciphertext_parser.add_argument("--expected-uuid", required=True)
+    ciphertext_parser.add_argument("--database", default="hometown_food")
+    ciphertext_parser.add_argument("--port", type=int, default=22)
+    ciphertext_parser.add_argument("--incoming", default="/var/lib/hometown-replica/incoming")
+    ciphertext_parser.add_argument("--minimum-free-bytes", type=int, default=512 * 1024 * 1024)
+    ciphertext_parser.set_defaults(ciphertext_only=True)
     status_parser = sub.add_parser("status")
     status_parser.add_argument("--config-dir", default="/etc/hometown-replica")
     status_parser.add_argument("--incoming", default="/var/lib/hometown-replica/incoming")
     status_parser.add_argument("--receipts", default="/var/lib/hometown-replica/incoming/receipts")
     status_parser.add_argument("--stale-after-hours", type=float, default=26)
     status_parser.add_argument("--minimum-free-bytes", type=int, default=512 * 1024 * 1024)
+    status_parser.add_argument("--ciphertext-only", action="store_true")
+    status_parser.add_argument("--expected-uuid")
+    status_parser.add_argument("--database", default="hometown_food")
     retention_parser = sub.add_parser("retention")
     retention_parser.add_argument("--incoming", default="/var/lib/hometown-replica/incoming")
     retention_parser.add_argument("--receipts", default="/var/lib/hometown-replica/incoming/receipts")
@@ -624,7 +704,7 @@ def main() -> None:
     try:
         if args.command == "publish": result = publish_backup(Path(args.backup), Path(args.backup_dir), Path(args.recipients), Path(args.export_dir), args.expected_group)
         elif args.command == "verify": result = verify(args)
-        elif args.command == "pull": result = pull(args)
+        elif args.command in ("pull", "pull-ciphertext"): result = pull(args)
         elif args.command == "retention":
             if args.apply_plan:
                 result = apply_retention_plan(args)
@@ -639,7 +719,7 @@ def main() -> None:
                 raise SystemExit(2)
         print(json.dumps(result, sort_keys=True))
     except Exception as error:
-        if args.command == "pull":
+        if args.command in ("pull", "pull-ciphertext"):
             incoming = Path(args.incoming)
             incoming.mkdir(parents=True, exist_ok=True, mode=0o700)
             atomic_json(incoming / "status.json", {"status": "FAILED", "errorType": type(error).__name__, "checkedAtUtc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})

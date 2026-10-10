@@ -1,0 +1,18 @@
+{
+  "healthUrl": "https://liziqi.icu/health/ready",
+  "backupDirectory": "/var/backups/hometown-database",
+  "backupMaxAgeSeconds": 93600,
+  "replicaMaxAgeSeconds": 93600,
+  "snapshotVerificationCachePath": "/var/lib/hometown-alert/snapshot-verify.json",
+  "snapshotVerificationIntervalSeconds": 300,
+  "snapshotMaxCompressedBytes": 8589934592,
+  "snapshotMaxSqlBytes": 68719476736,
+  "binlogStatusPath": "/var/backups/hometown-database/binlog-local/chain.json",
+  "binlogMaxAgeSeconds": 900,
+  "mysqlContainer": "hometown-food-mysql-1",
+  "database": "hometown_food",
+  "replicaStatusPath": "/var/lib/hometown-alert/receiver-status.json",
+  "replicaExportDirectory": "/var/backups/hometown-database/replica-export",
+  "replicaEvidenceMaxAgeSeconds": 900,
+  "snapshotVerificationMaxSeconds": 20
+}

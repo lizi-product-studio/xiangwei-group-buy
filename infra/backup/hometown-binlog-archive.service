@@ -1,0 +1,19 @@
+[Unit]
+Description=Capture, encrypt and publish closed hometown MySQL row-binlog segments
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/lib/hometown-backup/binlog_archive.py capture
+UMask=0027
+Nice=15
+IOSchedulingClass=idle
+TimeoutStartSec=3600
+MemoryMax=256M
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/etc/hometown-backup
+ReadWritePaths=/var/backups/hometown-database
+PrivateTmp=true

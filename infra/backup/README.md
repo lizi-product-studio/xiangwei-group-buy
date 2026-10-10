@@ -11,7 +11,7 @@ python3 /usr/local/lib/hometown-backup/database_backup.py
 python3 /usr/local/lib/hometown-backup/database_backup.py --restore-drill
 ```
 
-恢复演练先生成并校验新快照，再在同一 MySQL 内创建随机 `hometown_restore_*` 隔离库。恢复客户端与导出客户端都显式使用 utf8mb4。重新导出与原快照解压后 SHA-256 一致才算通过，随后只删除本轮新建的隔离库。失败回执保留隔离库名称供调查；不得用其覆盖正式库。演练不将正式数据传到测试机。
+恢复演练先生成并校验新快照，再在同一 MySQL 内创建随机 `hometown_restore_*` 隔离库。恢复客户端与导出客户端都显式使用 utf8mb4。重新导出与原快照逐字节比较，仅排除 mysqldump 的单条源日志位点注释；其余 SQL 内容和对象定义摘要一致才算通过。原快照的完整 SQL/压缩摘要及源位点仍单独保留，随后只删除本轮新建的隔离库。失败回执保留隔离库名称供调查；不得用其覆盖正式库。演练不将正式数据传到测试机。
 
 定时周期对应的备份数据损失窗口最多约 24 小时加随机延迟，前提是最近任务成功；实际恢复耗时以回执为准。2026-09-30 已将新备份加密发布，并由隔离测试机通过受限 SFTP 拉取校验；具体运行证据见项目交付记录。生产业务库恢复及历史备份删除仍须具体授权。
 
@@ -132,3 +132,28 @@ dry-run 计划绑定 backup/export 根目录身份、生成时间、每个源 gz
 `infra/cleanup/hometown-temp-cleanup.service` 调用同一已审核清理工具，timer 每周一北京时间 04:15 后五分钟内执行；它只处理 `/tmp/hometown-release-staging` 和 `/var/tmp/hometown-release-staging` 中已列入精确 manifest 的 `TASK_ENDED` 目录。服务不依赖维护者电脑在线，不递归清除未知项目，不操作 Docker 数据卷或备份。
 
 每次交付结束后，将该次可再生临时包移入唯一 staging 目录，创建 `.active.lock`，确认没有使用者，再登记目录 SHA-256。运行 dry-run 核对后，定时器或手动启动该服务会再次核验内容与锁状态；有变化或仍在使用则拒绝。已删除的条目会被跳过。保留线上及回退产物、备份、用户素材与验证证据。日常磁盘与副本状态由现有每天 09:00 巡检汇总；该巡检依赖本机 Codex 可运行，外部短信或邮件告警未配置。
+
+
+## Stage B 连续日志与合成恢复
+
+`binlog_archive.py capture` 接受 MySQL 8.4 的三列 `SHOW BINARY LOGS`，只归档已关闭的连续段。首次快照回执绑定服务器 UUID、schema、SQL 摘要和日志坐标；每个段绑定同一根回执及前驱 manifest。发布后、检查点前中断时，下次先校验全部 durable 段和检查点前缀，再采用已发布后缀。已归档的旧 anchor 从源索引过期可继续；任何尚未归档的下一段缺失仍拒绝。现有链不会随新快照静默更换根；源/接收端磁盘空间和归档留存须在安装前核对，归档本身不删除日志或备份。
+
+新增 `hometown-binlog-replica-pull.service` 仅拉取并校验密文、manifest 和连续链，不提供 age identity，不启动解密或数据库恢复。接收时先验证小型元数据及可用空间，再下载 payload；`.pending-*` 使用显式来源身份校验，成功后原子发布，失败资料保留。首次和重复拉取都核对源发布 head。状态 `CONTIGUOUS_CIPHERTEXT_VERIFIED` 只证明密文/链检查；完整 age 解密校验仅在明确的合成恢复入口执行。
+
+`receiver_status.py` 在接收机重验快照密文、所属数据库、所选起始位点与对应已验证段的覆盖关系，以及 binlog 链，并输出当前快照文件、压缩/SQL 摘要、源 UUID、根坐标、manifest 摘要、head 与检查时间。该输出不含解密内容或密钥。主编排须通过已有获授权且认证的只读通道取得它，在源机原子写入 0600 的 `receiver-status.json`；不得从源端 `PUBLISHED` 制造接收端证据。通道尚未接线、过期或源/副本不一致时，监控保持失败。此工具和源码测试不代表已安装该生产通道。
+
+```sh
+python3 /usr/local/lib/hometown-backup/receiver_status.py \
+  --incoming /var/lib/hometown-replica/incoming \
+  --binlogs /var/lib/hometown-replica/binlog \
+  --expected-uuid '<verified source UUID>' --database hometown_food
+```
+
+`restore_synthetic.py` 只接受显式 synthetic 标记和 `hometown_sec_b_*` 源/目标。fixture 必须包括 snapshot、原始 snapshotReceipt、anchor、精确 segmentBundles 和 `expectedRows.json`，metadata 同时绑定所有摘要及 expectedStopFile/Position。oracle 必须覆盖 orders/payments/orderRefunds/partialRefunds/ledger/users/points 并保留金额、状态和归属；空或仅订单/退款 oracle 拒绝。LEGACY/PREPARED 从实际 Store 导出的 Map-entry `[entityKey, document]` 对账，保留持久化键与完整文档，ENTITY 从记录表对账。非空目标以及已有开始标记的中断目标不重放，失败目标保留。age 解密有时限及声明大小约束；`--mysqlbinlog` 指向测试机已核验可用的 MySQL 8.4 工具。解码以目标 schema 筛选重写后的事件，然后通过 Docker 私有客户端管道导入新目标。合成 PITR 成功不证明真实微信、生产恢复或生产 RTO；生产密文和 identity 不进入该 fixture。
+
+
+### 正式快照纯密文入口（Stage B-r2）
+
+拟安装的 `hometown-encrypted-replica-pull.service` 改为 `encrypted_replica.py pull-ciphertext`，使用既有 REPLICA_SOURCE、SSH identity/known_hosts，并显式指定已核验 SOURCE_MYSQL_UUID 与数据库；不传入、读取或要求 age identity。首次与重复接收核对 complete/manifest/source UUID/schema/密文大小及摘要，缺字段、错来源、缺complete或坏hash失败关闭，既有副本保留。status 的 `--ciphertext-only` 配置检查也不要求 age identity。
+
+`CIPHERTEXT_VERIFIED` 表示密文和来源元数据验证，不证明 age 解密、gzip/SQL 内容或 key 可用性。显式 `verify --identity ...` 仍供合成演练，实际解密成功标记为 `DECRYPTION_VERIFIED`；历史 `VERIFIED_CIPHERTEXT_ONLY` 是旧解密路径的旧标签，不能解释为未解密。新纯密文回执不作为旧删除轮换流程所需的解密成功证明。现有安装尚未更新，正式替换/触发/回读由主编排完成。历史export若缺UUID/schema，严格入口会拒绝；保留原件，不猜测来源或改写历史manifest，安装前应核对来源元数据及接收选择。
