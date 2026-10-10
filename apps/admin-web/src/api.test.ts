@@ -181,7 +181,10 @@ describe("community admin API", () => {
     localStorage.setItem("community-admin-roles", JSON.stringify(["SUPER_ADMIN", 123]));
     expect(auth.roles()).toEqual([]);
     localStorage.setItem("community-admin-roles", JSON.stringify(["PICKUP_MANAGER"]));
+    expect(auth.roles()).toEqual([]);
+    auth.save("csrf-only-not-a-bearer", ["PICKUP_MANAGER"], "staff-id", "staff.name");
     expect(auth.roles()).toEqual(["PICKUP_MANAGER"]);
+    expect(localStorage.getItem("community-admin-token")).toBeNull();
     auth.clear();
   });
 

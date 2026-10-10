@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { test } from "./browser-auth";
+import { expect } from '@playwright/test';
 
 const apiBase = process.env.E2E_API_BASE_URL ?? 'http://127.0.0.1:3101';
 const headers = { 'x-demo-user-id': 'demo-super-admin', 'x-demo-role': 'SUPER_ADMIN' };

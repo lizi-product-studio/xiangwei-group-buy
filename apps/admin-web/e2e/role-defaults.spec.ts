@@ -1,5 +1,6 @@
+import { test, staffFetch } from "./browser-auth";
 import { fixturePhoto } from './media-fixture';
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { expect, type Browser, type Page } from "@playwright/test";
 
 const apiBase = process.env.E2E_API_BASE_URL ?? "http://127.0.0.1:3101";
 const adminBase = process.env.E2E_ADMIN_BASE_URL ?? "http://127.0.0.1:5174";
@@ -15,7 +16,7 @@ function watch(page: Page): string[] {
   page.on("pageerror", (error) => failures.push(`pageerror: ${error.message}`));
   page.on("requestfailed", (request) => failures.push(`requestfailed: ${request.url()}`));
   page.on("response", (response) => {
-    if (response.status() >= 400) failures.push(`http ${response.status()}: ${response.url()}`);
+    if (response.status() >= 400 && response.headers()["x-reauthentication-required"] !== "1") failures.push(`http ${response.status()}: ${response.url()}`);
   });
   return failures;
 }
@@ -58,12 +59,12 @@ async function createStaff(
 }
 
 test("五个内部角色仅加载其默认页与可见菜单，USER 被后台拒绝", async ({ browser, request }) => {
-  const pointResponse = await request.fetch(`${apiBase}/api/v1/admin/service-areas`, {
+  const pointResponse = await staffFetch(request, `${apiBase}/api/v1/admin/service-areas`, {
     method: "POST", headers: adminHeaders, data: { regionCode: "110101" },
   });
   expect(pointResponse.status()).toBeLessThan(300);
   const area = (await pointResponse.json()).data as { id: string };
-  const pickupResponse = await request.fetch(`${apiBase}/api/v1/admin/pickup-points`, {
+  const pickupResponse = await staffFetch(request, `${apiBase}/api/v1/admin/pickup-points`, {
     method: "POST", headers: adminHeaders,
     data: { photoUrl: await fixturePhoto(request),
     serviceAreaId: area.id, name: `角色点位 ${suffix()}`, address: "东城区角色权限测试点一号", businessHours: "每日 09:00–20:00", pickupInstructions: "请出示领取码后领取商品", longitude: 116.4, latitude: 39.9, contactName: "测试负责人", contactPhone: "13800138008", capacityPerDay: 8 },
@@ -91,7 +92,7 @@ test("五个内部角色仅加载其默认页与可见菜单，USER 被后台拒
     expect(session.failures).toEqual([]);
     await session.context.close();
   }
-  const userDenied = await request.fetch(`${apiBase}/api/v1/admin/orders`, {
+  const userDenied = await staffFetch(request, `${apiBase}/api/v1/admin/orders`, {
     headers: { "x-demo-user-id": "p1a-user", "x-demo-role": "USER" },
   });
   expect(userDenied.status()).toBe(403);

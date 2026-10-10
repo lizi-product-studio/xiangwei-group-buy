@@ -1,5 +1,6 @@
+import { test, staffFetch } from "./browser-auth";
 import { fixturePhoto } from './media-fixture';
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { expect, type APIRequestContext, type Page } from "@playwright/test";
 
 const apiBase = process.env.E2E_API_BASE_URL ?? "http://127.0.0.1:3101";
 const adminBase = process.env.E2E_ADMIN_BASE_URL ?? "http://127.0.0.1:5174";
@@ -10,7 +11,7 @@ const superHeaders = {
 };
 
 async function post<T>(request: APIRequestContext, path: string, data: unknown): Promise<T> {
-  const response = await request.fetch(`${apiBase}${path}`, {
+  const response = await staffFetch(request, `${apiBase}${path}`, {
     method: "POST",
     headers: superHeaders,
     data,
@@ -27,7 +28,7 @@ function watchBrowser(page: Page, expectedInvalidation = () => false): string[] 
     if (error !== "net::ERR_ABORTED") failures.push(`requestfailed: ${request.url()} ${error}`);
   });
   page.on("response", (response) => {
-    if (response.status() >= 400 && !expectedInvalidation())
+    if (response.status() >= 400 && response.headers()["x-reauthentication-required"] !== "1" && !expectedInvalidation())
       failures.push(`http ${response.status()}: ${response.url()}`);
   });
   return failures;
@@ -63,10 +64,13 @@ for (const entry of [
     await page.route("**/*", async (route) => {
       const url = new URL(route.request().url());
       if (url.pathname === "/api/v1/auth/admin/login") await loginGate;
-      const response = await route.fetch({ url: new URL(`${url.pathname}${url.search}`, adminBase).href });
+      const headers = await route.request().allHeaders();
+      delete headers.host;
+      if (headers.origin) headers.origin = adminBase;
+      const response = await route.fetch({ url: new URL(`${url.pathname}${url.search}`, adminBase).href, headers });
       await route.fulfill({ response });
     });
-    await page.goto(`http://${entry.hostname}/`);
+    await page.goto(`https://${entry.hostname}/`);
     await expect(page.getByRole("heading", { name: entry.role === "PICKUP_MANAGER" ? "点位负责人登录" : "乡味集 · 运营管理后台", level: 2, exact: true })).toBeVisible();
     const username = page.getByLabel("账号");
     const password = page.getByLabel("密码", { exact: true });
@@ -195,9 +199,9 @@ test("超管从网页创建员工，临时密码改密与撤权后的默认页�
   await ownPasswordDialog.getByRole("button", { name: "保存新密码" }).click();
   await expect(ownPasswordDialog).toHaveCount(0);
   await expect(page.getByText("密码已修改，其他旧会话已失效")).toBeVisible();
-  const oldPasswordLogin = await request.post(
+  const oldPasswordLogin = await staffFetch(request,
     `${apiBase}/api/v1/auth/admin/login`,
-    {
+    { method: "POST",
       data: {
         username: `p1a.admin.${suffix}`,
         password: "p1a admin setup password",
@@ -205,9 +209,9 @@ test("超管从网页创建员工，临时密码改密与撤权后的默认页�
     },
   );
   expect(oldPasswordLogin.status()).toBe(401);
-  const newPasswordLogin = await request.post(
+  const newPasswordLogin = await staffFetch(request,
     `${apiBase}/api/v1/auth/admin/login`,
-    {
+    { method: "POST",
       data: {
         username: `p1a.admin.${suffix}`,
         password: "p1a admin profile password",
@@ -476,7 +480,7 @@ test("同一标签切换账号会清空旧工作区，客服和财务刷新只�
     "content-type": "application/json",
     "idempotency-key": `refresh-order-${suffix}`,
   };
-  const createdOrder = await request.fetch(`${apiBase}/api/v1/orders`, {
+  const createdOrder = await staffFetch(request, `${apiBase}/api/v1/orders`, {
     method: "POST",
     headers: customerHeaders,
     data: {
@@ -488,7 +492,7 @@ test("同一标签切换账号会清空旧工作区，客服和财务刷新只�
   });
   expect(createdOrder.status(), await createdOrder.text()).toBe(201);
   const order = (await createdOrder.json()).data as { id: string };
-  const paid = await request.fetch(
+  const paid = await staffFetch(request,
     `${apiBase}/api/v1/orders/${order.id}/pay/mock-confirm`,
     {
       method: "POST",
@@ -499,7 +503,7 @@ test("同一标签切换账号会清空旧工作区，客服和财务刷新只�
     },
   );
   expect(paid.status(), await paid.text()).toBeLessThan(300);
-  const ledgerResponse = await request.fetch(`${apiBase}/api/v1/admin/finance/ledger?referenceId=${encodeURIComponent(order.id)}`, {
+  const ledgerResponse = await staffFetch(request, `${apiBase}/api/v1/admin/finance/ledger?referenceId=${encodeURIComponent(order.id)}`, {
     headers: superHeaders,
   });
   expect(ledgerResponse.status(), await ledgerResponse.text()).toBe(200);

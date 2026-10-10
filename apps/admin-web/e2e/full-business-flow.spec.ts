@@ -1,5 +1,6 @@
+import { test } from "./browser-auth";
 import { fixturePhoto } from './media-fixture';
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { expect, type APIRequestContext, type Page } from '@playwright/test';
 
 const apiBase = process.env.E2E_API_BASE_URL ?? 'http://127.0.0.1:3101';
 const bootstrap = { 'x-demo-user-id': 'demo-super-admin', 'x-demo-role': 'SUPER_ADMIN' };
@@ -28,14 +29,15 @@ test('同一主图商品与网页开售团贯穿运输到货及分批核销（�
   const categoryName = `连续分类 ${suffix}`;
   const failures: string[] = [];
   page.on('pageerror', error => failures.push(error.message));
-  page.on('response', response => { if (response.status() >= 400) failures.push(`${response.status()} ${response.url()}`); });
+  page.on('response', response => { if (response.status() >= 400 && response.headers()["x-reauthentication-required"] !== "1") failures.push(`${response.status()} ${response.url()}`); });
   // Only local fixture bootstrap uses super-admin demo headers. Every browser
-  // business mutation below must carry an actual password-issued Bearer token.
+  // business mutation below must use the password-issued HttpOnly cookie with CSRF.
   const mutations: Array<{ path: string; body: Record<string, unknown> }> = [];
   page.on('request', outgoing => {
     if (outgoing.method() !== 'POST' || !outgoing.url().includes('/api/v1/')) return;
     if (outgoing.url().includes('/auth/')) return;
-    expect(outgoing.headers().authorization).toMatch(/^Bearer .+/);
+    expect(outgoing.headers().authorization).toBeUndefined();
+    expect(outgoing.headers()["x-csrf-token"]).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(outgoing.headers()['x-demo-role']).toBeUndefined();
     if (!outgoing.url().endsWith('/product-images')) mutations.push({ path: new URL(outgoing.url()).pathname, body: outgoing.postDataJSON() ?? {} });
   });

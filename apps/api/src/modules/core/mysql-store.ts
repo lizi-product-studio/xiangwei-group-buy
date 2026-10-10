@@ -901,6 +901,7 @@ export class MysqlStore extends MemoryStore implements CommerceStore {
       if (mode === "ENTITY") {
         const actor = getCurrentInternalWriteActor();
         if (actor) {
+          if (actor.sessionTokenHash) await this.loadEntityNeed(scope, { collection: "sessions", key: actor.sessionTokenHash });
           await this.loadEntityNeed(scope, { collection: "users", key: actor.userId });
           await this.loadEntityNeed(scope, { collection: "staff", key: actor.userId });
           await this.loadEntityNeed(scope, { collection: "credentials", index: "a", value: actor.userId });

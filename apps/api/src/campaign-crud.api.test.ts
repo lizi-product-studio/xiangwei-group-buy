@@ -1,3 +1,4 @@
+import { StaffHttpClient } from "./modules/auth/staff-http.test-helper.js";
 import { moneyCents } from "@hometown/domain";
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance, InjectOptions } from 'fastify';
@@ -33,7 +34,7 @@ class InspectableStore extends MemoryStore {
 describe('draft campaign CRUD and private consumer directory', () => {
   let app: FastifyInstance;
   let store: InspectableStore;
-  let headers: {authorization:string};
+  let headers: Record<string, string>;
   let input: CommunityCampaignInput;
   let pointId: string;
   const call = (method: InjectOptions['method'], url:string, payload?:unknown, auth = headers) => app.inject({method,url,headers:auth,...(payload === undefined ? {} : {payload: payload as InjectOptions['payload']})});
@@ -44,9 +45,11 @@ describe('draft campaign CRUD and private consumer directory', () => {
     await store.replaceUserRoles('bootstrap',['SUPER_ADMIN']);
     await store.saveInternalStaff({userId:'bootstrap',staffNo:'BOOTSTRAP',displayName:'测试管理员',phone:'13800000000',role:'SUPER_ADMIN',status:'ACTIVE',createdBy:null,activatedAt:now,suspendedAt:null,suspensionReason:null,authorizationVersion:1,createdAt:now,updatedAt:now});
     await store.saveAdminCredential(await createAdminCredential('bootstrap','bootstrap','TestBootstrap123',['SUPER_ADMIN'],false,1));
-    app = await buildApp({config:loadConfig({NODE_ENV:'test',AUTH_PROVIDER:'wechat',WECHAT_APP_ID:'test-only-app',WECHAT_APP_SECRET:'test-only'}),store});
-    const login = await app.inject({method:'POST',url:'/api/v1/auth/admin/login',payload:{username:'bootstrap',password:'TestBootstrap123'}});
-    headers = {authorization:`Bearer ${login.json().data.accessToken}`};
+    app = await buildApp({config:loadConfig({NODE_ENV:'test',STAFF_CHALLENGE_BITS:'8',AUTH_PROVIDER:'wechat',WECHAT_APP_ID:'test-only-app',WECHAT_APP_SECRET:'test-only'}),store});
+    const root = new StaffHttpClient(app);
+    expect((await root.login('bootstrap','TestBootstrap123')).statusCode).toBe(200);
+    expect((await root.reauthenticate('TestBootstrap123')).statusCode).toBe(200);
+    headers = root.headers();
     const area = await call('POST','/api/v1/admin/service-areas',{regionCode:'110101'});
     const areaId = area.json().data.id;
     const point = await call('POST','/api/v1/admin/pickup-points',{serviceAreaId:areaId,name:'测试自提点',address:'测试社区一号',businessHours:'09:00-20:00',pickupInstructions:'请出示取货码',latitude:39.9,longitude:116.4,contactName:'测试负责人',contactPhone:'13800000002',capacityPerDay:100,photoUrl:'https://example.com/pickup.jpg'});
@@ -258,7 +261,7 @@ describe('draft campaign CRUD and private consumer directory', () => {
     expect(response.json().code).toBe('CAMPAIGN_HAS_REFERENCES');
     expect(await state(c.id)).toEqual(before);
   });
-  it('assigns stable user IDs, masks list phones, audits authorized detail views and rejects unauthorized roles',async()=>{
+  it('assigns stable user IDs, masks consumer details and audits only reauthenticated full-phone views',async()=>{
     for (let i=0;i<3;i++) await store.saveUser({id:`consumer-${i}`,wechatOpenId:`never-return-openid-${i}`,phoneNumber:`1380013800${i}`,phoneVerifiedAt:new Date().toISOString(),status:'ACTIVE',createdAt:`2026-09-08T00:00:0${i}.000Z`});
     const queryBefore = store.businessSnapshot();
     const list = await call('GET','/api/v1/admin/consumers?page=1&pageSize=2');
@@ -269,8 +272,9 @@ describe('draft campaign CRUD and private consumer directory', () => {
     expect(list.body).not.toContain('138001380');
     const afterNumbering = store.businessSnapshot();
     const detail = await call('GET','/api/v1/admin/consumers/1');
-    expect(detail.json().data).toEqual({id:1,maskedPhone:'138****8000',phoneNumber:'13800138000',phoneVerified:true,status:'ACTIVE',createdAt:'2026-09-08T00:00:00.000Z',orderCount:0,orders:[]});
-    expect((await store.listAuditLogs(100)).some((entry) => entry.action === 'CONSUMER_PHONE_VIEWED' && entry.resourceId === 'consumer-0')).toBe(true);
+    expect(detail.json().data).toEqual({id:1,maskedPhone:'138****8000',phoneVerified:true,status:'ACTIVE',createdAt:'2026-09-08T00:00:00.000Z',orderCount:0,orders:[]});
+    expect(detail.body).not.toContain('13800138000');
+    expect((await store.listAuditLogs(100)).some((entry) => entry.action === 'CONSUMER_PHONE_VIEWED' && entry.resourceId === 'consumer-0')).toBe(false);
     expect((await call('GET','/api/v1/admin/consumers?query=13800138001')).json().data.total).toBe(1);
     expect((await call('GET','/api/v1/admin/consumers/bootstrap')).statusCode).toBe(400);
     expect((await call('GET','/api/v1/admin/consumers?pageSize=101')).statusCode).toBe(400);
@@ -283,13 +287,21 @@ describe('draft campaign CRUD and private consumer directory', () => {
       const username = `test-${role.toLowerCase()}`;
       const created = await call('POST','/api/v1/admin/staff',{role,username,phone:`138000000${10+['OPERATOR','FINANCE','PICKUP_MANAGER','CUSTOMER_SERVICE'].indexOf(role)}`,pickupPointIds:role==='PICKUP_MANAGER'?[pointId]:[],status:'ACTIVE',displayName:username});
       expect(created.statusCode,created.body).toBe(201);
-      const login = await app.inject({method:'POST',url:'/api/v1/auth/admin/login',payload:{username,password:created.json().data.temporaryPassword}});
-      const change = await app.inject({method:'POST',url:'/api/v1/auth/admin/complete-password-change',payload:{passwordChangeToken:login.json().data.passwordChangeToken,newPassword:'ChangedPassword123'}});
-      const roleHeaders = {authorization:`Bearer ${change.json().data.accessToken}`};
+      const client = new StaffHttpClient(app);
+      const login = await client.login(username, created.json().data.temporaryPassword);
+      expect((await client.complete(login.json().data.passwordChangeToken, 'ChangedPassword123')).statusCode).toBe(200);
+      expect((await client.reauthenticate('ChangedPassword123')).statusCode).toBe(200);
+      const roleHeaders = client.headers();
       expect((await call('GET','/api/v1/admin/consumers',undefined,roleHeaders)).statusCode).toBe(role==='CUSTOMER_SERVICE'?200:403);
       const detailResponse = await call('GET','/api/v1/admin/consumers/1',undefined,roleHeaders);
       expect(detailResponse.statusCode).toBe(role==='CUSTOMER_SERVICE'?200:403);
-      if (role === 'CUSTOMER_SERVICE') expect(detailResponse.json().data.phoneNumber).toBe('13800138000');
+      if (role === 'CUSTOMER_SERVICE') {
+        expect(detailResponse.json().data).not.toHaveProperty('phoneNumber');
+        expect(detailResponse.json().data.maskedPhone).toBe('138****8000');
+        const phoneResponse = await call('GET','/api/v1/admin/consumers/1/phone',undefined,roleHeaders);
+        expect(phoneResponse.statusCode).toBe(200);
+        expect(phoneResponse.json().data).toEqual({phoneNumber:'13800138000'});
+      }
       if (role !== 'OPERATOR') {
         expect((await call('PATCH',`/api/v1/admin/campaigns/${c.id}`,{...input,version:1},roleHeaders)).statusCode).toBe(403);
         expect((await call('DELETE',`/api/v1/admin/campaigns/${c.id}`,{version:1},roleHeaders)).statusCode).toBe(403);
@@ -299,9 +311,11 @@ describe('draft campaign CRUD and private consumer directory', () => {
     expect(readOnlyRole.statusCode,readOnlyRole.body).toBe(200);
     const readOnlyStaff = await call('POST','/api/v1/admin/staff',{role:'CUSTOMER_SERVICE',accessRoleId:readOnlyRole.json().data.id,username:'consumer-read-only',phone:'13800000123',pickupPointIds:[],status:'ACTIVE',displayName:'只读客服'});
     expect(readOnlyStaff.statusCode,readOnlyStaff.body).toBe(201);
-    const readOnlyLogin = await app.inject({method:'POST',url:'/api/v1/auth/admin/login',payload:{username:'consumer-read-only',password:readOnlyStaff.json().data.temporaryPassword}});
-    const readOnlyChange = await app.inject({method:'POST',url:'/api/v1/auth/admin/complete-password-change',payload:{passwordChangeToken:readOnlyLogin.json().data.passwordChangeToken,newPassword:'ChangedPassword123'}});
-    const readOnlyHeaders = {authorization:`Bearer ${readOnlyChange.json().data.accessToken}`};
+    const readOnlyClient = new StaffHttpClient(app);
+    const readOnlyLogin = await readOnlyClient.login('consumer-read-only', readOnlyStaff.json().data.temporaryPassword);
+    expect((await readOnlyClient.complete(readOnlyLogin.json().data.passwordChangeToken, 'ChangedPassword123')).statusCode).toBe(200);
+    expect((await readOnlyClient.reauthenticate('ChangedPassword123')).statusCode).toBe(200);
+    const readOnlyHeaders = readOnlyClient.headers();
     const phoneAuditCount = (await store.listAuditLogs(1000)).filter((entry) => entry.action === 'CONSUMER_PHONE_VIEWED').length;
     const readOnlyDetail = await call('GET','/api/v1/admin/consumers/1',undefined,readOnlyHeaders);
     expect(readOnlyDetail.statusCode).toBe(200);
@@ -309,16 +323,28 @@ describe('draft campaign CRUD and private consumer directory', () => {
     expect(readOnlyDetail.json().data.maskedPhone).toBe('138****8000');
     expect((await call('GET','/api/v1/admin/consumers/1/phone',undefined,readOnlyHeaders)).statusCode).toBe(403);
     expect((await store.listAuditLogs(1000)).filter((entry) => entry.action === 'CONSUMER_PHONE_VIEWED')).toHaveLength(phoneAuditCount);
-    const contactRole = await call('POST','/api/v1/admin/access/roles',{name:'订单联系查看',description:'',scope:'PLATFORM',permissions:['orders.view','consumers.phone.view'],status:'ACTIVE'});
+    const contactRole = await call('POST','/api/v1/admin/access/roles',{name:'订单联系查看',description:'',scope:'PLATFORM',permissions:['orders.view','consumers.view','consumers.phone.view'],status:'ACTIVE'});
     expect(contactRole.statusCode,contactRole.body).toBe(200);
     const contactStaff = await call('POST','/api/v1/admin/staff',{role:'OPERATOR',accessRoleId:contactRole.json().data.id,username:'order-contact-viewer',phone:'13800000124',pickupPointIds:[],status:'ACTIVE',displayName:'订单联系人'});
     expect(contactStaff.statusCode,contactStaff.body).toBe(201);
-    const contactLogin = await app.inject({method:'POST',url:'/api/v1/auth/admin/login',payload:{username:'order-contact-viewer',password:contactStaff.json().data.temporaryPassword}});
-    const contactChange = await app.inject({method:'POST',url:'/api/v1/auth/admin/complete-password-change',payload:{passwordChangeToken:contactLogin.json().data.passwordChangeToken,newPassword:'ChangedPassword123'}});
-    const contactHeaders = {authorization:`Bearer ${contactChange.json().data.accessToken}`};
+    const contactClient = new StaffHttpClient(app);
+    const contactLogin = await contactClient.login('order-contact-viewer', contactStaff.json().data.temporaryPassword);
+    expect((await contactClient.complete(contactLogin.json().data.passwordChangeToken, 'ChangedPassword123')).statusCode).toBe(200);
+    const contactHeaders = contactClient.headers();
+    const unverifiedDetail = await call('GET','/api/v1/admin/consumers/1',undefined,contactHeaders);
+    expect(unverifiedDetail.statusCode,unverifiedDetail.body).toBe(200);
+    expect(unverifiedDetail.body).not.toContain('13800138000');
     const contactPhone = await call('GET','/api/v1/admin/consumers/1/phone',undefined,contactHeaders);
-    expect(contactPhone.statusCode,contactPhone.body).toBe(200);
-    expect(contactPhone.json().data).toEqual({phoneNumber:'13800138000'});
+    expect(contactPhone.statusCode).toBe(403);
+    expect(contactPhone.json().code).toBe('REAUTH_REQUIRED');
+    expect((await contactClient.reauthenticate('ChangedPassword123')).statusCode).toBe(200);
+    const verifiedDetail = await call('GET','/api/v1/admin/consumers/1',undefined,contactClient.headers());
+    expect(verifiedDetail.statusCode).toBe(200);
+    expect(verifiedDetail.json().data).not.toHaveProperty('phoneNumber');
+    expect(verifiedDetail.body).not.toContain('13800138000');
+    const authorizedPhone = await call('GET','/api/v1/admin/consumers/1/phone',undefined,contactClient.headers());
+    expect(authorizedPhone.statusCode,authorizedPhone.body).toBe(200);
+    expect(authorizedPhone.json().data).toEqual({phoneNumber:'13800138000'});
     expect((await call('PATCH',`/api/v1/admin/campaigns/${c.id}`,{...input,version:1},noAuth)).statusCode).toBe(401);
     expect((await call('DELETE',`/api/v1/admin/campaigns/${c.id}`,{version:1},noAuth)).statusCode).toBe(401);
     const after = await state(c.id);

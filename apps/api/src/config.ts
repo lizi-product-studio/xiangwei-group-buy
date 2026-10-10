@@ -27,6 +27,9 @@ const configSchema = z.object({
     .trim()
     .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/)
     .default("2026-09-07-phone-v1"),
+  STAFF_WEB_ORIGINS: z.string().default("https://admin.liziqi.icu,https://saas.liziqi.icu"),
+  STAFF_SESSION_TTL_SECONDS: z.coerce.number().int().min(900).max(86400).default(28800),
+  STAFF_CHALLENGE_BITS: z.coerce.number().int().min(8).max(22).default(18),
   AUTH_SESSION_TTL_SECONDS: z.coerce
     .number()
     .int()
@@ -157,6 +160,7 @@ export function loadConfig(
     }
   }
   if (config.NODE_ENV === "production") {
+    if (config.STAFF_CHALLENGE_BITS < 18) throw new BusinessError("VALIDATION_ERROR", "生产登录挑战强度不足", 500);
     if (config.DATA_STORE !== "mysql" || config.QUEUE_DRIVER !== "redis")
       throw new BusinessError(
         "VALIDATION_ERROR",

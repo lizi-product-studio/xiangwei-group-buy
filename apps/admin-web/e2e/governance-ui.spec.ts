@@ -1,8 +1,8 @@
+import { test, staffFetch, staffHeaders } from "./browser-auth";
 import { fixturePhoto } from './media-fixture';
 import { randomUUID } from "node:crypto";
 import {
   expect,
-  test,
   type APIRequestContext,
   type Page,
   type Response,
@@ -27,7 +27,7 @@ function watchBrowser(
       failures.push(`requestfailed: ${request.url()} ${reason}`);
   });
   page.on("response", (response) => {
-    if (response.status() >= 400 && !expected(response))
+    if (response.status() >= 400 && response.headers()["x-reauthentication-required"] !== "1" && !expected(response))
       failures.push(`http ${response.status()}: ${response.url()}`);
   });
   return failures;
@@ -39,7 +39,7 @@ async function post<T>(
   data: unknown,
   headers = superHeaders,
 ): Promise<T> {
-  const response = await request.fetch(`${apiBase}${path}`, {
+  const response = await staffFetch(request, `${apiBase}${path}`, {
     method: "POST",
     headers,
     data,
@@ -157,7 +157,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
   const operator = await createStaff("OPERATOR");
   const finance = await createStaff("FINANCE");
 
-  const superLogin = await request.fetch(`${apiBase}/api/v1/auth/admin/login`, {
+  const superLogin = await staffFetch(request, `${apiBase}/api/v1/auth/admin/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     data: {
@@ -167,7 +167,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
   });
   expect(superLogin.status(), await superLogin.text()).toBe(200);
   const superChallenge = (await superLogin.json()).data.passwordChangeToken as string;
-  const activateResponse = await request.fetch(`${apiBase}/api/v1/auth/admin/complete-password-change`, {
+  const activateResponse = await staffFetch(request, `${apiBase}/api/v1/auth/admin/complete-password-change`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     data: {
@@ -176,21 +176,21 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
     },
   });
   expect(activateResponse.status(), await activateResponse.text()).toBe(200);
-  const superToken = (await activateResponse.json()).data.accessToken as string;
-  const managerLogin = await request.fetch(`${apiBase}/api/v1/auth/admin/login`, {
+  const superSession = await staffHeaders(activateResponse);
+  const managerLogin = await staffFetch(request, `${apiBase}/api/v1/auth/admin/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     data: { username: manager.username, password: manager.temporaryPassword },
   });
   expect(managerLogin.status(), await managerLogin.text()).toBe(200);
   const managerChallenge = (await managerLogin.json()).data.passwordChangeToken as string;
-  const managerActivation = await request.fetch(`${apiBase}/api/v1/auth/admin/complete-password-change`, {
+  const managerActivation = await staffFetch(request, `${apiBase}/api/v1/auth/admin/complete-password-change`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     data: { passwordChangeToken: managerChallenge, newPassword: password },
   });
   expect(managerActivation.status(), await managerActivation.text()).toBe(200);
-  const managerToken = (await managerActivation.json()).data.accessToken as string;
+  const managerSession = await staffHeaders(managerActivation);
 
   const sku = await post<{ id: string }>(request, "/api/v1/admin/catalog/skus", {
     title: `P1-C 番茄 ${suffix}`,
@@ -231,7 +231,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
       "content-type": "application/json",
       "idempotency-key": `p1c-governance-order-${suffix}-${index}`,
     };
-    const order = await request.fetch(`${apiBase}/api/v1/orders`, {
+    const order = await staffFetch(request, `${apiBase}/api/v1/orders`, {
       method: "POST",
       headers,
       data: {
@@ -243,12 +243,12 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
     });
     expect(order.status(), await order.text()).toBe(201);
     const value = (await order.json()).data as { id: string; orderNo: string };
-    const paid = await request.fetch(
+    const paid = await staffFetch(request,
       `${apiBase}/api/v1/orders/${value.id}/pay/mock-confirm`,
       { method: "POST", headers: { "x-demo-user-id": userId, "x-demo-role": "USER" } },
     );
     expect(paid.status(), await paid.text()).toBeLessThan(300);
-    const view = await request.fetch(`${apiBase}/api/v1/orders/${value.id}`, {
+    const view = await staffFetch(request, `${apiBase}/api/v1/orders/${value.id}`, {
       headers: { "x-demo-user-id": userId, "x-demo-role": "USER" },
     });
     expect(view.status(), await view.text()).toBe(200);
@@ -260,7 +260,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
   const cancelB = await createPaidOrder(4);
   await expect
     .poll(async () => {
-      const response = await request.fetch(
+      const response = await staffFetch(request,
         `${apiBase}/api/v1/admin/campaigns/${campaign.id}/close`,
         { method: "POST", headers: superHeaders, data: {} },
       );
@@ -271,7 +271,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
     .toBe(200);
 
   for (const value of [cancelA, cancelB]) {
-    const response = await request.fetch(`${apiBase}/api/v1/orders/${value.id}/cancel`, {
+    const response = await staffFetch(request, `${apiBase}/api/v1/orders/${value.id}/cancel`, {
       method: "POST",
       headers: {
         "x-demo-user-id": value.userId,
@@ -330,11 +330,12 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
   allowExpectedCancellationRefreshFailure = true;
   const cancellationRefund = page.waitForResponse(
     (response) =>
-      response.request().method() === "POST" &&
+      response.request().method() === "POST" && response.headers()["x-reauthentication-required"] !== "1" &&
       response.url().endsWith(`/api/v1/admin/community/orders/${cancelA.id}/cancellation/refund`),
   );
   await financeCancellation.getByRole("button", { name: "执行退款" }).click();
   await page.getByRole("dialog", { name: "二次确认执行取消退款" }).getByRole("button", { name: "确认执行退款" }).click();
+  await expect(page.getByRole("dialog", { name: "二次确认执行取消退款" })).not.toBeVisible();
   expect((await cancellationRefund).ok()).toBe(true);
   await expect.poll(() => failedCancellationRefreshes).toBe(1);
   allowExpectedCancellationRefreshFailure = false;
@@ -344,7 +345,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
   // Four one-item orders were paid; cancelA has now been refunded and must
   // never contribute to arrival or allocation. The rejected cancelB remains.
   for (const value of [cancelA, qualityA, qualityB, cancelB]) {
-    const response = await request.fetch(`${apiBase}/api/v1/orders/${value.id}`, {
+    const response = await staffFetch(request, `${apiBase}/api/v1/orders/${value.id}`, {
       headers: { "x-demo-user-id": value.userId, "x-demo-role": "USER" },
     });
     expect(response.status(), await response.text()).toBe(200);
@@ -361,11 +362,11 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
   });
   const batch = await post<{ id: string }>(request, "/api/v1/admin/dispatch-batches", { campaignId: campaign.id });
   await post(request, `/api/v1/admin/dispatch-batches/${batch.id}/dispatch`, {});
-  const arrival = await request.fetch(
+  const arrival = await staffFetch(request,
     `${apiBase}/api/v1/admin/community/dispatch-batches/${batch.id}/arrival`,
     {
       method: "POST",
-      headers: { authorization: `Bearer ${superToken}`, "content-type": "application/json" },
+      headers: superSession,
       data: {
         receivedBy: "P1-C 紧急代办人",
         confirmationNote: "为治理角色验收建立到货前置",
@@ -375,14 +376,14 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
     },
   );
   expect(arrival.status(), await arrival.text()).toBe(200);
-  const managerHeaders = { authorization: `Bearer ${managerToken}`, "content-type": "application/json" };
+  const managerHeaders = managerSession;
   for (const [index, value] of [qualityA, qualityB].entries()) {
-    const codeResponse = await request.fetch(`${apiBase}/api/v1/pickup-code?orderId=${value.id}`, {
+    const codeResponse = await staffFetch(request, `${apiBase}/api/v1/pickup-code?orderId=${value.id}`, {
       headers: { "x-demo-user-id": value.userId, "x-demo-role": "USER" },
     });
     expect(codeResponse.status(), await codeResponse.text()).toBe(200);
     const code = (await codeResponse.json()).data.code as string;
-    const verify = await request.fetch(`${apiBase}/api/v1/pickup/verify`, {
+    const verify = await staffFetch(request, `${apiBase}/api/v1/pickup/verify`, {
       method: "POST",
       headers: managerHeaders,
       data: {
@@ -394,7 +395,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
       },
     });
     expect(verify.status(), await verify.text()).toBe(200);
-    const quality = await request.fetch(`${apiBase}/api/v1/orders/${value.id}/quality-cases`, {
+    const quality = await staffFetch(request, `${apiBase}/api/v1/orders/${value.id}/quality-cases`, {
       method: "POST",
       headers: { "x-demo-user-id": value.userId, "x-demo-role": "USER", "content-type": "application/json" },
       data: {
@@ -404,7 +405,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
     });
     expect(quality.status(), await quality.text()).toBe(201);
   }
-  const intent = await request.fetch(`${apiBase}/api/v1/service-area-interests`, {
+  const intent = await staffFetch(request, `${apiBase}/api/v1/service-area-interests`, {
     method: "POST",
     headers: { "x-demo-user-id": `p1c.intent.${suffix}`, "x-demo-role": "USER", "content-type": "application/json" },
     data: {
@@ -542,6 +543,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
   allowExpectedQualityRefreshFailure = true;
   await qualityFinanceRow.getByRole("button", { name: "执行退款" }).click();
   await page.getByRole("dialog", { name: "二次确认执行品质退款" }).getByRole("button", { name: "确认执行退款" }).click();
+  await expect(page.getByRole("dialog", { name: "二次确认执行品质退款" })).not.toBeVisible();
   await expect.poll(() => failedQualityRefreshes).toBe(1);
   allowExpectedQualityRefreshFailure = false;
   await page.unroute("**/api/v1/admin/quality-cases?*");
@@ -594,7 +596,7 @@ test("客服、运营、财务和超管从网页完成治理闭环", async ({
   await post(request, `/api/v1/admin/campaigns/${postponedCampaign.id}/open`, {});
   await expect
     .poll(async () => {
-      const response = await request.fetch(
+      const response = await staffFetch(request,
         `${apiBase}/api/v1/admin/campaigns/${postponedCampaign.id}/close`,
         { method: "POST", headers: superHeaders, data: {} },
       );

@@ -988,6 +988,13 @@ export class MemoryStore implements CommerceStore {
     try {
       const actor = getCurrentInternalWriteActor();
       if (actor) {
+        if (actor.sessionTokenHash) {
+          const session = await this.getActiveAuthSession(actor.sessionTokenHash);
+          if (!session || session.userId !== actor.userId || session.webOrigin !== actor.webOrigin)
+            throw new BusinessError("AUTH_REQUIRED", "登录状态已失效，请重新登录", 401);
+          if (actor.requireFreshAuthentication && (!session.reauthenticatedUntil || Date.parse(session.reauthenticatedUntil) <= Date.now()))
+            throw new BusinessError("REAUTH_REQUIRED", "此操作需要再次验证登录密码", 403);
+        }
         const [user, staff, credential] = await Promise.all([
           this.getUser(actor.userId),
           this.getInternalStaff(actor.userId),

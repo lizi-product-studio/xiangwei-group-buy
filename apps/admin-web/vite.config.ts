@@ -18,7 +18,8 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': apiTarget,
+      // Preserve the browser host so cookie origin checks match the deployed proxy.
+      '/api': { target: apiTarget, changeOrigin: false },
       '/health': apiTarget,
     },
   },

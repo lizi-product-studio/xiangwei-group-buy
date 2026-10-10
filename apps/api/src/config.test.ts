@@ -39,6 +39,12 @@ describe("production configuration safety", () => {
     expect(() => loadConfig({ NODE_ENV: "test", AGGREGATE_PAYLOAD_WARNING_BYTES: "4096", AGGREGATE_PAYLOAD_CRITICAL_BYTES: "4096" })).toThrow(/严重告警阈值/);
     expect(loadConfig({ NODE_ENV: "test" })).toMatchObject({ AGGREGATE_PAYLOAD_WARNING_BYTES: 2 * 1024 * 1024, AGGREGATE_PAYLOAD_CRITICAL_BYTES: 4 * 1024 * 1024 });
   });
+  it("keeps browser and consumer lifetimes separate and refuses weak production challenges", () => {
+    const valid = { ...productionBase, WECHAT_PAY_NOTIFY_URL: "https://api.groupbuy.cn/api/v1/payments/wechat/notify", WECHAT_PAY_REFUND_NOTIFY_URL: "https://api.groupbuy.cn/api/v1/refunds/wechat/notify" };
+    expect(loadConfig(valid)).toMatchObject({ AUTH_SESSION_TTL_SECONDS: 604800, STAFF_SESSION_TTL_SECONDS: 28800, STAFF_CHALLENGE_BITS: 18 });
+    expect(() => loadConfig({ ...valid, STAFF_CHALLENGE_BITS: "8" })).toThrow();
+    expect(() => loadConfig({ ...valid, STAFF_SESSION_TTL_SECONDS: "604800" })).toThrow();
+  });
   it("rejects placeholder payment callback hosts", () => {
     expect(() =>
       loadConfig({

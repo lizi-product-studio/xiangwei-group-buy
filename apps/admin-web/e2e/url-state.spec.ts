@@ -1,4 +1,5 @@
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { test } from "./browser-auth";
+import { expect, type APIRequestContext, type Page } from "@playwright/test";
 
 const apiBase = process.env.E2E_API_BASE_URL ?? "http://127.0.0.1:3101";
 const demoAdmin = { "x-demo-user-id": "demo-super-admin", "x-demo-role": "SUPER_ADMIN" };

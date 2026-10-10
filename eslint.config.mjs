@@ -15,14 +15,15 @@ export default tseslint.config(
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ['prototypes/xiangwei-group-buy-system-20260914/verify.mjs'],
+    files: ['prototypes/**/verify.mjs'],
     languageOptions: { globals: { process: 'readonly', console: 'readonly', location: 'readonly' } },
   },
   {
-    files: ['prototypes/xiangwei-group-buy-system-20260914/**/*.js'],
+    files: ['prototypes/**/*.js'],
     languageOptions: {
       sourceType: 'script',
       globals: {
+        Blob: 'readonly', URL: 'readonly', FormData: 'readonly', FileReader: 'readonly', structuredClone: 'readonly',
         document: 'readonly', window: 'readonly', location: 'readonly',
         URLSearchParams: 'readonly', setTimeout: 'readonly', clearTimeout: 'readonly',
         requestAnimationFrame: 'readonly', cancelAnimationFrame: 'readonly',
@@ -33,6 +34,20 @@ export default tseslint.config(
         localStorage: 'readonly', sessionStorage: 'readonly',
       },
     },
+  },
+  {
+    files: ['prototypes/**/*.js'],
+    rules: {
+      'no-empty': ['error', { allowEmptyCatch: true }],
+      'no-redeclare': ['error', { builtinGlobals: false }],
+      'no-irregular-whitespace': ['error', { skipStrings: true, skipTemplates: true }],
+      'no-useless-escape': ['error', { allowRegexCharacters: ['-'] }],
+    },
+  },
+  {
+    files: ['prototypes/**/*.cjs'],
+    languageOptions: { sourceType: 'commonjs', globals: { require: 'readonly', process: 'readonly', console: 'readonly', __dirname: 'readonly', setTimeout: 'readonly', clearTimeout: 'readonly', URL: 'readonly' } },
+    rules: { '@typescript-eslint/no-require-imports': 'off' },
   },
   {
     rules: {

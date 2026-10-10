@@ -1,4 +1,5 @@
-import { expect, test } from "@playwright/test";
+import { test } from "./browser-auth";
+import { expect } from "@playwright/test";
 
 test("财务分页请求历史待办且缺金额依据时禁止退款", async ({page, request}) => {
   // Real staff login; only queue read responses are synthetic to isolate the browser contract.

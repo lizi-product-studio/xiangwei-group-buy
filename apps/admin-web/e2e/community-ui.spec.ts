@@ -1,6 +1,7 @@
+import { test, staffFetch, staffHeaders } from "./browser-auth";
 import { uploadPointPhoto } from './media-fixture';
 import { fixturePhoto } from './media-fixture';
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { expect, type APIRequestContext, type Page } from "@playwright/test";
 
 const apiBase = process.env.E2E_API_BASE_URL ?? "http://127.0.0.1:3101";
 const superHeaders = {
@@ -12,7 +13,7 @@ async function call<T>(
   path: string,
   data?: unknown,
 ): Promise<T> {
-  const response = await request.fetch(`${apiBase}${path}`, {
+  const response = await staffFetch(request, `${apiBase}${path}`, {
     method: "POST",
     headers:
       data === undefined
@@ -82,7 +83,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   });
   page.on("response", (response) => {
     if (
-      response.status() >= 400 &&
+      response.status() >= 400 && response.headers()["x-reauthentication-required"] !== "1" &&
       !allowExpectedLocationVerificationFailure &&
       !(
         allowExpectedPickupDuplicate &&
@@ -412,7 +413,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   await expect(page.getByRole("button", { name: "已复核，确认开售" })).toBeVisible();
   await page.getByRole("button", { name: "暂不开售" }).click();
 
-  const skuResponse = await request.fetch(`${apiBase}/api/v1/admin/catalog/skus`, {
+  const skuResponse = await staffFetch(request, `${apiBase}/api/v1/admin/catalog/skus`, {
     headers: superHeaders,
   });
   expect(skuResponse.status(), await skuResponse.text()).toBe(200);
@@ -432,7 +433,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
     campaign: { id: string; deliveryPlan: { id: string } },
     quantity = 1,
   ) => {
-    const created = await request.fetch(`${apiBase}/api/v1/orders`, {
+    const created = await staffFetch(request, `${apiBase}/api/v1/orders`, {
       method: "POST",
       headers: {
         ...customerHeaders,
@@ -447,7 +448,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
     });
     expect(created.status(), await created.text()).toBe(201);
     const order = (await created.json()).data as { id: string };
-    const paid = await request.fetch(
+    const paid = await staffFetch(request,
       `${apiBase}/api/v1/orders/${order.id}/pay/mock-confirm`,
       { method: "POST", headers: customerActorHeaders },
     );
@@ -476,7 +477,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
     await createPaidOrder(expiry.campaign),
     await createPaidOrder(expiry.campaign),
   ];
-  const unpaid = await request.fetch(`${apiBase}/api/v1/orders`, {
+  const unpaid = await staffFetch(request, `${apiBase}/api/v1/orders`, {
     method: "POST",
     headers: {
       ...customerHeaders,
@@ -490,13 +491,13 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
     },
   });
   expect(unpaid.status(), await unpaid.text()).toBe(201);
-  const normalOrderResponse = await request.fetch(
+  const normalOrderResponse = await staffFetch(request,
     `${apiBase}/api/v1/orders/${normal.order.id}`,
     { headers: customerActorHeaders },
   );
   expect(normalOrderResponse.status(), await normalOrderResponse.text()).toBe(200);
   const normalOrder = (await normalOrderResponse.json()).data as { orderNo: string };
-  const emergencyOrderResponse = await request.fetch(
+  const emergencyOrderResponse = await staffFetch(request,
     `${apiBase}/api/v1/orders/${emergency.order.id}`,
     { headers: customerActorHeaders },
   );
@@ -504,7 +505,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   const emergencyOrder = (await emergencyOrderResponse.json()).data as { orderNo: string };
   const expiryOrderViews = await Promise.all(
     expiryOrders.map(async (order) => {
-      const response = await request.fetch(`${apiBase}/api/v1/orders/${order.id}`, {
+      const response = await staffFetch(request, `${apiBase}/api/v1/orders/${order.id}`, {
         headers: customerActorHeaders,
       });
       expect(response.status(), await response.text()).toBe(200);
@@ -515,7 +516,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   const batchByCampaignId = new Map<string, string>();
   for (const value of [normal, emergency, expiry]) {
     await expect.poll(async () => {
-      const response = await request.fetch(`${apiBase}/api/v1/admin/campaigns/${value.campaign.id}/close`, { method: "POST", headers: superHeaders });
+      const response = await staffFetch(request, `${apiBase}/api/v1/admin/campaigns/${value.campaign.id}/close`, { method: "POST", headers: superHeaders });
       return response.status();
     }, { timeout: 15_000, intervals: [250, 500] }).toBe(200);
     await call(request, `/api/v1/admin/delivery-plans/${value.campaign.deliveryPlan.id}/book-vehicle`, {
@@ -579,7 +580,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   await page.getByRole("button", { name: "提交到货确认" }).click();
   await expect(page.getByText("到货事实已登记")).toBeVisible();
   await expect(page.getByRole("dialog", { name: "逐商品确认到货" })).toHaveCount(0);
-  const pickupCode = await request.fetch(`${apiBase}/api/v1/pickup-code?orderId=${normal.order.id}`, { headers: customerActorHeaders });
+  const pickupCode = await staffFetch(request, `${apiBase}/api/v1/pickup-code?orderId=${normal.order.id}`, { headers: customerActorHeaders });
   expect(pickupCode.status(), await pickupCode.text()).toBe(200);
   const pickupValue = (await pickupCode.json()).data as { code: string };
   let pickupPosts = 0;
@@ -612,7 +613,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
     .click();
   await expect.poll(async () => pickupPosts).toBe(1);
   await expect(quantityInput).toHaveValue("0");
-  const firstPickupOrder = await request.fetch(
+  const firstPickupOrder = await staffFetch(request,
     `${apiBase}/api/v1/orders/${normal.order.id}`,
     { headers: customerActorHeaders },
   );
@@ -624,7 +625,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
     .getByRole("button", { name: "确认提交核销" })
     .click();
   await expect.poll(async () => pickupPosts).toBe(2);
-  const completedPickupOrder = await request.fetch(
+  const completedPickupOrder = await staffFetch(request,
     `${apiBase}/api/v1/orders/${normal.order.id}`,
     { headers: customerActorHeaders },
   );
@@ -637,7 +638,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   await page.getByLabel("密码").fill("community e2e admin password");
   await page.getByRole("button", { name: /登\s*录/ }).click();
   await expect(page.getByRole("heading", { name: "运营工作台" })).toBeVisible();
-  const adminLogin = await request.fetch(`${apiBase}/api/v1/auth/admin/login`, {
+  const adminLogin = await staffFetch(request, `${apiBase}/api/v1/auth/admin/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     data: {
@@ -646,10 +647,10 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
     },
   });
   expect(adminLogin.status(), await adminLogin.text()).toBe(200);
-  const adminToken = (await adminLogin.json()).data.accessToken as string;
+  const adminSession = await staffHeaders(adminLogin);
   await page.getByRole("menuitem", { name: "到货异常处理", exact: true }).click();
   await expect(page.getByRole("heading", { name: "到货异常处理" })).toBeVisible();
-  const deliverySnapshot = await request.fetch(`${apiBase}/api/v1/admin/community/deliveries`, {
+  const deliverySnapshot = await staffFetch(request, `${apiBase}/api/v1/admin/community/deliveries`, {
     headers: { ...superHeaders, accept: "application/json" },
   });
   expect(deliverySnapshot.status(), await deliverySnapshot.text()).toBe(200);
@@ -704,7 +705,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   await expect(page.getByRole("dialog")).toHaveCount(0);
   expect(emergencyArrivalPosts).toBe(1);
   await expect.poll(async () => {
-    const deliveries = await request.fetch(`${apiBase}/api/v1/admin/community/deliveries`, {
+    const deliveries = await staffFetch(request, `${apiBase}/api/v1/admin/community/deliveries`, {
       headers: superHeaders,
     });
     const data = (await deliveries.json()).data as Array<{
@@ -716,12 +717,12 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   }).toBe("EXCEPTION");
   // API setup is limited to the persisted test precondition. The following
   // operator and finance transitions are exercised only through the browser.
-  const expiryArrival = await request.fetch(
+  const expiryArrival = await staffFetch(request,
     `${apiBase}/api/v1/admin/community/dispatch-batches/${batchByCampaignId.get(expiry.campaign.id)!}/arrival`,
     {
       method: "POST",
       headers: {
-        authorization: `Bearer ${adminToken}`,
+        ...adminSession,
         "content-type": "application/json",
       },
       data: {
@@ -744,7 +745,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
   );
   expect(expiryArrival.status(), await expiryArrival.text()).toBe(200);
   for (const order of expiryOrders) {
-    const expired = await request.fetch(
+    const expired = await staffFetch(request,
       `${apiBase}/__test/community/orders/${order.id}/expire-pickup-window`,
       { method: "POST", headers: superHeaders },
     );
@@ -946,7 +947,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
     .click();
   await expect.poll(async () => pickupRefundPosts).toBe(1);
   await expect(pickupRefundRow.getByRole("button", { name: "执行退款" })).toHaveCount(0);
-  const windowsAfterRefund = await request.fetch(
+  const windowsAfterRefund = await staffFetch(request,
     `${apiBase}/api/v1/admin/community/pickup-windows`,
     { headers: superHeaders },
   );
@@ -956,7 +957,7 @@ test("运营后台只呈现社区主线，点位负责人只进入网页工作�
       (window) => window.orderId === expiryOrders[1]!.id,
     )?.status,
   ).toBe("CLOSED");
-  const refundState = await request.fetch(`${apiBase}/api/v1/admin/finance/refunds?reference=${encodeURIComponent(emergency.order.id)}`, {
+  const refundState = await staffFetch(request, `${apiBase}/api/v1/admin/finance/refunds?reference=${encodeURIComponent(emergency.order.id)}`, {
     headers: superHeaders,
   });
   expect(refundState.status(), await refundState.text()).toBe(200);

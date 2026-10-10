@@ -136,11 +136,13 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec eslint apps/admin-web/e2e playwright.config.ts --max-warnings=0
+      - run: pnpm exec eslint apps/admin-web/e2e playwright.config.ts playwright.security.config.ts --max-warnings=0
       - run: pnpm --filter @hometown/domain build && pnpm --filter @hometown/api-contracts build
       - run: pnpm exec playwright install --with-deps chromium
       - name: Run community group-buying browser gate
         run: pnpm test:e2e
+      - name: Run TLS cookie and CSP browser gate
+        run: pnpm test:security:browser
       - name: Upload Playwright evidence
         id: upload_playwright_evidence
         if: always()
@@ -152,6 +154,8 @@ jobs:
           path: |
             playwright-report
             test-results
+            .audit/security-browser-20261010
+          include-hidden-files: true
           if-no-files-found: warn
           retention-days: 14
       - name: Report Playwright evidence availability

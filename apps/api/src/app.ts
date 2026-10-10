@@ -53,6 +53,8 @@ import {
 } from "@hometown/api-contracts";
 import { BusinessError, moneyCents } from "@hometown/domain";
 import type { AppConfig } from "./config.js";
+import { WebSessions, requiresReauthentication } from "./modules/auth/web-session.js";
+import { LoginProtection, securityHash } from "./modules/auth/login-protection.js";
 import { AdminAuthService } from "./modules/auth/admin-auth.js";
 import { readDemoActor, requireActor } from "./modules/auth/auth.js";
 import { StaffService } from "./modules/auth/staff-service.js";
@@ -288,6 +290,12 @@ export async function buildApp(
             },
             redact: [
               "req.headers.authorization",
+              "req.headers.x-csrf-token",
+              "req.body.password",
+              "req.body.currentPassword",
+              "req.body.newPassword",
+              "req.body.passwordChangeToken",
+              "req.body.challenge",
               "req.body.code",
               "req.body.phoneCode",
               "req.body.phoneNumber",
@@ -412,8 +420,11 @@ export async function buildApp(
       : null;
   const adminAuthService = new AdminAuthService(
     store,
-    config.AUTH_SESSION_TTL_SECONDS,
+    config.STAFF_SESSION_TTL_SECONDS,
   );
+  const webSessions = new WebSessions(config);
+  const loginProtection = new LoginProtection(config.STAFF_CHALLENGE_BITS, config.QUEUE_DRIVER === "redis" ? config.REDIS_URL : undefined);
+  await loginProtection.initialize();
   const staffService = new StaffService(store);
 
   const audit = (
@@ -676,33 +687,46 @@ export async function buildApp(
           426,
         );
   });
+  app.decorateRequest("staffAuthorization", undefined);
+  app.decorateRequest("staffSession", null);
   app.addHook("onRequest", (request, _reply, done) => {
-    if (!request.headers.authorization?.startsWith("Bearer ")) {
+    const cookieAuthorization = webSessions.authorization(request);
+    const bearer = request.headers.authorization;
+    const publicLogin = ["/api/v1/auth/admin/login", "/api/v1/auth/admin/complete-password-change"].includes(request.url.split("?")[0]!);
+    if (cookieAuthorization && bearer) { done(new BusinessError("FORBIDDEN", "请使用单一登录身份", 403)); return; }
+    if (publicLogin) { request.actor = null; runWithInternalWriteActor(null, done); return; }
+    if (!cookieAuthorization && !bearer) {
       request.actor = config.AUTH_PROVIDER === "demo" ? readDemoActor(request) : null;
       runWithInternalWriteActor(request.actor, done);
       return;
     }
     let revokedSessionHash: string | undefined;
     void store.readSnapshot(async (snapshot) => {
-      const adminActor = await adminAuthService.authenticate(
-        request.headers.authorization,
-        snapshot,
-        (tokenHash) => { revokedSessionHash = tokenHash; },
-      );
-      const actor = adminActor ??
-        (config.AUTH_PROVIDER === "demo"
-          ? readDemoActor(request)
-          : await authService!.authenticate(request.headers.authorization, snapshot));
-      return attachAccess(snapshot, actor);
-    })
-      .then(
-        async (actor) => {
-          if (revokedSessionHash) await store.deleteAuthSession(revokedSessionHash);
-          request.actor = actor;
-          runWithInternalWriteActor(actor, done);
-        },
-        (error: Error) => done(error),
-      );
+      if (cookieAuthorization) {
+        const origin = webSessions.assertSameOrigin(request, false);
+        const actor = await adminAuthService.authenticate(cookieAuthorization, snapshot, hash => { revokedSessionHash = hash; }, origin);
+        if (!actor) return null;
+        request.staffAuthorization = cookieAuthorization;
+        request.staffSession = await snapshot.getActiveAuthSession(securityHash(cookieAuthorization.slice(7)));
+        return attachAccess(snapshot, { ...actor, sessionTokenHash: request.staffSession!.tokenHash, webOrigin: origin });
+      }
+      // Only the WeChat consumer contract uses HTTP Bearer authentication.
+      return authService ? authService.authenticate(bearer, snapshot) : null;
+    }).then(async actor => {
+      if (revokedSessionHash) await store.deleteAuthSession(revokedSessionHash);
+      request.actor = actor;
+      runWithInternalWriteActor(actor, done);
+    }, (error: Error) => done(error));
+  });
+  app.addHook("preValidation", async (request, reply) => {
+    if (!request.staffSession) return;
+    reply.header("cache-control", "no-store");
+    if (!["GET", "HEAD", "OPTIONS"].includes(request.method)) webSessions.assertCsrf(request);
+    if (requiresReauthentication(request.method, request.routeOptions.url ?? "")) {
+      if (!request.staffSession.reauthenticatedUntil || Date.parse(request.staffSession.reauthenticatedUntil) <= Date.now())
+        throw new BusinessError("REAUTH_REQUIRED", "此操作需要再次验证登录密码", 403);
+      if (request.actor) request.actor.requireFreshAuthentication = true;
+    }
   });
   registerAccessRoutes(app, store);
   app.setErrorHandler((error, request, reply) => {
@@ -722,6 +746,9 @@ export async function buildApp(
         requestId: request.id,
       });
     }
+    if (!(error instanceof BusinessError) && typeof error === "object" && error !== null && "statusCode" in error && error.statusCode === 413)
+      return reply.status(413).send({ code: "VALIDATION_ERROR", message: "请求内容过大", requestId: request.id });
+    if (error instanceof BusinessError && error.code === "REAUTH_REQUIRED") reply.header("x-reauthentication-required", "1");
     if (error instanceof BusinessError)
       return reply
         .status(error.statusCode)
@@ -766,6 +793,7 @@ export async function buildApp(
       }
     };
     const dependencies: Record<string, "ok" | "degraded"> = {
+      loginProtection: await loginProtection.health(),
       dataStore: await probe(() => store.health()),
       queue: await probe(() => scheduler.health()),
       reconciliation:
@@ -808,6 +836,7 @@ export async function buildApp(
     authService,
     adminAuthService,
     privacyNoticeVersion: config.PRIVACY_NOTICE_VERSION,
+    webSessions, loginProtection,
   });
   const listPickupPointManagerDirectory = async (serviceAreaId?: string) => {
     const [points, assignments, staff] = await Promise.all([
@@ -1575,25 +1604,13 @@ export async function buildApp(
     return {data:{items:await Promise.all(result.items.map(consumerSummary)),total:result.total,page:result.page,pageSize:result.pageSize}};
   });
   app.get("/api/v1/admin/consumers/:id", async (request) => {
-    const actor = requireActor(request, ["SUPER_ADMIN", "CUSTOMER_SERVICE"]);
+    requireActor(request, ["SUPER_ADMIN", "CUSTOMER_SERVICE"]);
     const consumerNumber = z.coerce.number().int().min(1).max(Number.MAX_SAFE_INTEGER).parse((request.params as {id:string}).id);
     await ensureConsumerPublicNumbers(store);
     const user = await store.findConsumerUserByPublicNumber(consumerNumber);
     if (!user) throw new BusinessError("RESOURCE_NOT_FOUND", "消费者不存在", 404);
-    const canViewPhone = actorCan(actor, "consumers.phone.view");
-    if (canViewPhone && user.phoneNumber)
-      await store.transaction(transactionStore => auditInTransaction(
-        transactionStore,
-        request,
-        actor.userId,
-        "CONSUMER_PHONE_VIEWED",
-        "CONSUMER",
-        user.id,
-        null,
-        { consumerNumber, phoneViewed: true },
-      ));
     const orders = (await store.listOrdersByUser(user.id)).sort((a,b) => b.createdAt.localeCompare(a.createdAt)).slice(0,50).map(order => ({orderNo:order.orderNo,status:order.status,totalAmountCents:order.totalCents,createdAt:order.createdAt}));
-    return {data:{...await consumerSummary(user),...(canViewPhone && user.phoneNumber ? {phoneNumber:user.phoneNumber} : {}),orders}};
+    return {data:{...await consumerSummary(user),orders}};
   });
   app.get("/api/v1/admin/consumers/:id/phone", async (request) => {
     const actor = requireActor(request, ["SUPER_ADMIN", "CUSTOMER_SERVICE", "OPERATOR", "FINANCE"]);
@@ -2606,6 +2623,7 @@ export async function buildApp(
   timer?.unref();
   app.addHook("onClose", async () => {
     if (timer) clearInterval(timer);
+    loginProtection.close();
     await scheduler.close();
     await store.close();
   });

@@ -11,6 +11,7 @@ import { createAdminCredential, AdminAuthService } from "./admin-auth.js";
 import { ALL_PERMISSION_CODES, BUILTIN_ACCESS_ROLES, normalizePermissions } from "@hometown/api-contracts";
 import { requireActor } from "./auth.js";
 import { attachAccess, ROUTE_PERMISSIONS } from "./access-control.js";
+import { StaffHttpClient } from "./staff-http.test-helper.js";
 import { RoleService } from "./role-service.js";
 import { StaffService } from "./staff-service.js";
 import { runWithInternalWriteActor } from "./internal-write-context.js";
@@ -27,10 +28,20 @@ async function account(store:MemoryStore,id:string,role:Role,accessRoleId?:strin
   await store.replaceUserRoles(id,[role],1);
   await store.saveInternalStaff({userId:id,staffNo:id,displayName:id,phone:"13800138000",role,status:"ACTIVE",authorizationVersion:1,createdBy:null,activatedAt:now,suspendedAt:null,suspensionReason:null,createdAt:now,updatedAt:now,...(accessRoleId?{accessRoleId}:{})});
   await store.saveAdminCredential(await createAdminCredential(id,id,password,[role],false,1));
-  const login=await new AdminAuthService(store,3600).login(id,password);
-  if(login.nextAction!=="LOGIN")throw new Error("login failed");
-  return {authorization:`Bearer ${login.accessToken}`};
+  return loginHeaders(store,id);
 }
+async function loginHeaders(store:MemoryStore,id:string):Promise<Record<string,string>> {
+  const loginApp=await buildApp({store,config:loadConfig({NODE_ENV:"test",STAFF_CHALLENGE_BITS:"8"})});
+  try {
+    const client=new StaffHttpClient(loginApp);
+    const response=await client.login(id,password);
+    expect(response.statusCode,response.body).toBe(200);
+    const verified=await client.reauthenticate(password);
+    expect(verified.statusCode,verified.body).toBe(200);
+    return client.headers();
+  } finally { await loginApp.close(); }
+}
+const serviceAuthorization=(headers:Record<string,string>)=>`Bearer ${headers.cookie!.split("; ").find(value=>value.startsWith("staff-session="))!.slice("staff-session=".length)}`;
 describe("configurable access roles",()=>{
   it("maps campaign-group and order-detail routes to explicit capabilities", async()=>{
     expect(ROUTE_PERMISSIONS["POST /api/v1/admin/campaign-groups"]).toEqual(["campaigns.create"]);
@@ -82,7 +93,7 @@ describe("configurable access roles",()=>{
     for(const url of ["/api/v1/admin/access/roles","/api/v1/admin/staff","/api/v1/admin/finance/ledger","/api/v1/admin/audit-logs"])
       expect((await app.inject({url,headers})).statusCode,url).toBe(403);
     expect((await app.inject({method:"POST",url:"/api/v1/admin/catalog/skus",headers,payload:{}})).statusCode).toBe(403);
-    const oldActor=await attachAccess(store,await new AdminAuthService(store,3600).authenticate(headers.authorization));
+    const oldActor=await attachAccess(store,await new AdminAuthService(store,3600).authenticate(serviceAuthorization(headers),store,undefined,"http://localhost"));
     expect(oldActor).not.toBeNull();
     await roles.save(custom.id,{...roleInput,permissions:[],version:custom.version},superActor,"revoke");
     expect((await app.inject({url:"/api/v1/admin/catalog/skus",headers})).statusCode).toBe(401);
@@ -187,7 +198,7 @@ describe("configurable access roles",()=>{
     try {
       app=await buildApp({store,config:loadConfig({NODE_ENV:"test",PRODUCT_IMAGE_DIR:directory})});
       const payload=await sharp({create:{width:2,height:2,channels:3,background:"red"}}).png().toBuffer();
-      const request=(headers:{authorization:string})=>app!.inject({method:"POST",url:"/api/v1/admin/product-detail-images",headers:{...headers,"content-type":"image/png"},payload});
+      const request=(headers:Record<string,string>)=>app!.inject({method:"POST",url:"/api/v1/admin/product-detail-images",headers:{...headers,"content-type":"image/png"},payload});
       expect((await request(createHeaders)).statusCode).toBe(201);
       expect((await request(editHeaders)).statusCode).toBe(201);
       expect((await request(viewHeaders)).statusCode).toBe(403);
@@ -204,7 +215,7 @@ describe("configurable access roles",()=>{
     await expect(service.save(custom.id,{...roleInput,permissions:[],version:custom.version},superActor,"change")).rejects.toThrow("audit unavailable");
     expect((await store.getAccessRole(custom.id))?.permissions).toEqual(["products.view"]);
     expect((await store.getInternalStaff("viewer"))?.authorizationVersion).toBe(1);
-    expect(await new AdminAuthService(store,3600).authenticate(headers.authorization)).not.toBeNull();
+    expect(await new AdminAuthService(store,3600).authenticate(serviceAuthorization(headers),store,undefined,"http://localhost")).not.toBeNull();
   });
   it("does not expose complete orders to summary and fulfillment roles",async()=>{
     const store=new MemoryStore(false); await account(store,"super","SUPER_ADMIN");
@@ -240,11 +251,11 @@ describe("configurable access roles",()=>{
     const role=await service.save(null,roleInput,superActor,"create");const headers=await account(store,"viewer","OPERATOR",role.id);
     const inactive=await service.save(role.id,{...roleInput,status:"INACTIVE",version:role.version},superActor,"disable");
     const auth=new AdminAuthService(store,3600);
-    expect(await auth.authenticate(headers.authorization)).toBeNull();
+    expect(await auth.authenticate(serviceAuthorization(headers),store,undefined,"http://localhost")).toBeNull();
     await expect(auth.login("viewer",password)).rejects.toMatchObject({code:"ACCOUNT_DISABLED"});
     await service.save(role.id,{...roleInput,version:inactive.version},superActor,"enable");
     const fresh=await auth.login("viewer",password);expect(fresh.nextAction).toBe("LOGIN");
-    expect(await auth.authenticate(headers.authorization)).toBeNull();
+    expect(await auth.authenticate(serviceAuthorization(headers),store,undefined,"http://localhost")).toBeNull();
   });
   it("registers every capability and denies future unregistered protected routes",()=>{
     const routes=new Set(Object.values(ROUTE_PERMISSIONS).flat());
@@ -273,8 +284,7 @@ describe("configurable access roles",()=>{
     const point=(await store.listPickupPoints()).find(p=>p.id==="point-a")!;await store.savePickupPoint({...point,status:"INACTIVE"});
     expect((await app.inject({url,headers})).json().data.map((p:{id:string})=>p.id)).toEqual(["point-a"]);
     await service.save(role.id,{...roleInput,name:role.name,scope:"PICKUP",permissions:[],version:role.version},superActor,"revoke");
-    const login=await new AdminAuthService(store,3600).login("point-viewer",password);if(login.nextAction!=="LOGIN")throw new Error("login");
-    const fresh={authorization:`Bearer ${login.accessToken}`};expect((await app.inject({url,headers:fresh})).statusCode).toBe(403);
+    const fresh=await loginHeaders(store,"point-viewer");expect((await app.inject({url,headers:fresh})).statusCode).toBe(403);
     const staff=(await store.getInternalStaff("point-viewer"))!;await store.saveInternalStaff({...staff,status:"SUSPENDED",suspendedAt:now,suspensionReason:"停用"});
     expect((await app.inject({url,headers:fresh})).statusCode).toBe(401);
   });

@@ -3,6 +3,7 @@ import { adminPasswordSchema } from '@hometown/api-contracts';
 import { BusinessError } from '@hometown/domain';
 import type { CommerceStore } from '../core/store.js';
 import type { AdminCredential, PasswordChangeToken, Role } from '../core/types.js';
+import type { WebBinding } from "./web-session.js";
 import type { Actor } from './auth.js';
 
 const SCRYPT_KEY_LENGTH = 64;
@@ -66,6 +67,8 @@ export class AdminAuthService {
     userId: string,
     roles: Role[],
     authorizationVersion: number,
+    binding?: WebBinding,
+    reauthenticatedUntil?: string,
   ): Promise<{ accessToken: string; expiresAt: string; userId: string; roles: Role[] }> {
     const accessToken = randomBytes(32).toString("base64url");
     const expiresAt = new Date(
@@ -77,11 +80,13 @@ export class AdminAuthService {
       roles,
       authorizationVersion,
       expiresAt,
+      ...(binding ? { webOrigin: binding.webOrigin, csrfToken: randomBytes(32).toString("base64url") } : {}),
+      ...(reauthenticatedUntil ? { reauthenticatedUntil } : {}),
     });
     return { accessToken, expiresAt, userId, roles };
   }
 
-  public async login(username: string, password: string): Promise<AdminLoginResult> {
+  public async login(username: string, password: string, binding?: WebBinding): Promise<AdminLoginResult> {
     const normalized = username.trim().toLowerCase();
     const credential = await this.store.findAdminCredential(normalized);
     const actual = await derivePassword(
@@ -145,6 +150,7 @@ export class AdminAuthService {
         authorizationVersion: credential.authorizationVersion,
         expiresAt,
         createdAt,
+        ...binding,
       };
       await this.store.savePasswordChangeToken(value);
       return {
@@ -159,6 +165,7 @@ export class AdminAuthService {
       user.id,
       credential.roles,
       credential.authorizationVersion,
+      binding,
     );
     return { nextAction: "LOGIN", ...session };
   }
@@ -167,13 +174,14 @@ export class AdminAuthService {
     token: string,
     newPassword: string,
     requestId: string,
+    binding?: WebBinding,
   ): Promise<AdminLoginResult> {
     let challengeUserId: string | null = null;
     let challengeUsername: string | null = null;
     await this.store.transaction(async (store) => {
       const tokenHash = sessionTokenHash(token.trim());
       const challenge = await store.getPasswordChangeToken(tokenHash);
-      if (!challenge)
+      if (!challenge || challenge.webOrigin !== binding?.webOrigin || challenge.webContextHash !== binding?.webContextHash)
         throw new BusinessError(
           "PASSWORD_CHANGE_TOKEN_INVALID",
           "密码修改凭据已失效，请重新登录",
@@ -252,20 +260,21 @@ export class AdminAuthService {
     });
     if (!challengeUserId || !challengeUsername)
       throw new BusinessError("PASSWORD_CHANGE_TOKEN_INVALID", "密码修改凭据已失效，请重新登录", 401);
-    return this.login(challengeUsername, newPassword);
+    return this.login(challengeUsername, newPassword, binding);
   }
 
   public async authenticate(
     authorization: string | undefined,
     scopedStore: CommerceStore = this.store,
     onRevokedSession?: (tokenHash: string) => void,
+    webOrigin?: string,
   ): Promise<Actor | null> {
     if (!authorization?.startsWith("Bearer ")) return null;
     const token = authorization.slice(7).trim();
     if (token.length < 32 || token.length > 128) return null;
     const tokenHash = sessionTokenHash(token);
     const session = await scopedStore.getActiveAuthSession(tokenHash);
-    if (!session) return null;
+    if (!session || session.webOrigin !== webOrigin) return null;
     // Consumer and employee tokens share storage. Leave consumer sessions for
     // the WeChat authenticator instead of revoking them as invalid employees.
     if (session.roles.length === 1 && session.roles[0] === "USER") return null;
@@ -305,6 +314,7 @@ export class AdminAuthService {
     currentPassword: string,
     newPassword: string,
     requestId: string,
+    binding?: WebBinding,
   ): Promise<AdminLoginResult> {
     const credential = await this.store.findAdminCredentialByUserId(actor.userId);
     const staff = await this.store.getInternalStaff(actor.userId);
@@ -346,8 +356,35 @@ export class AdminAuthService {
       // Issue the replacement session in the same authorized transaction.
       // A subsequent login/read would still carry this request's old version
       // and be rejected by MysqlStore after the password change committed.
-      const session = await this.issueSession(current.userId, current.roles, nextVersion);
+      const session = await this.issueSession(current.userId, current.roles, nextVersion, binding);
       return { nextAction: "LOGIN" as const, ...session };
+    });
+  }
+
+  public async session(authorization: string | undefined) {
+    if (!authorization?.startsWith("Bearer ")) return null;
+    return this.store.getActiveAuthSession(sessionTokenHash(authorization.slice(7).trim()));
+  }
+
+  public async browserIdentity(authorization: string | undefined) {
+    const session = await this.session(authorization);
+    if (!session?.webOrigin || !session.csrfToken) throw new BusinessError("AUTH_REQUIRED", "请先登录", 401);
+    const credential = await this.store.findAdminCredentialByUserId(session.userId);
+    if (!credential) throw new BusinessError("AUTH_REQUIRED", "请先登录", 401);
+    return { userId: session.userId, roles: session.roles, username: credential.username, expiresAt: session.expiresAt, csrfToken: session.csrfToken };
+  }
+
+  public async reauthenticate(actor: Actor, authorization: string, password: string, requestId: string, binding: WebBinding): Promise<AdminLoginResult> {
+    const credential = await this.store.findAdminCredentialByUserId(actor.userId);
+    if (!credential || !await verifyAdminCredentialPassword(credential, password)) throw new BusinessError("INVALID_CREDENTIALS", "账号或密码不正确", 401);
+    return this.store.transaction(async store => {
+      const current = await this.authenticate(authorization, store, undefined, binding.webOrigin);
+      if (!current || current.authorizationVersion !== credential.authorizationVersion) throw new BusinessError("AUTH_REQUIRED", "登录状态已失效，请重新登录", 401);
+      await store.deleteAuthSession(sessionTokenHash(authorization.slice(7).trim()));
+      const until = new Date(Date.now() + 120000).toISOString();
+      const session = await this.issueSession(actor.userId, current.roles, current.authorizationVersion!, binding, until);
+      await store.saveAuditLog({ id: randomBytes(16).toString("hex"), actorId: actor.userId, action: "STAFF_REAUTHENTICATED", resourceType: "INTERNAL_STAFF", resourceId: actor.userId, requestId, beforeData: null, afterData: { expiresAt: until }, createdAt: await store.databaseNow() });
+      return { nextAction: "LOGIN", ...session };
     });
   }
 

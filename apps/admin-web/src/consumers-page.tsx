@@ -39,9 +39,10 @@ export function createConsumerRequestGate<T>() {
 const time = (value: string) => dayjs(value).isValid() ? dayjs(value).format('YYYY-MM-DD HH:mm') : '—';
 const verified = (value: boolean) => <Tag color={value ? 'green' : 'default'}>{value ? '手机号已认证' : '手机号未认证'}</Tag>;
 
-export function Consumers({ loadPage, loadDetail }: {
+export function Consumers({ loadPage, loadDetail, loadPhone }: {
   loadPage: (query: PageQuery) => Promise<ConsumerPage>;
   loadDetail: (id: number) => Promise<ConsumerDetail>;
+  loadPhone: (id: number) => Promise<{phoneNumber: string}>;
 }) {
   const can = useCan();
   const canViewPhone = can('consumers.phone.view');
@@ -60,6 +61,10 @@ export function Consumers({ loadPage, loadDetail }: {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailFailed, setDetailFailed] = useState(false);
   const [detailRefresh, setDetailRefresh] = useState(0);
+  const [fullPhone, setFullPhone] = useState<string | null>(null);
+  const [phoneLoading, setPhoneLoading] = useState(false);
+  const [phoneFailed, setPhoneFailed] = useState(false);
+  const phoneRequest = useRef(0);
   useEffect(() => {
     const gate = listGate.current;
     setLoading(true); setFailed(false); setResult(null);
@@ -81,6 +86,7 @@ export function Consumers({ loadPage, loadDetail }: {
   const closeDetail = () => {
     detailGate.current.cancel();
     setSelectedId(null); setDetail(null); setDetailFailed(false);
+    phoneRequest.current += 1; setFullPhone(null); setPhoneLoading(false); setPhoneFailed(false);
   };
   return <>
     <header className="section-header">
@@ -102,7 +108,10 @@ export function Consumers({ loadPage, loadDetail }: {
         { title: '注册时间', dataIndex: 'createdAt', render: time },
         { title: '认证状态', dataIndex: 'phoneVerified', render: verified },
         { title: '订单数', dataIndex: 'orderCount' },
-        { title: '操作', render: (_, consumer) => <Button onClick={() => { setDetail(null); setSelectedId(consumer.id); }}>查看详情</Button> },
+        { title: '操作', render: (_, consumer) => <Button onClick={() => {
+          phoneRequest.current += 1; setPhoneLoading(false); setFullPhone(null); setPhoneFailed(false);
+          setDetail(null); setSelectedId(consumer.id);
+        }}>查看详情</Button> },
       ]} />
     <Modal title="用户详情" open={selectedId !== null} onCancel={closeDetail} footer={<Button onClick={closeDetail}>关闭</Button>} width={900}>
       {detailLoading && <Spin tip="正在加载用户详情"><div style={{ minHeight: 120 }} /></Spin>}
@@ -110,7 +119,7 @@ export function Consumers({ loadPage, loadDetail }: {
       {detail && <>
         <Descriptions bordered column={1} size="small">
           <Descriptions.Item label="用户ID">{detail.id}</Descriptions.Item>
-          <Descriptions.Item label="手机号">{detail.phoneNumber ?? detail.maskedPhone ?? '未绑定'}</Descriptions.Item>
+          <Descriptions.Item label="手机号">{fullPhone ?? detail.maskedPhone ?? '未绑定'}</Descriptions.Item>
           <Descriptions.Item label="账号状态">{displayLabel(detail.status)}</Descriptions.Item>
           <Descriptions.Item label="注册时间">{time(detail.createdAt)}</Descriptions.Item>
           <Descriptions.Item label="认证状态">{verified(detail.phoneVerified)}</Descriptions.Item>
@@ -123,7 +132,21 @@ export function Consumers({ loadPage, loadDetail }: {
           { title: '订单金额', dataIndex: 'totalAmountCents', render: (value: number) => `¥${(value / 100).toFixed(2)}` },
           { title: '创建时间', dataIndex: 'createdAt', render: time },
         ]} />
-        {canViewPhone && <Typography.Paragraph type="secondary">完整手机号仅向授权岗位显示；查看已记录在操作日志中。</Typography.Paragraph>}
+        {canViewPhone && detail.maskedPhone && <Space direction="vertical" size="small">
+          <Button loading={phoneLoading} disabled={Boolean(fullPhone)} onClick={() => {
+            const selected = selectedId;
+            if (!selected || !canViewPhone) return;
+            const request = ++phoneRequest.current; setPhoneLoading(true); setPhoneFailed(false);
+            void loadPhone(selected).then(value => {
+              if (phoneRequest.current === request && selectedId === selected) setFullPhone(value.phoneNumber);
+            }).catch(() => {
+              if (phoneRequest.current === request && selectedId === selected) {
+                setPhoneFailed(true);
+              }
+            }).finally(() => { if (phoneRequest.current === request) setPhoneLoading(false); });
+          }}>查看完整手机号</Button>
+          {phoneFailed && <Alert type="error" showIcon message="手机号暂时无法读取，请重试" />}
+        </Space>}
       </>}
     </Modal>
   </>;

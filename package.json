@@ -23,7 +23,8 @@
     "test": "pnpm -r test",
     "test:coverage": "pnpm -r --if-present test:coverage",
     "test:e2e": "pnpm typecheck:e2e && playwright test",
-    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "test:security:browser": "pnpm --filter @hometown/admin-web build && playwright test --config playwright.security.config.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.51.1",

@@ -1,5 +1,6 @@
+import { test } from "./browser-auth";
 import { fixturePhoto } from './media-fixture';
-import { expect, test, type APIRequestContext } from '@playwright/test';
+import { expect, type APIRequestContext } from '@playwright/test';
 
 const apiBase = process.env.E2E_API_BASE_URL ?? 'http://127.0.0.1:3101';
 const bootstrap = { 'x-demo-user-id': 'demo-super-admin', 'x-demo-role': 'SUPER_ADMIN' };
@@ -40,7 +41,7 @@ test('网页草稿过期恢复、编辑开售、无引用删除与消费者只�
   const removable = await draft(deleteTitle, 3_000_000);
   const failures: string[] = [];
   page.on('pageerror', error => failures.push(error.message));
-  page.on('response', response => { if (response.status() >= 400) failures.push(`${response.status()} ${response.url()}`); });
+  page.on('response', response => { if (response.status() >= 400 && response.headers()["x-reauthentication-required"] !== "1") failures.push(`${response.status()} ${response.url()}`); });
   await page.goto('/');
   await page.getByLabel('账号').fill(`crud.${suffix}`);
   await page.getByLabel('密码').fill(staff.temporaryPassword);
@@ -84,11 +85,11 @@ test('网页草稿过期恢复、编辑开售、无引用删除与消费者只�
   await page.getByRole('menuitem', { name: '删除草稿' }).click();
   const deleteReview = page.getByRole('dialog', { name: '删除草稿团期' });
   await expect(deleteReview).toContainText(deleteTitle);
-  const deleted = page.waitForResponse(response => response.url().endsWith(`/api/v1/admin/campaigns/${removable.id}`) && response.request().method() === 'DELETE');
+  const deleted = page.waitForResponse(response => response.url().endsWith(`/api/v1/admin/campaigns/${removable.id}`) && response.request().method() === 'DELETE' && response.headers()['x-reauthentication-required'] !== '1');
   await deleteReview.getByRole('button', { name: '确认删除' }).click();
+  await expect(deleteReview).not.toBeVisible();
   expect((await deleted).ok()).toBeTruthy();
   await expect(deleteRow).toHaveCount(0);
-  await expect(deleteReview).not.toBeVisible();
   // Default E2E has no persisted phone-bound consumers. Verify the real
   // empty/search query here; populated masked details are covered by API tests.
   const listed = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/admin/consumers');

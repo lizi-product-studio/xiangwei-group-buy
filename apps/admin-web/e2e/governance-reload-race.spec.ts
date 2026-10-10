@@ -1,4 +1,5 @@
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { test, staffFetch } from "./browser-auth";
+import { expect, type APIRequestContext, type Page } from "@playwright/test";
 
 const apiBase = process.env.E2E_API_BASE_URL ?? "http://127.0.0.1:3101";
 const superHeaders = {
@@ -16,7 +17,7 @@ function watchBrowser(page: Page): string[] {
       failures.push(`requestfailed: ${request.url()} ${error}`);
   });
   page.on("response", (response) => {
-    if (response.status() >= 400)
+    if (response.status() >= 400 && response.headers()["x-reauthentication-required"] !== "1")
       failures.push(`http ${response.status()}: ${response.url()}`);
   });
   return failures;
@@ -28,7 +29,7 @@ async function createLogin(
   suffix: string,
 ) {
   const username = `governance.reload.${role.toLowerCase()}.${suffix}`;
-  const created = await request.fetch(`${apiBase}/api/v1/admin/staff`, {
+  const created = await staffFetch(request, `${apiBase}/api/v1/admin/staff`, {
     method: "POST",
     headers: superHeaders,
     data: {
@@ -41,7 +42,7 @@ async function createLogin(
   });
   expect(created.status(), await created.text()).toBe(201);
   const temporaryPassword = (await created.json()).data.temporaryPassword as string;
-  const login = await request.fetch(`${apiBase}/api/v1/auth/admin/login`, {
+  const login = await staffFetch(request, `${apiBase}/api/v1/auth/admin/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     data: {
@@ -51,7 +52,7 @@ async function createLogin(
   });
   expect(login.status(), await login.text()).toBe(200);
   const challenge = (await login.json()).data.passwordChangeToken as string;
-  const activated = await request.fetch(`${apiBase}/api/v1/auth/admin/complete-password-change`, {
+  const activated = await staffFetch(request, `${apiBase}/api/v1/auth/admin/complete-password-change`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     data: { passwordChangeToken: challenge, newPassword: "governance reload password" },

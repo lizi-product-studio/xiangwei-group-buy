@@ -1,3 +1,4 @@
+import { StaffHttpClient } from "./modules/auth/staff-http.test-helper.js";
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -19,7 +20,7 @@ class CallbackTestProvider extends MockPaymentProvider {
     return { ...JSON.parse(rawBody), bodyHash: createHash('sha256').update(rawBody).digest('hex') } as PaymentNotification;
   }
 }
-type Headers = { authorization: string };
+type Headers = Record<string, string>;
 let app: FastifyInstance | undefined;
 let directory: string | undefined;
 afterEach(async () => {
@@ -37,7 +38,7 @@ describe('registered consumer and authenticated staff full business flow', () =>
     const network = vi.fn(() => { throw new Error('External network is forbidden in this isolated journey'); });
     vi.stubGlobal('fetch', network);
     directory = await mkdtemp(join(tmpdir(), 'full-business-flow-'));
-    const config = loadConfig({ NODE_ENV: 'test', AUTH_PROVIDER: 'wechat', WECHAT_APP_ID: 'test-only-app', WECHAT_APP_SECRET: 'test-only-secret', PRODUCT_IMAGE_DIR: directory });
+    const config = loadConfig({ NODE_ENV: 'test', STAFF_CHALLENGE_BITS: '8', AUTH_PROVIDER: 'wechat', WECHAT_APP_ID: 'test-only-app', WECHAT_APP_SECRET: 'test-only-secret', PRODUCT_IMAGE_DIR: directory });
     const store = new MemoryStore(false);
     const now = start.toISOString();
     // Initial bootstrap only. Every subsequent account and business write uses HTTP.
@@ -55,16 +56,21 @@ describe('registered consumer and authenticated staff full business flow', () =>
     const post = async (url: string, headers: Headers, payload?: Record<string, unknown>, status = 200) => (await request({ method: 'POST', url, headers, ...(payload ? { payload } : {}) }, status)).json().data;
     const get = async (url: string, headers?: Headers) => (await request({ method: 'GET', url, ...(headers ? { headers } : {}) })).json().data;
     const bearer = (accessToken: string): Headers => ({ authorization: `Bearer ${accessToken}` });
-    const root = bearer((await request({ method: 'POST', url: '/api/v1/auth/admin/login', payload: { username: 'bootstrap', password: 'TestBootstrap123' } })).json().data.accessToken);
+    const rootClient = new StaffHttpClient(app);
+    expect((await rootClient.login('bootstrap', 'TestBootstrap123')).statusCode).toBe(200);
+    expect((await rootClient.reauthenticate('TestBootstrap123')).statusCode).toBe(200);
+    const root = rootClient.headers();
     const staff = async (role: string, username: string, phone: string, pickupPointIds: string[] = []) => {
       const created = await post('/api/v1/admin/staff', root, { role, username, phone, pickupPointIds, status: 'ACTIVE', displayName: username }, 201);
       expect(created.staff.status).toBe('PASSWORD_SETUP_REQUIRED');
-      const login = (await request({ method: 'POST', url: '/api/v1/auth/admin/login', payload: { username, password: created.temporaryPassword } })).json().data;
+      const client = new StaffHttpClient(app!);
+      const login = (await client.login(username, created.temporaryPassword)).json().data;
       expect(login.nextAction).toBe('CHANGE_PASSWORD');
       expect(login.accessToken).toBeUndefined();
       await request({ method: 'GET', url: '/api/v1/pickup/delivery-plans', headers: bearer(login.passwordChangeToken) }, 401);
-      const changed = (await request({ method: 'POST', url: '/api/v1/auth/admin/complete-password-change', payload: { passwordChangeToken: login.passwordChangeToken, newPassword: 'ChangedPassword123' } })).json().data;
-      return { headers: bearer(changed.accessToken), id: created.staff.userId };
+      expect((await client.complete(login.passwordChangeToken, 'ChangedPassword123')).statusCode).toBe(200);
+      expect((await client.reauthenticate('ChangedPassword123')).statusCode).toBe(200);
+      return { headers: client.headers(), id: created.staff.userId };
     };
     const operator = (await staff('OPERATOR', 'operator', '13800000001')).headers;
     const area = await post('/api/v1/admin/service-areas', operator, { regionCode: '110101' }, 201);
@@ -210,8 +216,12 @@ describe('registered consumer and authenticated staff full business flow', () =>
     const windowBeforeExpiryProbe = await store.getCommunityPickupWindowForUpdate(order.id);
     try {
       vi.setSystemTime(new Date(afterFirst.pickupDeadlineAt));
+      // A fresh, separate browser session isolates pickup-window expiry from
+      // the intentionally shorter eight-hour staff session lifetime.
+      const boundaryClient = new StaffHttpClient(app!);
+      expect((await boundaryClient.login('manager', 'ChangedPassword123')).statusCode).toBe(200);
       await unchanged(async () => {
-        const rejected = await request({ method: 'POST', url: '/api/v1/pickup/verify', headers: manager.headers, payload: { ...pickup, pickupRequestId: randomUUID() } }, 409);
+        const rejected = await request({ method: 'POST', url: '/api/v1/pickup/verify', headers: boundaryClient.headers(), payload: { ...pickup, pickupRequestId: randomUUID() } }, 409);
         expect(rejected.json().code).toBe('PICKUP_CODE_EXPIRED');
       });
     } finally {

@@ -253,6 +253,9 @@ export interface PrivacyConsent {
   consentedAt: string;
 }
 export interface AuthSession {
+  webOrigin?: string;
+  csrfToken?: string;
+  reauthenticatedUntil?: string;
   tokenHash: string;
   userId: string;
   roles: Role[];
@@ -266,6 +269,8 @@ export interface AuthSession {
 }
 /** Short-lived, single-use challenge issued after a valid temporary password. */
 export interface PasswordChangeToken {
+  webOrigin?: string;
+  webContextHash?: string;
   tokenHash: string;
   userId: string;
   authorizationVersion: number;

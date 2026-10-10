@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { StaffHttpClient } from "./modules/auth/staff-http.test-helper.js";
 import { Redis } from "ioredis";
 import { describe, expect, it, vi } from "vitest";
 import { buildApp } from "./app.js";
@@ -29,42 +30,38 @@ describe("shared staff login without failed-password cooldown", () => {
     await store.saveAdminCredential(await createAdminCredential(username, userId, "correct retry password", [role]));
     const app = await buildApp({
       config: loadConfig({
-        NODE_ENV: "test", QUEUE_DRIVER: "memory", RATE_LIMIT_MAX: "10",
+        NODE_ENV: "test", REQUIRE_HTTPS: "true", STAFF_CHALLENGE_BITS: "8", QUEUE_DRIVER: "memory", RATE_LIMIT_MAX: "10",
         REDIS_URL: "redis://127.0.0.1:16379",
       }),
       store,
     });
+    const client = new StaffHttpClient(app, `https://${host}`);
     try {
       // Exceed the former five-account and twenty-IP failure limits, while
       // ordinary endpoints still use the configured ten-request threshold.
       for (let attempt = 0; attempt < 22; attempt += 1) {
-        const failed = await app.inject({
-          method: "POST", url: "/api/v1/auth/admin/login", headers: { host },
-          payload: { username, password: "incorrect retry password" },
-        });
+        const failed = await client.login(username, "incorrect retry password");
         expect(failed.statusCode, failed.body).toBe(401);
         expect(failed.json()).toMatchObject({ code: "INVALID_CREDENTIALS", message: "账号或密码不正确" });
         expect(failed.headers).not.toHaveProperty("retry-after");
         expect(failed.json()).not.toHaveProperty("data.accessToken");
       }
-      const login = await app.inject({
-        method: "POST", url: "/api/v1/auth/admin/login", headers: { host },
-        payload: { username, password: "correct retry password" },
-      });
+      const login = await client.login(username, "correct retry password");
       expect(login.statusCode, login.body).toBe(200);
       expect(login.json().data).toMatchObject({ nextAction: "LOGIN", userId, roles: [role] });
-      const token = login.json().data.accessToken as string;
+      expect(login.json().data).not.toHaveProperty("accessToken");
+      const token = login.cookies.find(cookie => cookie.name === "__Host-staff-session")!.value;
       const tokenHash = createHash("sha256").update(token).digest("hex");
       expect(await store.getAuthSession(tokenHash)).toMatchObject({ userId, roles: [role] });
       expect(Redis).not.toHaveBeenCalled();
 
-      const ready = await app.inject({ method: "GET", url: "/health/ready" });
+      const ready = await app.inject({ method: "GET", url: "/health/ready", headers: { "x-forwarded-proto": "https" } });
       expect(ready.statusCode, ready.body).toBe(200);
-      expect(ready.json().dependencies).not.toHaveProperty("loginProtection");
+      expect(ready.json().dependencies.loginProtection).toBe("ok");
       for (let request = 1; request < 10; request += 1) {
-        expect((await app.inject({ method: "GET", url: "/health/live" })).statusCode).toBe(200);
+        expect((await app.inject({ method: "GET", url: "/health/live", headers: { "x-forwarded-proto": "https" } })).statusCode).toBe(200);
       }
-      const limited = await app.inject({ method: "GET", url: "/health/live" });
+      const limited = await app.inject({ method: "GET", url: "/health/live", headers: { "x-forwarded-proto": "https" } });
       expect(limited.statusCode, limited.body).toBe(429);
       expect(limited.json()).toMatchObject({ code: "RATE_LIMITED" });
     } finally {

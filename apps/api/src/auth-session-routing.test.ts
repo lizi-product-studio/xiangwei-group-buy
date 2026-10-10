@@ -77,11 +77,11 @@ describe("WeChat session routing through the shared authentication hook", () => 
       suspendedAt: null, suspensionReason: null, authorizationVersion: 2, createdAt: now, updatedAt: now,
     });
     await store.saveAdminCredential(await createAdminCredential("stale-staff", "stale-staff", "test-only-password-123", ["OPERATOR"], false, 2));
-    await store.saveAuthSession({ tokenHash, userId: "stale-staff", roles: ["OPERATOR"], authorizationVersion: 1, expiresAt: new Date(Date.now() + 60_000).toISOString() });
+    await store.saveAuthSession({ webOrigin: "http://localhost", tokenHash, userId: "stale-staff", roles: ["OPERATOR"], authorizationVersion: 1, expiresAt: new Date(Date.now() + 60_000).toISOString() });
     app = await buildApp({ config: loadConfig({ NODE_ENV: "test" }), store });
     snapshotSpy.mockClear();
 
-    const response = await app.inject({ method: "GET", url: "/api/v1/admin/staff", headers: { authorization: `Bearer ${token}` } });
+    const response = await app.inject({ method: "GET", url: "/api/v1/admin/staff", headers: { host: "localhost", cookie: `staff-session=${token}` } });
     expect(response.statusCode).toBe(401);
     expect(snapshotSpy).toHaveBeenCalledOnce();
     expect(await store.getAuthSession(tokenHash)).toBeNull();

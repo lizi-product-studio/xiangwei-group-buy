@@ -7,6 +7,7 @@ const adminUrl = `http://127.0.0.1:${adminPort}`;
 
 export default defineConfig({
   testDir: "./apps/admin-web/e2e",
+  testIgnore: "**/web-security.spec.ts",
   timeout: 60_000,
   fullyParallel: false,
   // The memory-backed E2E server intentionally keeps one product aggregate;
@@ -39,6 +40,7 @@ export default defineConfig({
         // preventing a previous journey from turning later assertions into
         // unrelated rate-limit failures.
         RATE_LIMIT_MAX: "10000",
+        STAFF_CHALLENGE_BITS: "8",
       },
     },
     {

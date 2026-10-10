@@ -6268,7 +6268,7 @@ export function App() {
         <Login done={establishSession} notice={loginNotice} />
       </AntApp>
     );
-  if (!hasAccess || !defaultPage) return <AntApp><div className="access-loading-shell">{accessError ? <Alert type="error" showIcon message={accessError} /> : !hasAccess ? <div className="access-loading" role="status" aria-label="正在读取岗位权限"><Spin /></div> : <Alert type="warning" showIcon message="当前角色尚未分配可用功能，请联系管理员" />}<Space style={{marginTop:16}}><Button onClick={()=>{setAccessError("");void api.access().then(setAccess).catch(error=>setAccessError(adminErrorText(error)));}}>重新加载</Button><Button onClick={()=>{auth.clear();clearWorkspace();setAuthenticated(false);}}>退出登录</Button></Space></div></AntApp>;
+  if (!hasAccess || !defaultPage) return <AntApp><div className="access-loading-shell">{accessError ? <Alert type="error" showIcon message={accessError} /> : !hasAccess ? <div className="access-loading" role="status" aria-label="正在读取岗位权限"><Spin /></div> : <Alert type="warning" showIcon message="当前角色尚未分配可用功能，请联系管理员" />}<Space style={{marginTop:16}}><Button onClick={()=>{setAccessError("");void api.access().then(setAccess).catch(error=>setAccessError(adminErrorText(error)));}}>重新加载</Button><Button onClick={()=>{void api.logout().then(()=>{clearWorkspace();setAuthenticated(false);}).catch(error=>setAccessError(adminErrorText(error)));}}>退出登录</Button></Space></div></AntApp>;
   const mainPageLoadFailed =
     Boolean(loadError) &&
     ["dashboard", "products", "homepage-banners", "campaigns", "orders", "pickup-points", "settings"].includes(
@@ -6324,7 +6324,7 @@ export function App() {
         />
       )
     ) : currentPage === "consumers" ? (
-      <Consumers loadPage={api.consumers} loadDetail={api.consumerDetail} />
+      <Consumers loadPage={api.consumers} loadDetail={api.consumerDetail} loadPhone={api.consumerPhone} />
     ) : currentPage === "service" ? (
       <Service view={currentView}
         {...{

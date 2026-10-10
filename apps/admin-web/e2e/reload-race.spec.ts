@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import { test, staffFetch } from "./browser-auth";
+import { expect, type Page } from "@playwright/test";
 
 const apiBase = process.env.E2E_API_BASE_URL ?? "http://127.0.0.1:3101";
 const superHeaders = {
@@ -16,7 +17,7 @@ function watchBrowser(page: Page): string[] {
       failures.push(`requestfailed: ${request.url()} ${error}`);
   });
   page.on("response", (response) => {
-    if (response.status() >= 400)
+    if (response.status() >= 400 && response.headers()["x-reauthentication-required"] !== "1")
       failures.push(`http ${response.status()}: ${response.url()}`);
   });
   return failures;
@@ -50,7 +51,7 @@ test("同一身份的迟到员工列表响应不会覆盖创建后的最新刷�
 }) => {
   const failures = watchBrowser(page);
   const suffix = Date.now().toString();
-  const bootstrap = await request.fetch(`${apiBase}/api/v1/admin/staff`, {
+  const bootstrap = await staffFetch(request, `${apiBase}/api/v1/admin/staff`, {
     method: "POST",
     headers: superHeaders,
     data: {

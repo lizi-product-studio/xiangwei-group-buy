@@ -1,3 +1,4 @@
+import { StaffHttpClient } from "./staff-http.test-helper.js";
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { AdminAuthService, createAdminCredential, validateBootstrapAdminDisplayName } from "./admin-auth.js";
@@ -183,7 +184,7 @@ describe("AdminAuthService", () => {
     ).resolves.toBeNull();
   });
 
-  it("uses the bearer session on protected admin routes", async () => {
+  it("uses the HttpOnly session on protected admin routes", async () => {
     const store = new MemoryStore();
     await store.saveUser({
       id: "route-admin",
@@ -201,26 +202,15 @@ describe("AdminAuthService", () => {
       ),
     );
     const app = await buildApp({
-      config: loadConfig({ NODE_ENV: "test" }),
+      config: loadConfig({ NODE_ENV: "test", STAFF_CHALLENGE_BITS: "8" }),
       store,
     });
     try {
-      const login = await app.inject({
-        method: "POST",
-        url: "/api/v1/auth/admin/login",
-        payload: {
-          username: "route.admin",
-          password: "another long admin password",
-        },
-      });
+      const client = new StaffHttpClient(app);
+      const login = await client.login("route.admin", "another long admin password");
       expect(login.statusCode).toBe(200);
-      const response = await app.inject({
-        method: "GET",
-        url: "/api/v1/admin/orders",
-        headers: {
-          authorization: `Bearer ${login.json().data.accessToken as string}`,
-        },
-      });
+      expect(login.json().data).not.toHaveProperty("accessToken");
+      const response = await client.send({ method: "GET", url: "/api/v1/admin/orders" });
       expect(response.statusCode).toBe(200);
       expect(response.json().data).toEqual([]);
     } finally {
@@ -246,22 +236,18 @@ describe("AdminAuthService", () => {
     );
     await store.saveAdminCredential(credential);
     const app = await buildApp({
-      config: loadConfig({ NODE_ENV: "test" }),
+      config: loadConfig({ NODE_ENV: "test", STAFF_CHALLENGE_BITS: "8" }),
       store,
     });
     try {
-      const login = await app.inject({
-        method: "POST",
-        url: "/api/v1/auth/admin/login",
-        payload: { username: "racing.admin", password: "racing admin password" },
-      });
+      const client = new StaffHttpClient(app);
+      const login = await client.login("racing.admin", "racing admin password");
       expect(login.statusCode, login.body).toBe(200);
-      const token = login.json().data.accessToken as string;
       const barrier = store.armTransactionBarrier();
       const pendingWrite = app.inject({
         method: "POST",
         url: "/api/v1/admin/service-areas",
-        headers: { authorization: `Bearer ${token}` },
+        headers: client.headers(),
         payload: { regionCode: "110101" },
       });
       await barrier.started;
@@ -282,7 +268,7 @@ describe("AdminAuthService", () => {
 
   it("removes the legacy activation endpoint and keeps password challenge public", async () => {
     const app = await buildApp({
-      config: loadConfig({ NODE_ENV: "test" }),
+      config: loadConfig({ NODE_ENV: "test", STAFF_CHALLENGE_BITS: "8" }),
       store: new MemoryStore(false),
     });
     try {
@@ -292,11 +278,8 @@ describe("AdminAuthService", () => {
         payload: {},
       });
       expect(response.statusCode).toBe(404);
-      const challengeResponse = await app.inject({
-        method: "POST",
-        url: "/api/v1/auth/admin/complete-password-change",
-        payload: { passwordChangeToken: "x".repeat(32), newPassword: "long enough password" },
-      });
+      const client = new StaffHttpClient(app);
+      const challengeResponse = await client.complete("x".repeat(32), "long enough password");
       expect(challengeResponse.statusCode).toBe(401);
       expect(challengeResponse.json().code).toBe("PASSWORD_CHANGE_TOKEN_INVALID");
     } finally {
@@ -370,7 +353,7 @@ describe("AdminAuthService", () => {
       ),
     );
     const app = await buildApp({
-      config: loadConfig({ NODE_ENV: "test" }),
+      config: loadConfig({ NODE_ENV: "test", STAFF_CHALLENGE_BITS: "8" }),
       store,
     });
     try {
@@ -412,12 +395,9 @@ describe("AdminAuthService", () => {
         headers: { authorization: `Bearer ${oldTarget.accessToken}` },
       });
       expect(oldResponse.statusCode).toBe(401);
-      const renewed = await auth.login("to.finance", "target staff password");
-      const renewedResponse = await app.inject({
-        method: "GET",
-        url: "/api/v1/admin/quality-cases",
-        headers: { authorization: `Bearer ${renewed.accessToken}` },
-      });
+      const client = new StaffHttpClient(app);
+      expect((await client.login("to.finance", "target staff password")).statusCode).toBe(200);
+      const renewedResponse = await client.send({ method: "GET", url: "/api/v1/admin/quality-cases" });
       expect(renewedResponse.statusCode).toBe(200);
       await expect(auth.authenticate(`Bearer ${oldLogin.accessToken}`)).resolves.toMatchObject({
         roles: ["SUPER_ADMIN"],
@@ -505,39 +485,23 @@ describe("AdminAuthService", () => {
       ),
     );
     const app = await buildApp({
-      config: loadConfig({ NODE_ENV: "test" }),
+      config: loadConfig({ NODE_ENV: "test", STAFF_CHALLENGE_BITS: "8" }),
       store,
     });
     try {
-      const login = await app.inject({
-        method: "POST",
-        url: "/api/v1/auth/admin/login",
-        payload: { username: "self.change", password: "current finance password" },
-      });
-      const oldToken = login.json().data.accessToken as string;
-      const changed = await app.inject({
-        method: "POST",
-        url: "/api/v1/admin/me/change-password",
-        headers: { authorization: `Bearer ${oldToken}` },
-        payload: {
-          currentPassword: "current finance password",
-          newPassword: "new finance password",
-        },
+      const client = new StaffHttpClient(app);
+      const login = await client.login("self.change", "current finance password");
+      expect(login.statusCode, login.body).toBe(200);
+      const oldHeaders = client.headers();
+      const changed = await client.send({
+        method: "POST", url: "/api/v1/admin/me/change-password",
+        payload: { currentPassword: "current finance password", newPassword: "new finance password", ...await client.proof("password") },
       });
       expect(changed.statusCode, changed.body).toBe(200);
-      const newToken = changed.json().data.accessToken as string;
-      expect(newToken).not.toBe(oldToken);
-      const oldResponse = await app.inject({
-        method: "GET",
-        url: "/api/v1/admin/quality-cases",
-        headers: { authorization: `Bearer ${oldToken}` },
-      });
+      expect(client.headers().cookie).not.toBe(oldHeaders.cookie);
+      const oldResponse = await app.inject({ method: "GET", url: "/api/v1/admin/quality-cases", headers: oldHeaders });
       expect(oldResponse.statusCode).toBe(401);
-      const newResponse = await app.inject({
-        method: "GET",
-        url: "/api/v1/admin/quality-cases",
-        headers: { authorization: `Bearer ${newToken}` },
-      });
+      const newResponse = await client.send({ method: "GET", url: "/api/v1/admin/quality-cases" });
       expect(newResponse.statusCode).toBe(200);
     } finally {
       await app.close();
@@ -730,6 +694,7 @@ describe("AdminAuthService", () => {
     const token = "multi-role-bearer-token-value-1234567890";
     const tokenHash = createHash("sha256").update(token).digest("hex");
     await store.saveAuthSession({
+      webOrigin: "http://localhost",
       tokenHash,
       userId: "multi-role-user",
       roles: ["OPERATOR", "FINANCE"],
@@ -737,14 +702,14 @@ describe("AdminAuthService", () => {
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     });
     const app = await buildApp({
-      config: loadConfig({ NODE_ENV: "test" }),
+      config: loadConfig({ NODE_ENV: "test", STAFF_CHALLENGE_BITS: "8" }),
       store,
     });
     try {
       const response = await app.inject({
         method: "GET",
         url: "/api/v1/admin/finance/refunds",
-        headers: { authorization: `Bearer ${token}` },
+        headers: { host: "localhost", cookie: `staff-session=${token}` },
       });
       expect(response.statusCode, response.body).toBe(401);
       await expect(store.getAuthSession(tokenHash)).resolves.toBeNull();

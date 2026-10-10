@@ -13,6 +13,9 @@ export interface Actor {
   accessRoleId?: string;
   accessRoleVersion?: number;
   requiredPermissions?: string[];
+  sessionTokenHash?: string;
+  webOrigin?: string;
+  requireFreshAuthentication?: boolean;
 }
 
 declare module "fastify" {
@@ -48,6 +51,8 @@ export function requireActor(
   const actor = request.actor;
   if (!actor) throw new BusinessError("AUTH_REQUIRED", "请先登录", 401);
   const path = request.routeOptions?.url ?? "";
+  if (actor.sessionTokenHash && !path.startsWith("/api/v1/admin/") && !path.startsWith("/api/v1/pickup/") && path !== "/api/v1/auth/logout")
+    throw new BusinessError("FORBIDDEN", "请使用对应的消费者登录身份", 403);
   if (actor.permissions && !actor.roles.includes("SUPER_ADMIN") && (path.startsWith("/api/v1/admin/") || path.startsWith("/api/v1/pickup/")) && path !== "/api/v1/admin/me/change-password") {
     let required = ROUTE_PERMISSIONS[`${request.method} ${path}`];
     if (path === "/api/v1/admin/catalog/skus" && request.method === "POST") {

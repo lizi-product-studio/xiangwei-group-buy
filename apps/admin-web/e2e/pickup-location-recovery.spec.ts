@@ -1,6 +1,7 @@
+import { test, staffFetch, loginBrowser } from "./browser-auth";
 import { uploadPointPhoto } from './media-fixture';
 import { fixturePhoto } from './media-fixture';
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { expect, type APIRequestContext, type Page } from "@playwright/test";
 
 const apiBase = process.env.E2E_API_BASE_URL ?? "http://127.0.0.1:3101";
 const demoHeaders = {
@@ -15,7 +16,7 @@ async function activateMapAdmin(
 ): Promise<void> {
   const suffix = `${Date.now()}${Math.floor(Math.random() * 10_000)}`;
   const username = `pickup.retry.${suffix}`;
-  const created = await request.fetch(`${apiBase}/api/v1/admin/staff`, {
+  const created = await staffFetch(request, `${apiBase}/api/v1/admin/staff`, {
     method: "POST",
     headers: demoHeaders,
     data: {
@@ -31,7 +32,7 @@ async function activateMapAdmin(
     data: { temporaryPassword: string };
   };
   const password = "logistics empty state password";
-  const login = await request.fetch(
+  const login = await staffFetch(request,
     `${apiBase}/api/v1/auth/admin/login`,
     {
       method: "POST",
@@ -44,7 +45,7 @@ async function activateMapAdmin(
   );
   expect(login.status(), await login.text()).toBe(200);
   const challenge = (await login.json()).data.passwordChangeToken as string;
-  const activated = await request.fetch(
+  const activated = await staffFetch(request,
     `${apiBase}/api/v1/auth/admin/complete-password-change`,
     {
       method: "POST",
@@ -53,17 +54,7 @@ async function activateMapAdmin(
     },
   );
   expect(activated.status(), await activated.text()).toBe(200);
-  const activatedBody = (await activated.json()) as {
-    data: { accessToken: string; roles: string[]; userId: string };
-  };
-  await page.goto("/");
-  await page.evaluate(({ accessToken, roles, userId, username: loginUsername }) => {
-    localStorage.setItem("community-admin-token", accessToken);
-    localStorage.setItem("community-admin-roles", JSON.stringify(roles));
-    localStorage.setItem("community-admin-user-id", userId);
-    localStorage.setItem("community-admin-username", loginUsername);
-  }, { ...activatedBody.data, username });
-  await page.reload();
+  await loginBrowser(page, username, password);
   await expect(page.getByRole("heading", { name: "运营工作台" })).toBeVisible();
 }
 

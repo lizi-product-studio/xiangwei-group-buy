@@ -1,3 +1,4 @@
+import { solveLoginChallenge, type LoginChallenge } from "./login-proof.ts";
 import type { AccessRole, PermissionDefinition } from "@hometown/api-contracts";
 export interface AccessSnapshot { permissions: string[]; roleId: string; roleName: string; scope: "PLATFORM" | "PICKUP"; isSuperAdmin: boolean }
 import type { ConsumerSummary, ConsumerDetail } from "./consumers-page.tsx";
@@ -640,6 +641,7 @@ function adminErrorTextBase(error: unknown): string {
     )
   )
     return "暂时无法连接后台服务，请稍后重试；持续失败请联系超级管理员";
+  if (["AUTH_CHALLENGE_INVALID", "AUTH_BUSY", "CSRF_INVALID", "REAUTH_REQUIRED"].includes(String(value?.code))) return message || "请重试安全验证";
   if (statusCode === 401 && value?.code === "INVALID_CREDENTIALS")
     return "账号或密码不正确";
   if (statusCode === 401 || value?.code === "AUTHENTICATION_REQUIRED")
@@ -709,53 +711,51 @@ export function hasValidAdminSession(
   if (!requireBearer) return true;
   return Boolean(token && roles.length > 0 && userId?.trim() && username?.trim());
 }
+interface BrowserIdentity { csrfToken: string; roles: string[]; userId: string; username: string }
+let identity: BrowserIdentity | null = null;
+let reauthenticationHandler: (() => Promise<void>) | null = null;
+let reauthentication: Promise<void> | null = null;
+export function setReauthenticationHandler(handler: (() => Promise<void>) | null): void { reauthenticationHandler = handler; }
+async function confirmSensitiveAction(): Promise<void> {
+  if (!reauthenticationHandler) throw new AdminApiError("此操作需要再次验证登录密码", { code: "REAUTH_REQUIRED", statusCode: 403 });
+  if (!reauthentication) reauthentication = reauthenticationHandler().finally(() => { reauthentication = null; });
+  await reauthentication;
+}
 export const auth = {
-  token: () => localStorage.getItem(TOKEN),
-  userId: () => localStorage.getItem(USER_ID),
-  username: () => localStorage.getItem(USERNAME),
-  roles: (): string[] => {
-    try {
-      const v = JSON.parse(localStorage.getItem(ROLES) ?? "[]");
-      if (!isValidStaffRoles(v)) {
-        if (requiresLogin && auth.token()) auth.clear();
-        return [];
-      }
-      return v;
-    } catch {
-      if (requiresLogin && auth.token()) auth.clear();
-      return [];
-    }
+  // This is an in-memory CSRF value, never a credential accepted as Bearer.
+  token: () => identity?.csrfToken ?? null,
+  userId: () => identity?.userId ?? null,
+  username: () => identity?.username ?? null,
+  roles: (): string[] => identity?.roles ?? [],
+  save: (csrfToken: string, roles: string[], userId?: string, username?: string) => {
+    identity = isValidStaffRoles(roles) && csrfToken && userId
+      ? { csrfToken, roles, userId, username: username ?? identity?.username ?? "" } : null;
+    auth.removeLegacy();
   },
-  save: (token: string, roles: string[], userId?: string, username?: string) => {
-    localStorage.setItem(TOKEN, token);
-    localStorage.setItem(ROLES, JSON.stringify(roles));
-    if (userId) localStorage.setItem(USER_ID, userId);
-    if (username) localStorage.setItem(USERNAME, username);
+  removeLegacy: () => {
+    if (typeof localStorage === "undefined") return;
+    for (const key of [TOKEN, ROLES, USER_ID, USERNAME]) localStorage.removeItem(key);
   },
-  clear: () => {
-    localStorage.removeItem(TOKEN);
-    localStorage.removeItem(ROLES);
-    localStorage.removeItem(USER_ID);
-    localStorage.removeItem(USERNAME);
-  },
+  clear: () => { identity = null; auth.removeLegacy(); },
 };
 function headers(json = true): Record<string, string> {
   const value: Record<string, string> = {};
   if (json) value["content-type"] = "application/json";
   if (requiresLogin) {
     const token = auth.token();
-    if (token) value.authorization = `Bearer ${token}`;
+    if (token) value["x-csrf-token"] = token;
   } else {
     value["x-demo-user-id"] = "demo-super-admin";
     value["x-demo-role"] = "SUPER_ADMIN";
   }
   return value;
 }
-async function request<T>(path: string, init: RequestInit = {}, includeEnvelope = false): Promise<T> {
+async function request<T>(path: string, init: RequestInit = {}, includeEnvelope = false, mayReauthenticate = true): Promise<T> {
   let response: Response;
   try {
     response = await fetch(path, {
       ...init,
+      credentials: "same-origin",
       headers: { ...headers(init.body !== undefined), ...(init.headers ?? {}) },
     });
   } catch (error) {
@@ -768,8 +768,16 @@ async function request<T>(path: string, init: RequestInit = {}, includeEnvelope 
     const body = (await response.json().catch(() => ({}))) as ErrorEnvelope;
     const publicAuthEndpoint =
       path === "/api/v1/auth/admin/login" ||
-      path === "/api/v1/auth/admin/complete-password-change";
-    if (response.status === 401 && !publicAuthEndpoint) {
+      path === "/api/v1/auth/admin/complete-password-change" ||
+      path === "/api/v1/auth/admin/reauthenticate" ||
+      path === "/api/v1/admin/me/change-password";
+    if (body.code === "REAUTH_REQUIRED" && mayReauthenticate) {
+      const userId = auth.userId();
+      await confirmSensitiveAction();
+      if (!userId || userId !== auth.userId()) throw new AdminApiError("登录身份已变化，请重新操作", { code: "AUTH_REQUIRED", statusCode: 401 });
+      return request<T>(path, init, includeEnvelope, false);
+    }
+    if (response.status === 401 && (!publicAuthEndpoint || body.code === "AUTH_REQUIRED")) {
       auth.clear();
       window.dispatchEvent(new Event("admin-auth-expired"));
     }
@@ -790,10 +798,10 @@ async function request<T>(path: string, init: RequestInit = {}, includeEnvelope 
   const body = (await response.json()) as Envelope<T>;
   return includeEnvelope ? body as T : body.data;
 }
-async function requestBlob(path: string): Promise<{ blob: Blob; rowCount: number }> {
+async function requestBlob(path: string, mayReauthenticate = true): Promise<{ blob: Blob; rowCount: number }> {
   let response: Response;
   try {
-    response = await fetch(path, { headers: headers(false) });
+    response = await fetch(path, { credentials: "same-origin", headers: headers(false) });
   } catch (error) {
     throw new AdminApiError("暂时无法连接后台服务，请稍后重试；持续失败请联系超级管理员", {
       code: "NETWORK_UNAVAILABLE",
@@ -802,6 +810,11 @@ async function requestBlob(path: string): Promise<{ blob: Blob; rowCount: number
   }
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as ErrorEnvelope;
+    if (body.code === "REAUTH_REQUIRED" && mayReauthenticate) {
+      const userId = auth.userId(); await confirmSensitiveAction();
+      if (!userId || userId !== auth.userId()) throw new AdminApiError("登录身份已变化，请重新操作", { code: "AUTH_REQUIRED", statusCode: 401 });
+      return requestBlob(path, false);
+    }
     if (response.status === 401) {
       auth.clear();
       window.dispatchEvent(new Event("admin-auth-expired"));
@@ -831,7 +844,21 @@ export interface QueuePage<T> { data: T[]; pagination: {total: number; page: num
 export interface QueueQuery {page: number; pageSize: number; status?: string; sourceStage?: string}
 const queuePage = <T,>(path: string, query: QueueQuery) => request<QueuePage<T>>(`${path}?${new URLSearchParams({page: String(query.page), pageSize: String(query.pageSize), ...(query.status ? {status: query.status} : {}), ...(query.sourceStage ? {sourceStage: query.sourceStage} : {})})}`, {}, true);
 
+async function proof(purpose: "login" | "reauth" | "password", username = "") {
+  return solveLoginChallenge(await post<LoginChallenge>("/api/v1/auth/admin/challenge", { purpose, username }));
+}
 export const api = {
+  restoreSession: async () => {
+    auth.removeLegacy();
+    if (!requiresLogin) return;
+    const value = await request<BrowserIdentity | null>("/api/v1/auth/admin/session");
+    if (!value) { auth.clear(); return; }
+    auth.save(value.csrfToken, value.roles, value.userId, value.username);
+  },
+  reauthenticate: async (password: string) => {
+    const value = await post<BrowserIdentity>("/api/v1/auth/admin/reauthenticate", { password, ...await proof("reauth") });
+    auth.save(value.csrfToken, value.roles, value.userId, value.username);
+  },
   qualityPage: (query: QueueQuery) => queuePage<QualityCase>("/api/v1/admin/quality-cases", query),
   cancellationsPage: (query: QueueQuery) => queuePage<CancellationRequest>("/api/v1/admin/community/cancellation-requests", query),
   pickupWindowsPage: (query: QueueQuery) => queuePage<PickupWindow>("/api/v1/admin/community/pickup-windows", query),
@@ -840,13 +867,13 @@ export const api = {
   serviceAreaInterestsPage: (query: QueueQuery) => queuePage<ServiceAreaInterest>("/api/v1/admin/service-area-interests", query),
   login: async (username: string, password: string) => {
     const v = await post<
-      | { nextAction: "LOGIN"; accessToken: string; roles: string[]; userId: string }
+      | { nextAction: "LOGIN"; csrfToken: string; roles: string[]; userId: string }
       | { nextAction: "CHANGE_PASSWORD"; passwordChangeToken: string; roles: string[]; userId: string }
     >(
       "/api/v1/auth/admin/login",
-      { username, password },
+      { username, password, ...await proof("login", username) },
     );
-    if (v.nextAction === "LOGIN") auth.save(v.accessToken, v.roles, v.userId, username.trim().toLowerCase());
+    if (v.nextAction === "LOGIN") auth.save(v.csrfToken, v.roles, v.userId, username.trim().toLowerCase());
     return v;
   },
   completePasswordChange: async (
@@ -854,22 +881,22 @@ export const api = {
     newPassword: string,
     username?: string,
   ) => {
-    const v = await post<{ nextAction: "LOGIN"; accessToken: string; roles: string[]; userId: string }>(
+    const v = await post<{ nextAction: "LOGIN"; csrfToken: string; roles: string[]; userId: string }>(
       "/api/v1/auth/admin/complete-password-change",
-      { passwordChangeToken, newPassword },
+      { passwordChangeToken, newPassword, ...await proof("password") },
     );
-    auth.save(v.accessToken, v.roles, v.userId, username?.trim().toLowerCase());
+    auth.save(v.csrfToken, v.roles, v.userId, username?.trim().toLowerCase());
     return v;
   },
-  changeOwnPassword: (currentPassword: string, newPassword: string) =>
-    post<{ nextAction: "LOGIN"; accessToken: string; roles: string[]; userId: string }>(
+  changeOwnPassword: async (currentPassword: string, newPassword: string) =>
+    post<{ nextAction: "LOGIN"; csrfToken: string; roles: string[]; userId: string }>(
       "/api/v1/admin/me/change-password",
-      { currentPassword, newPassword },
+      { currentPassword, newPassword, ...await proof("password") },
     ).then((v) => {
-      auth.save(v.accessToken, v.roles, v.userId);
+      auth.save(v.csrfToken, v.roles, v.userId);
       return v;
     }),
-  logout: () => post<void>("/api/v1/auth/logout"),
+  logout: async () => { await post<void>("/api/v1/auth/logout"); auth.clear(); },
   areas: () => request<ServiceArea[]>("/api/v1/admin/service-areas"),
   regions: (query = "") =>
     request<RegionDirectoryEntry[]>(

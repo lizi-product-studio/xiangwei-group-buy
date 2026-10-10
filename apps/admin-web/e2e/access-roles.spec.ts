@@ -1,4 +1,5 @@
-import {test,expect} from "@playwright/test";
+import { test } from "./browser-auth";
+import {expect} from "@playwright/test";
 const base=process.env.E2E_API_BASE_URL??"http://127.0.0.1:3101";
 const headers={"x-demo-user-id":"rbac-admin","x-demo-role":"SUPER_ADMIN"};
 test("自定义角色配置、员工分配、只读菜单与撤权形成闭环",async({page,request,browser},testInfo)=>{

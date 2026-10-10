@@ -1,5 +1,6 @@
+import { test, staffFetch } from "./browser-auth";
 import { fixturePhoto } from './media-fixture';
-import { expect, test, type APIRequestContext } from "@playwright/test";
+import { expect, type APIRequestContext } from "@playwright/test";
 
 const apiBase = process.env.E2E_API_BASE_URL ?? "http://127.0.0.1:3101";
 const superHeaders = {
@@ -13,7 +14,7 @@ async function post<T>(
   data?: unknown,
   headers: Record<string, string> = superHeaders,
 ): Promise<T> {
-  const response = await request.fetch(`${apiBase}${path}`, {
+  const response = await staffFetch(request, `${apiBase}${path}`, {
     method: "POST",
     headers:
       data === undefined
@@ -37,7 +38,7 @@ test("超管通过网页复核运输、发车、紧急纠正、订单详情和�
       failures.push(`requestfailed: ${failed.url()} ${reason}`);
   });
   page.on("response", (response) => {
-    if (response.status() >= 400)
+    if (response.status() >= 400 && response.headers()["x-reauthentication-required"] !== "1")
       failures.push(`http ${response.status()}: ${response.url()}`);
   });
 
@@ -125,7 +126,7 @@ test("超管通过网页复核运输、发车、紧急纠正、订单详情和�
   await post(request, `/api/v1/orders/${order.id}/pay/mock-confirm`, undefined, customerHeaders);
   await expect
     .poll(async () => {
-      const response = await request.fetch(`${apiBase}/api/v1/admin/campaigns/${campaign.id}/close`, {
+      const response = await staffFetch(request, `${apiBase}/api/v1/admin/campaigns/${campaign.id}/close`, {
         method: "POST",
         headers: superHeaders,
       });

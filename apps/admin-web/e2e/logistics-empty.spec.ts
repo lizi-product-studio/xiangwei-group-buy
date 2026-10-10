@@ -1,4 +1,5 @@
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { test, staffFetch, loginBrowser } from "./browser-auth";
+import { expect, type APIRequestContext, type Page } from "@playwright/test";
 
 const apiBase = process.env.E2E_API_BASE_URL ?? "http://127.0.0.1:3101";
 const demoHeaders = {
@@ -13,7 +14,7 @@ async function activatePreviewAdmin(
 ): Promise<void> {
   const suffix = `${Date.now()}${Math.floor(Math.random() * 10_000)}`;
   const username = `logistics.empty.${suffix}`;
-  const created = await request.fetch(`${apiBase}/api/v1/admin/staff`, {
+  const created = await staffFetch(request, `${apiBase}/api/v1/admin/staff`, {
     method: "POST",
     headers: demoHeaders,
     data: {
@@ -29,7 +30,7 @@ async function activatePreviewAdmin(
     data: { temporaryPassword: string };
   };
   const password = "logistics empty state password";
-  const login = await request.fetch(
+  const login = await staffFetch(request,
     `${apiBase}/api/v1/auth/admin/login`,
     {
       method: "POST",
@@ -42,7 +43,7 @@ async function activatePreviewAdmin(
   );
   expect(login.status(), await login.text()).toBe(200);
   const challenge = (await login.json()).data.passwordChangeToken as string;
-  const activated = await request.fetch(
+  const activated = await staffFetch(request,
     `${apiBase}/api/v1/auth/admin/complete-password-change`,
     {
       method: "POST",
@@ -51,17 +52,7 @@ async function activatePreviewAdmin(
     },
   );
   expect(activated.status(), await activated.text()).toBe(200);
-  const activatedBody = (await activated.json()) as {
-    data: { accessToken: string; roles: string[]; userId: string };
-  };
-  await page.goto("/");
-  await page.evaluate(({ accessToken, roles, userId, username: loginUsername }) => {
-    localStorage.setItem("community-admin-token", accessToken);
-    localStorage.setItem("community-admin-roles", JSON.stringify(roles));
-    localStorage.setItem("community-admin-user-id", userId);
-    localStorage.setItem("community-admin-username", loginUsername);
-  }, { ...activatedBody.data, username });
-  await page.reload();
+  await loginBrowser(page, username, password);
   await expect(page.getByRole("heading", { name: "运营工作台" })).toBeVisible();
 }
 
@@ -72,7 +63,7 @@ test("配送 API 不可用时显示可恢复错误而不是空表", async ({ pag
     failures.push(`requestfailed: ${failed.url()}`),
   );
   page.on("response", (response) => {
-    if (response.status() >= 400 && !response.url().includes("/admin/delivery-plans"))
+    if (response.status() >= 400 && response.headers()["x-reauthentication-required"] !== "1" && !response.url().includes("/admin/delivery-plans"))
       failures.push(`http ${response.status()}: ${response.url()}`);
   });
   await activatePreviewAdmin(request, page);
@@ -102,7 +93,7 @@ test("配送 API 正常返回空数据时提供创建团期引导", async ({ pag
     failures.push(`requestfailed: ${failed.url()}`),
   );
   page.on("response", (response) => {
-    if (response.status() >= 400)
+    if (response.status() >= 400 && response.headers()["x-reauthentication-required"] !== "1")
       failures.push(`http ${response.status()}: ${response.url()}`);
   });
   await activatePreviewAdmin(request, page);
