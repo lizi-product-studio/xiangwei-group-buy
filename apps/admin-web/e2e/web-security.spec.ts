@@ -104,8 +104,27 @@ test("consumer phone button uses browser CSRF/origin, keeps masked state on fail
   let verification = page.getByRole("dialog", { name: "验证登录密码" });
   await expect(verification).toBeVisible();
   await verification.getByLabel("当前登录密码").fill("incorrect step-up password");
+  const incorrectProofStarted = Date.now();
+  const rejectedAuthentication = page.waitForResponse(response =>
+    new URL(response.url()).pathname === "/api/v1/auth/admin/reauthenticate" && response.request().method() === "POST",
+    { timeout: 90_000 });
+  const observeIncorrectPasswordChallenge = (response: Response): void => {
+    if (new URL(response.url()).pathname === "/api/v1/auth/admin/challenge" && response.request().method() === "POST")
+      console.info(JSON.stringify({ operation: "incorrect-phone-password-challenge", status: response.status(), elapsedMs: Date.now()-incorrectProofStarted }));
+  };
+  page.on("response", observeIncorrectPasswordChallenge);
   await verification.getByRole("button", { name: "验证并继续" }).click();
-  await expect(verification.getByRole("alert")).toContainText("账号或密码不正确");
+  const rejected = await rejectedAuthentication;
+  page.off("response", observeIncorrectPasswordChallenge);
+  const rejection = await rejected.json() as { code?: string; requestId?: string };
+  const safeRequestId = typeof rejection.requestId === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(rejection.requestId) ? rejection.requestId : undefined;
+  const safeCode = typeof rejection.code === "string" && /^[A-Z0-9_]{1,80}$/.test(rejection.code) ? rejection.code : undefined;
+  console.info(JSON.stringify({ operation: "incorrect-phone-password", status: rejected.status(), code: safeCode,
+    requestId: safeRequestId, elapsedMs: Date.now()-incorrectProofStarted }));
+  await testInfo.attach("incorrect-phone-password", { body: JSON.stringify({status:rejected.status(),code:safeCode,requestId:safeRequestId}), contentType:"application/json" });
+  expect(rejected.status(), `Incorrect password response: ${safeCode ?? "unknown"}, requestId=${safeRequestId ?? "unavailable"}`).toBe(401);
+  expect(rejection.code).toBe("INVALID_CREDENTIALS");
+  await expect(verification.getByRole("alert")).toContainText("账号或密码不正确", { timeout: 5000 });
   await expect(detail.getByText("138****8010", { exact: true })).toBeVisible();
   await expect(detail.getByText("13800138010", { exact: true })).toHaveCount(0);
   await page.keyboard.press("Escape");
