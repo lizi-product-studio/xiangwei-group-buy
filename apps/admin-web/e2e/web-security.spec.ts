@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page, type Response } from "@playwright/test";
 import { secureBrowserFixture } from "./secure-browser-process.ts";
 let fixture: Awaited<ReturnType<typeof secureBrowserFixture>>;
 test.beforeAll(async () => { fixture = await secureBrowserFixture(); });
@@ -84,7 +84,7 @@ test("permission-loading failure logout revokes the server cookie and survives r
   await page.reload(); await expect(page.getByRole("button", { name: /登\s*录/ })).toBeVisible();
 });
 
-test("consumer phone button uses browser CSRF/origin, keeps masked state on failure or cancel, then loads the selected number", async ({ page }) => {
+test("consumer phone button uses browser CSRF/origin, keeps masked state on failure or cancel, then loads the selected number", async ({ page, context }, testInfo) => {
   await login(page, fixture.admin, "tls.admin");
   const phoneRequests: Array<{ method: string; origin: string | undefined; csrf: string | undefined; fetchSite: string | undefined; url: string }> = [];
   page.on("request", async request => {
@@ -114,9 +114,38 @@ test("consumer phone button uses browser CSRF/origin, keeps masked state on fail
   await detail.getByRole("button", { name: "查看完整手机号" }).click();
   verification = page.getByRole("dialog", { name: "验证登录密码" });
   await verification.getByLabel("当前登录密码").fill(fixture.password);
+  const oldSession = (await context.cookies(fixture.admin)).find(value => value.name === "__Host-staff-session")!;
+  const reauthenticationResponse = page.waitForResponse(response =>
+    new URL(response.url()).pathname === "/api/v1/auth/admin/reauthenticate" && response.request().method() === "POST",
+    { timeout: 90_000 });
+  const selectedPhoneResponse = page.waitForResponse(response =>
+    new URL(response.url()).pathname === "/api/v1/admin/consumers/1/phone" && response.request().method() === "GET",
+    { timeout: 90_000 }).then(response => ({ response }), error => ({ errorType: error instanceof Error ? error.name : "Error" }));
+  const proofStarted = Date.now();
+  page.on("response", response => {
+    if (new URL(response.url()).pathname === "/api/v1/auth/admin/challenge" && response.request().method() === "POST")
+      console.info(JSON.stringify({ operation: "consumer-phone-challenge", status: response.status(), elapsedMs: Date.now()-proofStarted }));
+  });
   await verification.getByRole("button", { name: "验证并继续" }).click();
-  await expect(detail.getByText("13800138010", { exact: true })).toBeVisible();
+  async function assertSuccessfulResponse(response: Response, operation: string) {
+    let code: string | undefined, requestId: string | undefined;
+    if (response.status() !== 200) {
+      const error = await response.json().catch(() => null) as { code?: string; requestId?: string } | null;
+      if (typeof error?.code === "string" && /^[A-Z0-9_]{1,80}$/.test(error.code)) code = error.code;
+      if (typeof error?.requestId === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(error.requestId)) requestId = error.requestId;
+    }
+    console.info(JSON.stringify({ operation, status: response.status(), code, requestId, elapsedSinceProofStartedMs: Date.now()-proofStarted }));
+    await testInfo.attach(operation, { body: JSON.stringify({ status: response.status(), code, requestId,
+      elapsedSinceProofStartedMs: Date.now()-proofStarted }), contentType: "application/json" });
+    expect(response.status(), `${operation}: ${code ?? "unexpected status"}, requestId=${requestId ?? "unavailable"}`).toBe(200);
+  }
+  await assertSuccessfulResponse(await reauthenticationResponse, "consumer-phone-reauthentication");
+  const phone = await selectedPhoneResponse;
+  if (!("response" in phone)) throw new Error(`Selected consumer phone response failed: ${phone.errorType}`);
+  await assertSuccessfulResponse(phone.response, "selected-consumer-phone");
+  await expect(detail.getByText("13800138010", { exact: true })).toBeVisible({ timeout: 5000 });
   expect(phoneRequests).toHaveLength(3);
+  expect(phoneRequests.at(-1)?.csrf).not.toBe(phoneRequests[0]?.csrf);
   for (const request of phoneRequests) expect(request).toMatchObject({ method: "GET", origin: undefined, fetchSite: "same-origin", csrf: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/) });
   await detail.locator(".ant-modal-footer button").click();
   await expect(detail).toHaveCount(0);
@@ -125,4 +154,8 @@ test("consumer phone button uses browser CSRF/origin, keeps masked state on fail
   const otherDetail = page.getByRole("dialog", { name: "用户详情" });
   await expect(otherDetail.getByText("139****9010", { exact: true })).toBeVisible();
   await expect(otherDetail.getByText("13800138010", { exact: true })).toHaveCount(0);
+  const staleSession = await page.request.get(`${fixture.admin}/api/v1/admin/me/access`, {
+    headers: { cookie: `${oldSession.name}=${oldSession.value}`, origin: fixture.admin },
+  });
+  expect(staleSession.status()).toBe(401);
 });
