@@ -143,8 +143,15 @@ test("分类与点位操作精简，状态在编辑中修改且使用居中弹�
     businessHours: "每日 09:00–20:00", pickupInstructions: "出示取货码", contactName: "", contactPhone: "", capacityPerDay: null,
   } });
   expect(pointResponse.ok(), await pointResponse.text()).toBe(true);
+  const createdPoint = (await pointResponse.json()).data as { id: string };
+  const pointReadback = await request.get(`${apiBase}/api/v1/admin/pickup-points`, { headers: demoHeaders });
+  expect(pointReadback.ok(), await pointReadback.text()).toBe(true);
+  const listedPoints = (await pointReadback.json()).data as Array<{ id: string }>;
+  expect(listedPoints.some((point) => point.id === createdPoint.id)).toBe(true);
   await page.getByRole("menuitem", { name: "自提点管理", exact: true }).click();
-  const pointRow = page.getByRole("row").filter({ hasText: pointName });
+  await page.getByLabel("自提点关键词", { exact: true }).fill(pointName);
+  const pointRow = page.locator(`tr[data-row-key="${createdPoint.id}"]`);
+  await expect(pointRow).toHaveCount(1);
   await expect(pointRow.getByRole("button")).toHaveCount(2);
   await page.screenshot({ animations: "disabled", path: testInfo.outputPath("pickup-list.png") });
   await pointRow.getByRole("button", { name: /编\s*辑/ }).click();

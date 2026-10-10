@@ -108,7 +108,11 @@ test("售后按问题类型分栏且保留筛选，小屏无多表堆叠", async
   await expect(quality).toBeVisible();
   await expect(differences).not.toBeVisible();
   await expect(pickup).not.toBeVisible();
-  await quality.getByLabel("待办状态筛选").first().click();
+  const qualityStatusControl = quality.locator(
+    '.ant-select:has(input[role="combobox"][aria-label="待办状态筛选"])',
+  );
+  await expect(qualityStatusControl).toHaveCount(1);
+  await qualityStatusControl.locator(".ant-select-content-value").click();
   await page.locator(".ant-select-dropdown:visible").getByText("待运营审核", { exact: true }).click();
   await page.getByRole("tab", { name: "履约差异", exact: true }).click();
   await expect(differences).toBeVisible();
@@ -117,7 +121,9 @@ test("售后按问题类型分栏且保留筛选，小屏无多表堆叠", async
   await expect(pickup).toBeVisible();
   await expect(differences).not.toBeVisible();
   await page.getByRole("tab", { name: "品质售后", exact: true }).click();
-  await expect(quality.getByText("待运营审核", { exact: true })).toBeVisible();
+  const acceptedFilterValue = qualityStatusControl.locator('.ant-select-content-value[title="待运营审核"]');
+  await expect(acceptedFilterValue).toHaveCount(1);
+  await expect(acceptedFilterValue).toBeVisible();
   for (const width of [375, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);

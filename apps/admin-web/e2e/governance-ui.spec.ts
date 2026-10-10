@@ -73,7 +73,22 @@ async function logout(page: Page) {
   // Finish modal dismissal/focus restoration before opening the account popup.
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await page.getByRole("button", { name: "打开账号菜单" }).click();
+  const logoutCompleted = page.waitForResponse(response =>
+    new URL(response.url()).pathname === "/api/v1/auth/logout" && response.request().method() === "POST",
+    { timeout: 10_000 },
+  );
   await page.getByRole("menuitem", { name: "退出登录" }).click();
+  const logoutResponse = await logoutCompleted;
+  expect(logoutResponse.status()).toBe(204);
+  await expect(page.getByRole("button", { name: /登\s*录/ })).toBeVisible();
+  const restoredSession = page.waitForResponse(response =>
+    new URL(response.url()).pathname === "/api/v1/auth/admin/session" && response.request().method() === "GET",
+    { timeout: 10_000 },
+  );
+  await page.reload();
+  const sessionResponse = await restoredSession;
+  expect(sessionResponse.status(), await sessionResponse.text()).toBe(200);
+  expect((await sessionResponse.json()).data).toBeNull();
   await expect(page.getByRole("button", { name: /登\s*录/ })).toBeVisible();
 }
 

@@ -85,18 +85,38 @@ async function login(page: Page, staff: { username: string; temporaryPassword: s
   await page.getByRole("button", { name: /登\s*录/ }).click();
   await page.getByLabel("新密码", { exact: true }).fill("url state browser password");
   await page.getByLabel("确认新密码").fill("url state browser password");
-  const accessLoaded = page.waitForResponse(response => response.url().endsWith("/api/v1/admin/me/access") && response.ok());
+  const passwordChanged = page.waitForResponse(response =>
+    new URL(response.url()).pathname === "/api/v1/auth/admin/complete-password-change" && response.request().method() === "POST",
+    { timeout: 10_000 },
+  );
+  const accessLoaded = page.waitForResponse(response =>
+    new URL(response.url()).pathname === "/api/v1/admin/me/access" && response.request().method() === "GET",
+    { timeout: 10_000 },
+  );
   await page.getByRole("button", { name: "保存新密码" }).click();
-  await accessLoaded;
+  const passwordResponse = await passwordChanged;
+  expect(passwordResponse.status(), await passwordResponse.text()).toBe(200);
+  const accessResponse = await accessLoaded;
+  expect(accessResponse.status(), await accessResponse.text()).toBe(200);
 }
 
 async function logout(page: Page) {
   await page.getByRole("button", { name: "打开账号菜单" }).click();
   const logoutCompleted = page.waitForResponse(response =>
     new URL(response.url()).pathname === "/api/v1/auth/logout" && response.request().method() === "POST",
+    { timeout: 10_000 },
   );
   await page.getByRole("menuitem", { name: "退出登录" }).click();
-  expect((await logoutCompleted).status()).toBe(204);
+  const response = await logoutCompleted;
+  expect(response.status()).toBe(204);
+  const restoredSession = page.waitForResponse(candidate =>
+    new URL(candidate.url()).pathname === "/api/v1/auth/admin/session" && candidate.request().method() === "GET",
+    { timeout: 10_000 },
+  );
+  await page.reload();
+  const sessionResponse = await restoredSession;
+  expect(sessionResponse.status(), await sessionResponse.text()).toBe(200);
+  expect((await sessionResponse.json()).data).toBeNull();
   await expect(page.getByLabel("账号")).toBeVisible();
   await expect(page.getByLabel("密码", { exact: true })).toBeVisible();
 }
@@ -105,13 +125,7 @@ test("管理员页面与订单详情从 URL 恢复，刷新与浏览器后退保
   test.setTimeout(120_000);
   const fixtures = await createUrlFixtures(request);
   const staff = await createAdmin(request);
-  await page.goto("/");
-  await page.getByLabel("账号").fill(staff.username);
-  await page.getByLabel("密码").fill(staff.temporaryPassword);
-  await page.getByRole("button", { name: /登\s*录/ }).click();
-  await page.getByLabel("新密码", { exact: true }).fill("url state browser password");
-  await page.getByLabel("确认新密码").fill("url state browser password");
-  await page.getByRole("button", { name: "保存新密码" }).click();
+  await login(page, staff);
   await expect(page.getByRole("heading", { name: "运营工作台" })).toBeVisible();
 
   await page.goto("/?page=orders");
