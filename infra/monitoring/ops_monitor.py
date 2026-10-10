@@ -15,6 +15,9 @@ import ssl
 import subprocess
 import gzip
 import hashlib
+import importlib.util
+import math
+from functools import lru_cache
 import tempfile
 import time
 from urllib.request import Request, urlopen
@@ -24,6 +27,7 @@ FORMAT = "hometown-ops-monitor-v1"
 MAX_QUEUE = 1000
 MAX_ATTEMPTS = 5
 MAX_DELIVERIES_PER_CYCLE = 2
+MAX_PROPAGATION_SECONDS = 900
 RETRY_SECONDS = (30, 120, 600, 1800)
 EVENTS = {
     "api_unhealthy": ("严重", "后台 API 健康检查失败"),
@@ -96,9 +100,9 @@ def conditions(observation: dict, now_epoch: float | None = None) -> dict[str, b
         result["api_unhealthy"] = True
     if observation.get("snapshot") != "BACKUP_OK":
         result["snapshot_stale"] = True
-    if observation.get("replica") != "CIPHERTEXT_VERIFIED":
+    if observation.get("replica") != "CIPHERTEXT_VERIFIED" and not bounded_propagation(observation, "replica", "PENDING"):
         result["replica_unhealthy"] = True
-    if observation.get("binlog") != "CONTIGUOUS":
+    if observation.get("binlog") != "CONTIGUOUS" and not bounded_propagation(observation, "binlog", "LAGGING"):
         result["binlog_gap"] = True
     metric_names = ("refundManualHold", "refundUnknown", "refundStale",
                     "notificationManual", "notificationUnknown", "notificationStale")
@@ -151,7 +155,7 @@ def transition(state: dict, observation: dict, now: str | None = None) -> list[s
         raise RuntimeError("monitor outbox is full; preserving existing events")
     state["lastCycleUtc"] = now
     state["lastObservation"] = {key: value for key, value in observation.items()
-                                 if key in ("api", "snapshot", "replica", "binlog")
+                                 if key in ("api", "snapshot", "replica", "binlog", "replicaPropagation", "binlogPropagation")
                                  or key in EVENTS}
     return emitted
 
@@ -311,6 +315,174 @@ def mysql_observation(container: str, database: str) -> dict:
         "refundManualHold", "refundUnknown", "refundStale", "notificationManual", "notificationUnknown", "notificationStale")}
 
 
+def bounded_propagation(observation: dict, name: str, status: str) -> bool:
+    detail = observation.get(name + "Propagation")
+    if observation.get(name) != status or not isinstance(detail, dict) or detail.get("verifiedSourceBinding") is not True:
+        return False
+    age, maximum = detail.get("ageSeconds"), detail.get("maxAgeSeconds")
+    return (type(age) in (int, float) and math.isfinite(age) and type(maximum) is int
+            and 0 < maximum <= MAX_PROPAGATION_SECONDS and 0 <= age <= maximum)
+
+
+@lru_cache(maxsize=1)
+def backup_verifiers():
+    """Reuse the frozen ciphertext/chain verifiers; never load or call age."""
+    here = Path(__file__).resolve().parent
+    # Installed monitor and backup libraries have separate sibling directories.
+    roots = (here, here.parent / "hometown-backup", here.parent / "backup")
+    root = next((candidate for candidate in roots if (candidate / "binlog_archive.py").is_file()
+                 and (candidate / "encrypted_replica.py").is_file()), None)
+    if root is None or root.is_symlink() or root.stat().st_uid != os.geteuid() or root.stat().st_mode & 0o022:
+        raise ValueError("backup verifier directory is missing or not trusted")
+    modules = []
+    for name in ("binlog_archive", "encrypted_replica"):
+        path = root / (name + ".py")
+        if (path.is_symlink() or not path.is_file() or path.stat().st_uid != os.geteuid()
+                or path.stat().st_mode & 0o022):
+            raise ValueError("installed backup verifier is missing or not a regular file")
+        spec = importlib.util.spec_from_file_location("hometown_monitor_" + name, path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        modules.append(module)
+    return tuple(modules)
+
+
+def publication_age(value: str, now_epoch: float) -> float:
+    if not isinstance(value, str):
+        raise ValueError("source publication timestamp is missing")
+    published = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if published.tzinfo is None:
+        raise ValueError("source publication timestamp must include its timezone")
+    age = now_epoch - published.timestamp()
+    if not math.isfinite(age) or age < 0:
+        raise ValueError("source publication timestamp is invalid or in the future")
+    return age
+
+
+def replica_observation(config: dict, receipt: dict, snapshot_ok: bool) -> dict:
+    if not snapshot_ok or not receipt or receipt.get("status") != "BACKUP_OK":
+        raise ValueError("latest verified source backup is unavailable")
+    archive, snapshots = backup_verifiers()
+    now = time.time()
+    maximum = min(MAX_PROPAGATION_SECONDS, int(config.get("replicaEvidenceMaxAgeSeconds", 900)))
+    if maximum <= 0:
+        raise ValueError("receiver propagation bound must be positive")
+    status_path = Path(config["replicaStatusPath"])
+    if (status_path.is_symlink() or not status_path.is_file() or status_path.stat().st_mode & 0o077
+            or status_path.stat().st_size > 65536 or status_path.parent.stat().st_mode & 0o077
+            or status_path.stat().st_uid != os.geteuid()):
+        raise ValueError("receiver evidence must be a private bounded regular file")
+    receiver = json.loads(status_path.read_text(encoding="utf-8"))
+    checked_age = now - float(receiver.get("checkedAtEpoch", 0))
+    if (receiver.get("format") != "hometown-receiver-ciphertext-status-v1"
+            or receiver.get("status") != "CIPHERTEXT_VERIFIED" or not 0 <= checked_age <= maximum
+            or receiver.get("sourceUuid") != receipt.get("sourceUuid") or receiver.get("database") != config["database"]):
+        raise ValueError("receiver evidence is stale or bound to another source")
+    export = Path(config["replicaExportDirectory"])
+    latest_name = receipt["file"].removesuffix(".sql.gz")
+    receiver_file = receiver.get("snapshotFile")
+    if not isinstance(receiver_file, str) or not re.fullmatch(r"\d{8}T\d{6}Z-[a-f0-9]{8}\.sql\.gz", receiver_file):
+        raise ValueError("receiver snapshot identity is invalid")
+    receiver_name = receiver_file.removesuffix(".sql.gz")
+    selected = snapshots.inspect_bundle(export / receiver_name)
+    latest = selected if receiver_name == latest_name else snapshots.inspect_bundle(export / latest_name)
+    for inspected in (selected, latest):
+        source = inspected["manifest"]
+        if source.get("database") != config["database"] or source.get("sourceUuid") != receipt.get("sourceUuid"):
+            raise ValueError("source snapshot export is bound to another database or UUID")
+    for key in ("compressedSha256", "sqlSha256", "snapshotBinlogFile", "snapshotBinlogPosition"):
+        if latest["manifest"].get(key) != receipt.get(key) or selected["manifest"].get(key) != receiver.get(key):
+            raise ValueError("source receipt/export or receiver snapshot digest/coordinate differs")
+    if type(receiver.get("snapshotBinlogPosition")) is not int:
+        raise ValueError("receiver snapshot coordinate must be an integer")
+    if (receiver.get("snapshotManifestSha256") != selected["manifestSha256"]
+            or receiver.get("encryptedSha256") != selected["encryptedSha256"]):
+        raise ValueError("receiver snapshot ciphertext or exact source manifest differs")
+    observed = {"replica": "CIPHERTEXT_VERIFIED"}
+    if receiver_name != latest_name:
+        if receiver_name > latest_name:
+            raise ValueError("receiver snapshot is ahead of the current source")
+        # Use the first still-unreceived source publication, not the newest one.
+        # Subsequent source snapshots must never restart the propagation clock.
+        pending = []
+        for path in sorted(export.iterdir(), key=lambda item: item.name):
+            if receiver_name < path.name <= latest_name and re.fullmatch(r"\d{8}T\d{6}Z-[a-f0-9]{8}", path.name):
+                metadata = snapshots.read_bundle_metadata(path)
+                source = metadata["manifest"]
+                if source.get("sourceUuid") != receipt.get("sourceUuid") or source.get("database") != config["database"]:
+                    raise ValueError("pending source snapshot belongs to another source")
+                pending.append(publication_age(source.get("exportedAtUtc"), now))
+        if not pending:
+            raise ValueError("unreceived source snapshot publication is unavailable")
+        age = max(pending)
+        observed.update(replica="PENDING" if age <= maximum else "FAILED", replicaPropagation={"verifiedSourceBinding": True, "ageSeconds": age,
+            "maxAgeSeconds": maximum, "receiverSnapshot": receiver_file, "latestSourceSnapshot": receipt["file"],
+            "latestSnapshotVerified": False})
+    try:
+        observed.update(binlog_observation(config, receipt, receiver, selected, archive, now))
+    except Exception:
+        observed["binlog"] = "FAILED"
+        if observed["replica"] == "PENDING":
+            # A prior snapshot is tolerated only with a verified matching source prefix.
+            observed["replica"] = "FAILED"
+            observed.pop("replicaPropagation", None)
+    return observed
+
+
+def binlog_observation(config: dict, receipt: dict, receiver: dict, selected: dict, archive, now: float) -> dict:
+    export = Path(config["replicaExportDirectory"])
+    chain = archive.read_object(Path(config["binlogStatusPath"]))
+    binlog_root = export / "binlog"
+    anchor = archive.read_object(binlog_root / "anchor.json")
+    bundles = [path for path in binlog_root.iterdir() if re.fullmatch(r"[0-9a-f]{8}-[A-Za-z0-9_.-]+\.\d{6}", path.name)]
+    verified = archive.verify_chain(bundles, anchor, receipt["sourceUuid"], config["database"])
+    active_match = re.fullmatch(r"[A-Za-z0-9_.-]+\.(\d{6})", str(chain.get("currentSourceFile")))
+    head = verified["headFileIndex"]
+    max_chain_age = min(MAX_PROPAGATION_SECONDS, int(config.get("binlogMaxAgeSeconds", 900)))
+    if max_chain_age <= 0:
+        raise ValueError("binlog propagation bound must be positive")
+    source_age = now - float(chain.get("lastPublishedEpoch", 0))
+    if (chain.get("status") != "PUBLISHED_CONTIGUOUS" or not isinstance(head, int)
+            or chain.get("sourceUuid") != receipt["sourceUuid"] or chain.get("database") != config["database"]
+            or type(chain.get("headFileIndex")) is not int or chain["headFileIndex"] != head
+            or chain.get("headManifestSha256") != verified["headManifestSha256"]
+            or not active_match or int(active_match.group(1)) != head + 1
+            or type(chain.get("currentSourcePosition")) is not int or chain["currentSourcePosition"] < 4
+            ):
+        raise ValueError("source published chain is stale, incomplete, or inconsistent")
+    source_segments = {}
+    for path in bundles:
+        manifest, digest = archive.manifest_digest(path)
+        source_segments[manifest["fileIndex"]] = (manifest, digest)
+    receiver_head = receiver.get("headFileIndex")
+    if type(receiver_head) is not int or receiver_head not in source_segments:
+        raise ValueError("receiver head is ahead of or absent from the verified source prefix")
+    head_manifest, head_digest = source_segments[receiver_head]
+    if (receiver.get("headManifestSha256") != head_digest
+            or type(receiver.get("segmentCount")) is not int
+            or receiver["segmentCount"] != receiver_head - verified["firstFileIndex"] + 1):
+        raise ValueError("receiver verified head digest or prefix length differs")
+    snapshot_file = selected["manifest"]["snapshotBinlogFile"]
+    snapshot_index = archive.parse_binlog_name(snapshot_file)[1]
+    position = selected["manifest"]["snapshotBinlogPosition"]
+    segment = source_segments.get(snapshot_index, ({}, ""))[0]
+    if (snapshot_index > receiver_head or segment.get("binlogFile") != snapshot_file
+            or not segment.get("startPosition", 0) <= position <= segment.get("endPosition", 0)
+            or (snapshot_file == anchor["snapshotBinlogFile"] and position == anchor["snapshotBinlogPosition"]
+                and selected["manifest"]["sqlSha256"] != anchor.get("snapshotSha256"))):
+        raise ValueError("receiver snapshot is not covered by its matching source prefix/root SQL")
+    observed = {"binlog": "CONTIGUOUS"}
+    if (not 0 <= source_age <= max_chain_age
+            or publication_age(verified["headCapturedAtUtc"], now) > max_chain_age):
+        observed["binlog"] = "FAILED"
+    if receiver_head < head:
+        lag_age = publication_age(head_manifest.get("capturedAtUtc"), now)
+        observed.update(binlog="LAGGING" if lag_age <= max_chain_age and observed["binlog"] != "FAILED" else "FAILED", binlogPropagation={"verifiedSourceBinding": True, "ageSeconds": lag_age,
+            "maxAgeSeconds": max_chain_age, "receiverHeadFileIndex": receiver_head, "sourceHeadFileIndex": head,
+            "receiverHeadCapturedAtUtc": head_manifest["capturedAtUtc"], "latestHeadVerified": False})
+    return observed
+
+
 def collect(config: dict) -> dict:
     observation = {}
     try:
@@ -392,54 +564,9 @@ def collect(config: dict) -> dict:
     except Exception:
         observation["snapshot"] = "STALE"
     try:
-        if not receipt or receipt.get("status") != "BACKUP_OK":
-            raise ValueError("latest source backup receipt is unavailable")
-        status_path = Path(config["replicaStatusPath"])
-        if (status_path.is_symlink() or not status_path.is_file() or status_path.stat().st_mode & 0o077
-                or status_path.stat().st_size > 65536 or status_path.parent.stat().st_mode & 0o077
-                or status_path.stat().st_uid != os.geteuid()):
-            raise ValueError("receiver evidence must be a private bounded regular file")
-        status_doc = json.loads(status_path.read_text(encoding="utf-8"))
-        export = Path(config["replicaExportDirectory"])
-        bundle = receipt["file"].removesuffix(".sql.gz")
-        manifest_path = export / bundle / "manifest.json"
-        if manifest_path.is_symlink() or not manifest_path.is_file():
-            raise ValueError("source snapshot export manifest is missing")
-        source_manifest_bytes = manifest_path.read_bytes()
-        source_manifest = json.loads(source_manifest_bytes)
-        if (receipt.get("database") != config["database"]
-                or source_manifest.get("database") != config["database"]
-                or source_manifest.get("sourceUuid") != receipt.get("sourceUuid")):
-            raise ValueError("source receipt/export manifest database or UUID differs from monitor configuration")
-        source_manifest_hash = hashlib.sha256(source_manifest_bytes).hexdigest()
-        age = time.time() - float(status_doc.get("checkedAtEpoch", 0))
-        if (status_doc.get("format") != "hometown-receiver-ciphertext-status-v1"
-                or status_doc.get("status") != "CIPHERTEXT_VERIFIED"
-                or not 0 <= age <= int(config.get("replicaEvidenceMaxAgeSeconds", 900))
-                or status_doc.get("sourceUuid") != receipt.get("sourceUuid")
-                or status_doc.get("database") != config["database"]
-                or status_doc.get("snapshotFile") != receipt["file"]
-                or status_doc.get("snapshotManifestSha256") != source_manifest_hash
-                or any(status_doc.get(key) != receipt.get(key) for key in (
-                    "compressedSha256", "sqlSha256", "snapshotBinlogFile", "snapshotBinlogPosition"))):
-            raise ValueError("receiver evidence is stale or differs from current source snapshot")
-        observation["replica"] = "CIPHERTEXT_VERIFIED"
+        observation.update(replica_observation(config, receipt, observation["snapshot"] == "BACKUP_OK"))
     except Exception:
         observation["replica"] = "FAILED"
-    try:
-        chain = json.loads(Path(config["binlogStatusPath"]).read_text(encoding="utf-8"))
-        max_age = int(config.get("binlogMaxAgeSeconds", 900))
-        active = chain.get("currentSourceFile")
-        active_match = re.search(r"\.(\d{6})$", active) if isinstance(active, str) else None
-        head = chain.get("headFileIndex")
-        sequence_ok = active_match and isinstance(head, int) and int(active_match.group(1)) == head + 1
-        receiver_chain_matches = (observation["replica"] == "CIPHERTEXT_VERIFIED"
-            and status_doc.get("headFileIndex") == chain.get("headFileIndex")
-            and status_doc.get("headManifestSha256") == chain.get("headManifestSha256"))
-        observation["binlog"] = "CONTIGUOUS" if (receiver_chain_matches and chain.get("status") == "PUBLISHED_CONTIGUOUS" and sequence_ok
-            and isinstance(chain.get("currentSourcePosition"), int)
-            and time.time() - float(chain.get("lastPublishedEpoch", 0)) <= max_age) else "FAILED"
-    except Exception:
         observation["binlog"] = "FAILED"
     try:
         observation.update(mysql_observation(config["mysqlContainer"], config["database"]))

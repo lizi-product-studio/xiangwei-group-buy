@@ -163,52 +163,26 @@ class MonitorTests(unittest.TestCase):
                 self.assertEqual(recovery[0]["pairedRequestId"], original)
 
     def test_collector_requires_fresh_receiver_ciphertext_status_for_current_snapshot(self):
-        backup = self.root / "backups"
-        backup.mkdir()
-        filename = "20261010T000000Z-ab12cd34.sql.gz"
-        path = backup / filename
-        sql = b"synthetic SQL payload"
-        with path.open("wb") as raw:
-            with gzip.GzipFile(fileobj=raw, mode="wb", mtime=0) as compressed:
-                compressed.write(sql)
-        receipt = {"status": "BACKUP_OK", "file": filename, "sizeBytes": path.stat().st_size,
-                   "compressedSha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-                   "sqlSha256": hashlib.sha256(sql).hexdigest(), "replicaStatus": "PUBLISHED"}
-        (backup / "receipt.json").write_text(json.dumps(receipt))
-        chain = self.root / "chain.json"
-        chain.write_text(json.dumps({"status": "PUBLISHED_CONTIGUOUS", "currentSourceFile": "mysql-bin.000002",
-                                     "headFileIndex": 1, "currentSourcePosition": 100, "lastPublishedEpoch": __import__("time").time()}))
-        config = {"healthUrl": "https://invalid.example/health", "backupDirectory": str(backup),
-                  "binlogStatusPath": str(chain), "mysqlContainer": "unused", "database": "unused",
-                  "snapshotVerificationCachePath": str(self.root / "verify-cache.json"),
-                  "replicaVerifierScript": "/verified/encrypted_replica.py"}
-        receipt.update(database="hometown_food", sourceUuid="2d3a4d54-7a3a-4aa1-992c-87ad8bcf1a31", snapshotBinlogFile="mysql-bin.000001", snapshotBinlogPosition=157)
-        (backup / "receipt.json").write_text(json.dumps(receipt))
-        export = self.root / "export" / filename.removesuffix(".sql.gz")
-        export.mkdir(parents=True)
-        (export / "manifest.json").write_text(json.dumps({"database":"hometown_food", "sourceUuid":receipt["sourceUuid"]}))
-        status_path = self.root / "receiver-status.json"
-        config.update(database="hometown_food", replicaStatusPath=str(status_path), replicaExportDirectory=str(export.parent))
+        import runpy
+        fixture_type = runpy.run_path(str(Path(__file__).with_name("ops_monitor.propagation.test.py")))["Fixture"]
+        fixture = fixture_type(self.root)
+        status_path = fixture.receiver_path
+        evidence = fixture.evidence
+        export = fixture.export / fixture.root_snapshot["file"].removesuffix(".sql.gz")
         import time
-        evidence = {"format": "hometown-receiver-ciphertext-status-v1", "status": "CIPHERTEXT_VERIFIED",
-                    "sourceUuid": receipt["sourceUuid"], "database": "hometown_food", "snapshotFile": filename,
-                    "snapshotManifestSha256": hashlib.sha256((export / "manifest.json").read_bytes()).hexdigest(),
-                    "checkedAtEpoch": time.time(),
-                    **{key: receipt[key] for key in ("compressedSha256", "sqlSha256", "snapshotBinlogFile", "snapshotBinlogPosition")}}
-        status_path.write_text(json.dumps(evidence)); status_path.chmod(0o600)
         with patch.object(monitor, "urlopen", side_effect=OSError), patch.object(monitor, "mysql_observation", side_effect=RuntimeError):
-            observed = monitor.collect(config)
+            observed = monitor.collect(fixture.config)
             self.assertEqual(observed["snapshot"], "BACKUP_OK")
             self.assertEqual(observed["replica"], "CIPHERTEXT_VERIFIED")
             for change in ({"checkedAtEpoch": time.time()-901}, {"sourceUuid": "wrong"}, {"snapshotFile": "old.sql.gz"},
                            {"compressedSha256": "0"*64}, {"snapshotManifestSha256": "0"*64}, {"status": "FAILED"}):
                 status_path.write_text(json.dumps({**evidence, **change}))
-                self.assertEqual(monitor.collect(config)["replica"], "FAILED")
-            (export / "manifest.json").write_text(json.dumps({"database":"wrong", "sourceUuid":receipt["sourceUuid"]}))
+                self.assertEqual(monitor.collect(fixture.config)["replica"], "FAILED")
+            (export / "manifest.json").write_text(json.dumps({"database":"wrong", "sourceUuid":evidence["sourceUuid"]}))
             status_path.write_text(json.dumps(evidence))
-            self.assertEqual(monitor.collect(config)["replica"], "FAILED")
+            self.assertEqual(monitor.collect(fixture.config)["replica"], "FAILED")
             status_path.unlink()
-            self.assertEqual(monitor.collect(config)["replica"], "FAILED")
+            self.assertEqual(monitor.collect(fixture.config)["replica"], "FAILED")
 
     def test_same_size_snapshot_tamper_and_invalid_gzip_fail_digest_check(self):
         backup = self.root / "backups"
